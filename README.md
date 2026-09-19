@@ -25,4 +25,4 @@ aegis verify [path] -- command args...
 aegis worktree [path]
 ```
 
-The GUI exposes the MVP review flow plus evidence, symbols, architecture, risk, timeline, board, specialized lenses, LSP probing, worktrees, critic mode, proposal comparison, and agent handoff from the toolbar or `Ctrl+Shift+P`.
+The GUI opens as a quiet session-first console. `Ctrl+R` opens the review drawer, `Ctrl+P` opens filtered Quick Open for changed files, `Ctrl+Shift+P` opens the command palette, and `Escape` returns to the session. Review includes the unified and side-by-side line-numbered diff, evidence, symbols, architecture, risk, timeline, board, specialized lenses, LSP probing, worktrees, critic mode, proposal comparison, and agent handoff.
