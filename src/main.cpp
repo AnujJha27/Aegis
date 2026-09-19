@@ -280,11 +280,16 @@ public:
             menu.exec(files_->viewport()->mapToGlobal(position));
         });
         connect(palette, &QPushButton::clicked, this, [this] { showPalette(); });
-        process_.onOutput = [this](const QByteArray &data) { appendTerminal(data); };
+        process_.onOutput = [this](const QByteArray &data) {
+            if (codexSessionActive_) appendCodexOutput(data);
+            else appendTerminal(data);
+        };
         process_.onError = [this](const QString &error) { appendTerminal(("\n[aegis] " + error + "\n").toUtf8()); };
         process_.onFinished = [this](int code) {
+            if (codexSessionActive_) finishCodexOutput(code);
             trace_->appendPlainText("agent exited with code " + QString::number(code));
             agentState_->setText(agent_->currentText().compare("codex", Qt::CaseInsensitive) == 0 ? "● READY" : "● IDLE");
+            codexSessionActive_ = false;
             refreshStatus();
         };
         connect(&timer_, &QTimer::timeout, this, [this] { refreshStatus(); });
@@ -347,6 +352,8 @@ private:
     void startAgent() {
         if (process_.isRunning()) return;
         if (agent_->currentText().compare("codex", Qt::CaseInsensitive) == 0) {
+            codexThreadId_.clear();
+            codexOutputBuffer_.clear();
             agentState_->setText("● READY");
             trace_->appendPlainText("CODEX exec mode ready");
             return;
@@ -371,6 +378,9 @@ private:
                 appendTerminal(("\n[aegis] switching agent to " + agent + "\n").toUtf8());
                 process_.terminate();
             }
+            codexSessionActive_ = false;
+            codexThreadId_.clear();
+            codexOutputBuffer_.clear();
             brand_->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), agent.toUpper()));
             startAgent();
             agent_->setEnabled(true);
@@ -418,7 +428,11 @@ private:
             terminal_->appendPlainText("\n[aegis] Codex is still processing the previous prompt.\n");
             return;
         }
-        const auto command = QStringList{"exec", "--ephemeral", "--color", "never", text};
+        const auto command = codexThreadId_.isEmpty()
+                                 ? QStringList{"exec", "--json", "--color", "never", text}
+                                 : QStringList{"exec", "resume", "--json", codexThreadId_, text};
+        codexSessionActive_ = true;
+        codexOutputBuffer_.clear();
         agentState_->setText("● RUNNING");
         trace_->appendPlainText(aegis::ui::activityLine("prompt", text, true));
         trace_->appendPlainText("start codex " + command.join(' '));
@@ -429,6 +443,52 @@ private:
         }
         aegis::session::appendEvent(repo_, "prompt", text, paranoia_->isChecked());
         prompt_->clear();
+    }
+
+    void appendCodexOutput(const QByteArray &data) {
+        codexOutputBuffer_ += data;
+        while (true) {
+            const auto newline = codexOutputBuffer_.indexOf('\n');
+            if (newline < 0) return;
+            const auto line = codexOutputBuffer_.left(newline).trimmed();
+            codexOutputBuffer_.remove(0, newline + 1);
+            if (line.isEmpty()) continue;
+            QJsonParseError error;
+            const auto document = QJsonDocument::fromJson(line, &error);
+            if (error.error != QJsonParseError::NoError || !document.isObject()) {
+                appendTerminal(line + "\n");
+                continue;
+            }
+            const auto event = document.object();
+            const auto type = event.value("type").toString();
+            if (type == "thread.started") {
+                codexThreadId_ = event.value("thread_id").toString();
+                continue;
+            }
+            if (type == "error") {
+                appendTerminal("\n[Codex error] " + event.value("message").toString().toUtf8() + "\n");
+                continue;
+            }
+            if (type != "item.completed") continue;
+            const auto item = event.value("item").toObject();
+            const auto itemType = item.value("type").toString();
+            if (itemType == "agent_message") {
+                appendTerminal("\n[Codex]\n" + item.value("text").toString().toUtf8() + "\n");
+            } else if (itemType == "command_execution") {
+                appendTerminal("\n[Codex ran] " + item.value("command").toString().toUtf8() + "\n");
+            }
+        }
+    }
+
+    void finishCodexOutput(int code) {
+        if (!codexOutputBuffer_.trimmed().isEmpty()) {
+            appendCodexOutput("\n");
+            if (!codexOutputBuffer_.trimmed().isEmpty()) {
+                appendTerminal(codexOutputBuffer_);
+                codexOutputBuffer_.clear();
+            }
+        }
+        if (code != 0) appendTerminal("\n[Codex exited with code " + QByteArray::number(code) + "]\n");
     }
 
     void refreshStatus() {
@@ -904,7 +964,10 @@ private:
     QString lastPrompt_;
     QString lastStatus_;
     QString lastWorktree_;
+    QByteArray codexOutputBuffer_;
+    QString codexThreadId_;
     aegis::analysis::Report report_;
+    bool codexSessionActive_ = false;
 };
 
 int runCli(const QStringList &args) {
