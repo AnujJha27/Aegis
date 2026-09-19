@@ -9,6 +9,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDialog>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QProcess>
@@ -160,6 +162,14 @@ public:
         reviewSummary_->setObjectName("muted");
         reviewSummary_->setWordWrap(true);
         rightLayout->addWidget(reviewSummary_);
+        reviewChecks_ = new QLabel("BUILD   —\nTESTS   —\nFINDINGS 0", reviewPanel_);
+        reviewChecks_->setObjectName("muted");
+        rightLayout->addWidget(reviewChecks_);
+        reviewDetails_ = new QPlainTextEdit(reviewPanel_);
+        reviewDetails_->setReadOnly(true);
+        reviewDetails_->setMaximumHeight(130);
+        reviewDetails_->setPlaceholderText("No verification or findings yet.");
+        rightLayout->addWidget(reviewDetails_);
         auto *reviewActions = new QHBoxLayout;
         auto *reviewVerify = new QPushButton("VERIFY", reviewPanel_);
         auto *reviewAnalyze = new QPushButton("ANALYZE", reviewPanel_);
@@ -169,6 +179,7 @@ public:
         rightLayout->addLayout(reviewActions);
         files_ = new QListWidget(reviewPanel_);
         files_->setMaximumHeight(120);
+        files_->setContextMenuPolicy(Qt::CustomContextMenu);
         rightLayout->addWidget(files_);
         tabs_ = new QTabWidget(reviewPanel_);
         unified_ = new aegis::ui::CodeView(tabs_);
@@ -234,6 +245,14 @@ public:
         connect(review, &QPushButton::clicked, this, [this] { toggleReview(); });
         connect(reviewVerify, &QPushButton::clicked, this, [this] { runVerification(); });
         connect(reviewAnalyze, &QPushButton::clicked, this, [this] { analyzeChanges(); });
+        connect(files_, &QListWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+            if (!files_->itemAt(position)) return;
+            QMenu menu(this);
+            menu.addAction("Open", this, [this] { openEditor(); });
+            menu.addAction("Pin", this, [this] { pinSelected(); });
+            menu.addAction("Ask agent", this, [this] { sendPrompt(); });
+            menu.exec(files_->viewport()->mapToGlobal(position));
+        });
         connect(palette, &QPushButton::clicked, this, [this] { showPalette(); });
         process_.onOutput = [this](const QByteArray &data) { appendTerminal(data); };
         process_.onError = [this](const QString &error) { appendTerminal(("\n[aegis] " + error + "\n").toUtf8()); };
@@ -325,7 +344,8 @@ private:
                 status_->setText(aegis::ui::statusRail(summary.files, summary.insertions, summary.deletions,
                                                        agent_->currentText().toUpper() +
                                                            (paranoia_->isChecked() ? " PARANOIA" : " IDLE")) +
-                                 "    " + (summary.branch.isEmpty() ? "(detached)" : summary.branch));
+                                 "    BUILD —    TESTS —    ⚠ " + QString::number(report_.findings.size()) +
+                                 "    REVIEW ^R    " + (summary.branch.isEmpty() ? "(detached)" : summary.branch));
                 const auto selected = files_->currentItem() ? files_->currentItem()->text() : QString();
                 files_->clear();
                 files_->addItems(changedFiles(status));
@@ -378,6 +398,10 @@ private:
         trace_->appendPlainText("verify " + command.join(' '));
         const auto result = runCommand(command.first(), command.mid(1), repo_);
         terminal_->appendPlainText(QString("\n[verify exit %1]\n%2").arg(result.exitCode).arg(result.output));
+        reviewChecks_->setText(QString("BUILD   %1\nTESTS   %2\nFINDINGS %3")
+                                   .arg(result.exitCode == 0 ? "✓" : "✕")
+                                   .arg(result.exitCode == 0 ? "✓" : "✕")
+                                   .arg(report_.findings.size()));
         trace_->appendPlainText(QString("verify exit %1").arg(result.exitCode));
         aegis::session::appendEvent(repo_, "verify", QString("%1 (exit %2)").arg(command.join(' ')).arg(result.exitCode), paranoia_->isChecked());
         refreshReview();
@@ -415,9 +439,33 @@ private:
             trace_->appendPlainText("quick open: no changed files");
             return;
         }
-        bool ok = false;
-        const auto selected = QInputDialog::getItem(this, "Quick open", "File:", choices, files_->currentRow(), true, &ok);
-        if (!ok || selected.trimmed().isEmpty()) return;
+
+        QDialog dialog(this);
+        dialog.setWindowTitle("Quick open");
+        dialog.resize(560, 320);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *filter = new QLineEdit(&dialog);
+        filter->setPlaceholderText("Search changed files…");
+        auto *results = new QListWidget(&dialog);
+        results->addItems(choices);
+        layout->addWidget(filter);
+        layout->addWidget(results, 1);
+        connect(filter, &QLineEdit::textChanged, &dialog, [filter, results] {
+            const auto query = filter->text().trimmed();
+            for (int i = 0; i < results->count(); ++i)
+                results->item(i)->setHidden(!query.isEmpty() && !results->item(i)->text().contains(query, Qt::CaseInsensitive));
+            for (int i = 0; i < results->count(); ++i) {
+                if (!results->item(i)->isHidden()) {
+                    results->setCurrentRow(i);
+                    break;
+                }
+            }
+        });
+        connect(filter, &QLineEdit::returnPressed, &dialog, &QDialog::accept);
+        connect(results, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
+        filter->setFocus();
+        if (dialog.exec() != QDialog::Accepted || !results->currentItem()) return;
+        const auto selected = results->currentItem()->text();
         for (int i = 0; i < files_->count(); ++i) {
             if (files_->item(i)->text() == selected) {
                 files_->setCurrentRow(i);
@@ -459,6 +507,10 @@ private:
         QString lenses = "SOLIDITY\n" + list(report_.solidity) + "\n\nBINARY\n" + list(report_.binary) +
                          "\n\nSYSTEMS\n" + list(report_.systems) + "\n\nFORMAL\n" + list(report_.formal);
         lenses_->setPlainText(lenses);
+        reviewSummary_->setText(aegis::ui::reviewSummary(report_.changedFiles.size(), 0, 0, report_.findings.size()));
+        reviewDetails_->setPlainText("FINDINGS\n" + list(report_.findings.isEmpty() ? QStringList{"✓ No new diagnostics"} : QStringList{QString::number(report_.findings.size()) + " finding(s)"}) +
+                                     "\n\nDEPENDENCIES\n" + list(report_.dependencies.isEmpty() ? QStringList{"✓ No dependency changes"} : report_.dependencies) +
+                                     "\n\nSYMBOLS\n" + QString::number(report_.symbols.size()) + " affected symbols");
         refreshHistory();
         aegis::session::appendEvent(repo_, "analysis", QString::number(report_.findings.size()) + " findings", paranoia_->isChecked());
     }
@@ -707,6 +759,8 @@ private:
     QWidget *reviewPanel_ = nullptr;
     QLabel *reviewTitle_ = nullptr;
     QLabel *reviewSummary_ = nullptr;
+    QLabel *reviewChecks_ = nullptr;
+    QPlainTextEdit *reviewDetails_ = nullptr;
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
     aegis::ui::CodeView *unified_ = nullptr;
