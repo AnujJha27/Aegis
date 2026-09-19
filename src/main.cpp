@@ -153,9 +153,9 @@ public:
         reviewPanel_ = new QWidget(split);
         auto *rightLayout = new QVBoxLayout(reviewPanel_);
         rightLayout->setContentsMargins(6, 0, 0, 0);
-        auto *reviewTitle = new QLabel("REVIEW / EVIDENCE", reviewPanel_);
-        reviewTitle->setObjectName("muted");
-        rightLayout->addWidget(reviewTitle);
+        reviewTitle_ = new QLabel("REVIEW / EVIDENCE", reviewPanel_);
+        reviewTitle_->setObjectName("muted");
+        rightLayout->addWidget(reviewTitle_);
         reviewSummary_ = new QLabel("No active changes.\nAgent modifications will appear here automatically.", reviewPanel_);
         reviewSummary_->setObjectName("muted");
         reviewSummary_->setWordWrap(true);
@@ -282,8 +282,18 @@ private:
     void toggleReview() {
         const auto open = !reviewPanel_->isVisible();
         reviewPanel_->setVisible(open);
-        if (open) refreshReview();
+        if (open) {
+            reviewTitle_->setText("REVIEW / EVIDENCE");
+            refreshReview();
+        }
         trace_->appendPlainText(open ? "review opened" : "review closed");
+    }
+
+    void openDeepView(QWidget *view, const QString &mode) {
+        if (!reviewPanel_->isVisible()) reviewPanel_->setVisible(true);
+        reviewTitle_->setText(aegis::ui::deepViewTitle(mode));
+        tabs_->setCurrentWidget(view);
+        trace_->appendPlainText(aegis::ui::deepViewTitle(mode));
     }
 
     void sendPrompt() {
@@ -664,7 +674,7 @@ private:
     }
 
     void showPalette() {
-        const QStringList actions = {"Analyze evidence", "Review diff", "Run verification", "Create snapshot", "Create worktree", "Worktree action", "Run LSP check", "Run formal check", "Run Solidity tests", "Critic mode", "Compare agents", "Compare current/parent", "Time machine", "Handoff to agent", "Pin selected file", "Enable/disable paranoia", "Quick open"};
+        const QStringList actions = {"Analyze evidence", "Review diff", "Run verification", "Create snapshot", "Create worktree", "Worktree action", "Run LSP check", "Run formal check", "Run Solidity tests", "Critic mode", "Compare agents", "Compare current/parent", "Time machine", "Handoff to agent", "Pin selected file", "Enable/disable paranoia", "Quick open", "Investigate", "Architecture"};
         bool ok = false;
         const auto action = QInputDialog::getItem(this, "Aegis command palette", "Action:", actions, 0, false, &ok);
         if (!ok) return;
@@ -685,6 +695,8 @@ private:
         else if (action == actions[14]) pinSelected();
         else if (action == actions[15]) paranoia_->setChecked(!paranoia_->isChecked());
         else if (action == actions[16]) quickOpen();
+        else if (action == actions[17]) openDeepView(evidence_, "investigate");
+        else if (action == actions[18]) openDeepView(architecture_, "architecture");
     }
 
     QString repo_;
@@ -693,6 +705,7 @@ private:
     QCheckBox *paranoia_ = nullptr;
     QLabel *status_ = nullptr;
     QWidget *reviewPanel_ = nullptr;
+    QLabel *reviewTitle_ = nullptr;
     QLabel *reviewSummary_ = nullptr;
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;

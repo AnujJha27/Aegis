@@ -95,6 +95,10 @@ QString diffLineMarker(const QString &line) {
     return line.isEmpty() ? " " : line.left(1);
 }
 
+QString deepViewTitle(const QString &mode) {
+    return "DEEP VIEW / " + mode.toUpper();
+}
+
 class CodeView::LineNumberArea final : public QWidget {
 public:
     explicit LineNumberArea(CodeView *editor) : QWidget(editor), editor_(editor) {}

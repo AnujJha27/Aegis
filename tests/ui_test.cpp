@@ -20,5 +20,6 @@ int main(int argc, char **argv) {
     assert(aegis::ui::diffLineMarker("+ added") == "+");
     assert(aegis::ui::diffLineMarker("- removed") == "-");
     assert(aegis::ui::diffLineMarker(" context") == " ");
+    assert(aegis::ui::deepViewTitle("architecture") == "DEEP VIEW / ARCHITECTURE");
     return 0;
 }
