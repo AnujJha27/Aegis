@@ -244,6 +244,7 @@ public:
         busyProgress_->setFixedWidth(280);
         busyLayout->addWidget(busyLabel_, 0, Qt::AlignCenter);
         busyLayout->addWidget(busyProgress_, 0, Qt::AlignCenter);
+        busyOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
         busyOverlay_->setGeometry(root->rect());
         busyOverlay_->hide();
 
