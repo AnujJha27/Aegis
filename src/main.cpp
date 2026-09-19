@@ -13,8 +13,10 @@
 #include <QDialog>
 #include <QDesktopServices>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -24,6 +26,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTabWidget>
@@ -230,6 +233,20 @@ public:
         reviewPanel_->setVisible(false);
         layout->addWidget(split, 1);
 
+        busyOverlay_ = new QFrame(root);
+        busyOverlay_->setObjectName("busyOverlay");
+        auto *busyLayout = new QVBoxLayout(busyOverlay_);
+        busyLayout->setAlignment(Qt::AlignCenter);
+        busyLabel_ = new QLabel("Working…", busyOverlay_);
+        busyLabel_->setObjectName("busyLabel");
+        busyProgress_ = new QProgressBar(busyOverlay_);
+        busyProgress_->setRange(0, 0);
+        busyProgress_->setFixedWidth(280);
+        busyLayout->addWidget(busyLabel_, 0, Qt::AlignCenter);
+        busyLayout->addWidget(busyProgress_, 0, Qt::AlignCenter);
+        busyOverlay_->setGeometry(root->rect());
+        busyOverlay_->hide();
+
         verifyCommand_ = new QLineEdit("ctest --test-dir build", root);
         verifyCommand_->setVisible(false);
 
@@ -294,10 +311,36 @@ private:
         QMainWindow::closeEvent(event);
     }
 
+    void resizeEvent(QResizeEvent *event) override {
+        QMainWindow::resizeEvent(event);
+        if (busyOverlay_ && centralWidget()) busyOverlay_->setGeometry(centralWidget()->rect());
+    }
+
     void appendTerminal(const QByteArray &data) {
         terminal_->moveCursor(QTextCursor::End);
         terminal_->insertPlainText(QString::fromLocal8Bit(data));
         terminal_->ensureCursorVisible();
+    }
+
+    void beginBusy(const QString &message) {
+        ++busyDepth_;
+        busyLabel_->setText(message);
+        busyOverlay_->setGeometry(centralWidget()->rect());
+        busyOverlay_->raise();
+        busyOverlay_->show();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    void endBusy() {
+        if (busyDepth_ <= 0 || --busyDepth_ > 0) return;
+        busyOverlay_->hide();
+    }
+
+    CommandResult runBlocking(const QString &program, const QStringList &arguments, const QString &message) {
+        beginBusy(message);
+        const auto result = runCommand(program, arguments, repo_);
+        endBusy();
+        return result;
     }
 
     void startAgent() {
@@ -314,13 +357,19 @@ private:
     }
 
     void switchAgent(const QString &agent) {
-        if (process_.isRunning()) {
-            trace_->appendPlainText("switching agent to " + agent.toUpper());
-            appendTerminal(("\n[aegis] switching agent to " + agent + "\n").toUtf8());
-            process_.terminate();
-        }
-        brand_->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), agent.toUpper()));
-        startAgent();
+        beginBusy("Switching to " + agent.toUpper() + "…");
+        agent_->setEnabled(false);
+        QTimer::singleShot(0, this, [this, agent] {
+            if (process_.isRunning()) {
+                trace_->appendPlainText("switching agent to " + agent.toUpper());
+                appendTerminal(("\n[aegis] switching agent to " + agent + "\n").toUtf8());
+                process_.terminate();
+            }
+            brand_->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), agent.toUpper()));
+            startAgent();
+            agent_->setEnabled(true);
+            endBusy();
+        });
     }
 
     void toggleReview() {
@@ -381,8 +430,8 @@ private:
         });
     }
 
-    QString diff() const {
-        auto result = git(repo_, {"diff", "HEAD", "--no-ext-diff", "--no-color"});
+    QString diff() {
+        auto result = runBlocking("git", {"diff", "HEAD", "--no-ext-diff", "--no-color"}, "Loading diff…").output;
         if (result.trimmed().isEmpty()) result = "(no tracked diff)";
         return result;
     }
@@ -429,7 +478,7 @@ private:
         const auto command = QProcess::splitCommand(verifyCommand_->text());
         if (command.isEmpty()) return;
         trace_->appendPlainText("verify " + command.join(' '));
-        const auto result = runCommand(command.first(), command.mid(1), repo_);
+        const auto result = runBlocking(command.first(), command.mid(1), "Running verification…");
         terminal_->appendPlainText(QString("\n[verify exit %1]\n%2").arg(result.exitCode).arg(result.output));
         reviewChecks_->setText(QString("BUILD   %1\nTESTS   %2\nFINDINGS %3")
                                    .arg(result.exitCode == 0 ? "✓" : "✕")
@@ -513,6 +562,7 @@ private:
     }
 
     void analyzeChanges() {
+        beginBusy("Analyzing changes…");
         report_ = aegis::analysis::analyze(repo_, diff(), agent_->currentText());
         QString evidence = "EVIDENCE\n\nChanged files\n" + list(report_.changedFiles) + "\n\nSemantic changes\n" + list(report_.semanticChanges);
         evidence += "\n\nDependencies\n" + list(report_.dependencies) + "\n\nLikely affected tests\n" + list(report_.impactedTests);
@@ -546,11 +596,12 @@ private:
                                      "\n\nSYMBOLS\n" + QString::number(report_.symbols.size()) + " affected symbols");
         refreshHistory();
         aegis::session::appendEvent(repo_, "analysis", QString::number(report_.findings.size()) + " findings", paranoia_->isChecked());
+        endBusy();
     }
 
     void refreshHistory() {
         auto history = aegis::session::events(repo_);
-        history << "\nGIT HISTORY\n" + git(repo_, {"log", "--oneline", "--decorate", "-20"});
+        history << "\nGIT HISTORY\n" + runBlocking("git", {"log", "--oneline", "--decorate", "-20"}, "Loading history…").output;
         timeline_->setPlainText(history.join('\n'));
         board_->setPlainText(list(aegis::session::board(repo_)));
     }
@@ -567,7 +618,7 @@ private:
         const auto path = repo_ + "/.aegis/worktrees/" + QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss");
         const auto branch = "aegis/" + QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss");
         QDir().mkpath(QFileInfo(path).path());
-        const auto result = runCommand("git", {"worktree", "add", "-b", branch, path, "HEAD"}, repo_);
+        const auto result = runBlocking("git", {"worktree", "add", "-b", branch, path, "HEAD"}, "Creating worktree…");
         terminal_->appendPlainText("\n[worktree]\n" + result.output);
         trace_->appendPlainText("worktree " + path);
         lastWorktree_ = path;
@@ -590,17 +641,17 @@ private:
             return;
         }
         if (action == "discard") {
-            const auto result = runCommand("git", {"worktree", "remove", "--force", path}, repo_);
+            const auto result = runBlocking("git", {"worktree", "remove", "--force", path}, "Removing worktree…");
             terminal_->appendPlainText("\n[discard worktree]\n" + result.output);
             return;
         }
-        const auto branch = runCommand("git", {"-C", path, "branch", "--show-current"}, repo_).output.trimmed();
+        const auto branch = runBlocking("git", {"-C", path, "branch", "--show-current"}, "Reading worktree…").output.trimmed();
         if (action == "merge branch") {
-            const auto result = runCommand("git", {"merge", branch}, repo_);
+            const auto result = runBlocking("git", {"merge", branch}, "Merging worktree…");
             terminal_->appendPlainText("\n[merge worktree]\n" + result.output);
         } else {
-            const auto commit = runCommand("git", {"-C", path, "rev-parse", "HEAD"}, repo_).output.trimmed();
-            const auto result = runCommand("git", {"cherry-pick", commit}, repo_);
+            const auto commit = runBlocking("git", {"-C", path, "rev-parse", "HEAD"}, "Reading worktree commit…").output.trimmed();
+            const auto result = runBlocking("git", {"cherry-pick", commit}, "Applying worktree commit…");
             terminal_->appendPlainText("\n[cherry-pick worktree]\n" + result.output);
         }
         aegis::session::appendEvent(repo_, "worktree-action", action + " " + path, paranoia_->isChecked());
@@ -614,11 +665,13 @@ private:
             trace_->appendPlainText("LSP: no language server found");
             return;
         }
+        beginBusy("Querying language server…");
         QProcess server;
         server.setWorkingDirectory(repo_);
         server.start(lsp, {});
         if (!server.waitForStarted(3000)) {
             trace_->appendPlainText("LSP: failed to start " + lsp);
+            endBusy();
             return;
         }
         const auto uri = QUrl::fromLocalFile(QDir(repo_).filePath(file)).toString();
@@ -651,6 +704,7 @@ private:
                                    "\n\nLSP definition\n" + definition + "\n\nLSP references\n" + references +
                                    "\n\nLSP hover\n" + hover + "\n\nLSP workspace symbols\n" + workspace);
         aegis::session::appendEvent(repo_, "lsp", lsp + " symbols/definitions/references/hover", paranoia_->isChecked());
+        endBusy();
     }
 
     void runFormalCheck() {
@@ -674,7 +728,7 @@ private:
             terminal_->appendPlainText("\n[formal] tool unavailable: " + command.first() + "\n");
             return;
         }
-        const auto result = runCommand(command.first(), command.mid(1), repo_);
+        const auto result = runBlocking(command.first(), command.mid(1), "Running formal check…");
         terminal_->appendPlainText("\n[formal exit " + QString::number(result.exitCode) + "]\n" + result.output);
         aegis::session::appendEvent(repo_, "formal", command.join(' ') + " exit " + QString::number(result.exitCode), paranoia_->isChecked());
     }
@@ -685,7 +739,7 @@ private:
             terminal_->appendPlainText("\n[solidity] forge unavailable; showing static lens only\n" + lenses_->toPlainText());
             return;
         }
-        const auto result = runCommand(forge, {"test"}, repo_);
+        const auto result = runBlocking(forge, {"test"}, "Running Solidity tests…");
         terminal_->appendPlainText("\n[forge exit " + QString::number(result.exitCode) + "]\n" + result.output);
         aegis::session::appendEvent(repo_, "solidity", "forge test exit " + QString::number(result.exitCode), paranoia_->isChecked());
     }
@@ -699,20 +753,20 @@ private:
     }
 
     void compareWithParent() {
-        const auto current = git(repo_, {"diff", "HEAD", "--stat"});
-        const auto previous = git(repo_, {"diff", "HEAD~1", "HEAD", "--stat"});
+        const auto current = runBlocking("git", {"diff", "HEAD", "--stat"}, "Comparing changes…").output;
+        const auto previous = runBlocking("git", {"diff", "HEAD~1", "HEAD", "--stat"}, "Loading parent changes…").output;
         evidence_->setPlainText("CURRENT WORKTREE\n" + current + "\nPARENT COMMIT\n" + previous);
         tabs_->setCurrentWidget(evidence_);
         aegis::session::appendEvent(repo_, "compare", "worktree vs parent", paranoia_->isChecked());
     }
 
     void timeMachine() {
-        const auto commits = git(repo_, {"log", "--format=%h %s", "-20"});
+        const auto commits = runBlocking("git", {"log", "--format=%h %s", "-20"}, "Loading commits…").output;
         bool ok = false;
         const auto commit = QInputDialog::getText(this, "Time machine", "Commit (choose from the timeline):", QLineEdit::Normal, commits.section('\n', 0, 0).section(' ', 0, 0), &ok);
         if (!ok || commit.trimmed().isEmpty()) return;
-        const auto snapshot = git(repo_, {"show", "--stat", "--oneline", "--decorate", commit});
-        const auto change = git(repo_, {"show", "--format=", "--no-ext-diff", "--no-color", commit});
+        const auto snapshot = runBlocking("git", {"show", "--stat", "--oneline", "--decorate", commit}, "Loading commit…").output;
+        const auto change = runBlocking("git", {"show", "--format=", "--no-ext-diff", "--no-color", commit}, "Loading commit diff…").output;
         evidence_->setPlainText("TIME MACHINE\n" + snapshot + "\n" + change);
         tabs_->setCurrentWidget(evidence_);
         aegis::session::appendEvent(repo_, "time-machine", commit, paranoia_->isChecked());
@@ -737,13 +791,14 @@ private:
     void compareAgents() {
         const auto task = QInputDialog::getText(this, "Multi-agent proposals", "Task:");
         if (task.trimmed().isEmpty()) return;
+        beginBusy("Comparing agents…");
         QString output;
         for (const auto &agent : QStringList{"codex", "claude", "opencode"}) {
             const auto command = aegis::agentCommand(agent);
             if (QStandardPaths::findExecutable(command.first()).isEmpty()) continue;
             const auto path = repo_ + "/.aegis/proposals/" + agent + "-" + QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss");
             QDir().mkpath(QFileInfo(path).path());
-            const auto worktree = runCommand("git", {"worktree", "add", "--detach", path, "HEAD"}, repo_);
+            const auto worktree = runBlocking("git", {"worktree", "add", "--detach", path, "HEAD"}, "Preparing " + agent.toUpper() + "…");
             if (worktree.exitCode != 0) { output += agent + ": worktree failed\n"; continue; }
             QProcess process;
             process.setWorkingDirectory(path);
@@ -756,6 +811,7 @@ private:
         }
         evidence_->setPlainText(output.isEmpty() ? "No configured agent executable was found." : output);
         tabs_->setCurrentWidget(evidence_);
+        endBusy();
     }
 
     void showPalette() {
@@ -798,6 +854,9 @@ private:
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
     aegis::ui::CodeView *unified_ = nullptr;
+    QFrame *busyOverlay_ = nullptr;
+    QLabel *busyLabel_ = nullptr;
+    QProgressBar *busyProgress_ = nullptr;
     QPlainTextEdit *trace_ = nullptr;
     QPlainTextEdit *evidence_ = nullptr;
     QPlainTextEdit *symbols_ = nullptr;
@@ -813,6 +872,7 @@ private:
     QTimer timer_;
     bool statusRefreshInFlight_ = false;
     bool reviewRefreshInFlight_ = false;
+    int busyDepth_ = 0;
     QString lastPrompt_;
     QString lastStatus_;
     QString lastWorktree_;

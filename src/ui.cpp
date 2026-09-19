@@ -67,6 +67,10 @@ QString styleSheet() {
         QLabel#muted { color: #52606D; }
         QLabel#state { color: #5ED6C8; }
         QLabel#rail { color: #8A98A8; background: #0E1217; border-top: 1px solid #1C242E; padding: 7px 10px; }
+        QFrame#busyOverlay { background: rgba(10, 13, 16, 245); }
+        QLabel#busyLabel { color: #D6DEE8; font-size: 15px; font-weight: 600; }
+        QProgressBar { min-height: 5px; max-height: 5px; border: 0; background: #1C242E; }
+        QProgressBar::chunk { background: #6EA8FE; }
     )";
 }
 
