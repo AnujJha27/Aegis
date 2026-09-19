@@ -156,6 +156,17 @@ public:
         auto *reviewTitle = new QLabel("REVIEW / EVIDENCE", reviewPanel_);
         reviewTitle->setObjectName("muted");
         rightLayout->addWidget(reviewTitle);
+        reviewSummary_ = new QLabel("No active changes.\nAgent modifications will appear here automatically.", reviewPanel_);
+        reviewSummary_->setObjectName("muted");
+        reviewSummary_->setWordWrap(true);
+        rightLayout->addWidget(reviewSummary_);
+        auto *reviewActions = new QHBoxLayout;
+        auto *reviewVerify = new QPushButton("VERIFY", reviewPanel_);
+        auto *reviewAnalyze = new QPushButton("ANALYZE", reviewPanel_);
+        reviewActions->addWidget(reviewVerify);
+        reviewActions->addWidget(reviewAnalyze);
+        reviewActions->addStretch();
+        rightLayout->addLayout(reviewActions);
         files_ = new QListWidget(reviewPanel_);
         files_->setMaximumHeight(120);
         rightLayout->addWidget(files_);
@@ -220,6 +231,8 @@ public:
         connect(send, &QPushButton::clicked, this, [this] { sendPrompt(); });
         connect(prompt_, &QLineEdit::returnPressed, this, [this] { sendPrompt(); });
         connect(review, &QPushButton::clicked, this, [this] { toggleReview(); });
+        connect(reviewVerify, &QPushButton::clicked, this, [this] { runVerification(); });
+        connect(reviewAnalyze, &QPushButton::clicked, this, [this] { analyzeChanges(); });
         connect(palette, &QPushButton::clicked, this, [this] { showPalette(); });
         process_.onOutput = [this](const QByteArray &data) { appendTerminal(data); };
         process_.onError = [this](const QString &error) { appendTerminal(("\n[aegis] " + error + "\n").toUtf8()); };
@@ -254,9 +267,13 @@ private:
         if (process_.isRunning()) return;
         const auto command = aegis::agentCommand(agent_->currentText());
         agentState_->setText("● RUNNING");
+        trace_->appendPlainText(aegis::ui::activityHeader(agent_->currentText()));
+        trace_->appendPlainText("  └ session started");
         trace_->appendPlainText("start " + command.join(' '));
-        if (!process_.start(command.first(), command.mid(1), repo_))
+        if (!process_.start(command.first(), command.mid(1), repo_)) {
+            agentState_->setText("● IDLE");
             appendTerminal("\n[aegis] failed to start agent\n");
+        }
     }
 
     void toggleReview() {
@@ -290,6 +307,8 @@ private:
                     aegis::session::appendEvent(repo_, "repository", "working tree changed", paranoia_->isChecked());
                 lastStatus_ = status;
                 const auto summary = aegis::summarizeGit(status, numstat);
+                reviewSummary_->setText(aegis::ui::reviewSummary(summary.files, summary.insertions, summary.deletions,
+                                                                 report_.findings.size()));
                 status_->setText(aegis::ui::statusRail(summary.files, summary.insertions, summary.deletions,
                                                        agent_->currentText().toUpper() +
                                                            (paranoia_->isChecked() ? " PARANOIA" : " IDLE")) +
@@ -651,6 +670,7 @@ private:
     QCheckBox *paranoia_ = nullptr;
     QLabel *status_ = nullptr;
     QWidget *reviewPanel_ = nullptr;
+    QLabel *reviewSummary_ = nullptr;
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
     QPlainTextEdit *unified_ = nullptr;

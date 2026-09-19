@@ -73,4 +73,13 @@ QString sessionHeader(const QString &project, const QString &agent) {
     return QString("AEGIS   %1                              %2 ●").arg(project, agent);
 }
 
+QString reviewSummary(int files, int additions, int deletions, int findings) {
+    return QString("%1 CHANGED FILES\n+%2 −%3\n%4 FINDING%5")
+        .arg(files).arg(additions).arg(deletions).arg(findings).arg(findings == 1 ? "" : "S");
+}
+
+QString activityHeader(const QString &agent) {
+    return "◆ " + agent.toUpper();
+}
+
 }
