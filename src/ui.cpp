@@ -82,4 +82,8 @@ QString activityHeader(const QString &agent) {
     return "◆ " + agent.toUpper();
 }
 
+QString activityLine(const QString &action, const QString &value, bool last) {
+    return QString("  %1 %2 %3").arg(last ? "└" : "├", action, value);
+}
+
 }

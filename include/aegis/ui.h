@@ -9,5 +9,6 @@ QString statusRail(int files, int additions, int deletions, const QString &agent
 QString sessionHeader(const QString &project, const QString &agent);
 QString reviewSummary(int files, int additions, int deletions, int findings);
 QString activityHeader(const QString &agent);
+QString activityLine(const QString &action, const QString &value, bool last);
 
 }

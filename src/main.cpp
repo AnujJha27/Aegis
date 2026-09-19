@@ -201,6 +201,7 @@ public:
         tabs_->addTab(board_, "Board");
         tabs_->addTab(lenses_, "Lenses");
         tabs_->addTab(trace_, "Trace");
+        tabs_->setDocumentMode(true);
         rightLayout->addWidget(tabs_);
         reviewPanel_->setMinimumWidth(360);
         split->addWidget(terminal_);
@@ -246,6 +247,8 @@ public:
         connect(paletteShortcut, &QShortcut::activated, this, [this] { showPalette(); });
         auto *reviewShortcut = new QShortcut(QKeySequence("Ctrl+R"), this);
         connect(reviewShortcut, &QShortcut::activated, this, [this] { toggleReview(); });
+        auto *quickOpenShortcut = new QShortcut(QKeySequence("Ctrl+P"), this);
+        connect(quickOpenShortcut, &QShortcut::activated, this, [this] { quickOpen(); });
         auto *closeReviewShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
         connect(closeReviewShortcut, &QShortcut::activated, this, [this] { if (reviewPanel_->isVisible()) toggleReview(); });
         auto *deepShortcut = new QShortcut(QKeySequence("Ctrl+Shift+O"), this);
@@ -268,7 +271,7 @@ private:
         const auto command = aegis::agentCommand(agent_->currentText());
         agentState_->setText("● RUNNING");
         trace_->appendPlainText(aegis::ui::activityHeader(agent_->currentText()));
-        trace_->appendPlainText("  └ session started");
+        trace_->appendPlainText(aegis::ui::activityLine("start", "agent session", true));
         trace_->appendPlainText("start " + command.join(' '));
         if (!process_.start(command.first(), command.mid(1), repo_)) {
             agentState_->setText("● IDLE");
@@ -292,7 +295,7 @@ private:
                                ? "Please revise the current changeset: " + text.mid(7).trimmed()
                                : text) + "\n";
         process_.write(line.toUtf8());
-        trace_->appendPlainText("input: " + line.trimmed());
+        trace_->appendPlainText(aegis::ui::activityLine("prompt", line.trimmed(), true));
         aegis::session::appendEvent(repo_, "prompt", line.trimmed(), paranoia_->isChecked());
         prompt_->clear();
     }
@@ -393,6 +396,25 @@ private:
         if (path.contains(" -> ")) path = path.section(" -> ", -1);
         QDesktopServices::openUrl(QUrl::fromLocalFile(repo_ + "/" + path));
         trace_->appendPlainText("open editor " + path);
+    }
+
+    void quickOpen() {
+        QStringList choices;
+        for (int i = 0; i < files_->count(); ++i) choices << files_->item(i)->text();
+        if (choices.isEmpty()) {
+            trace_->appendPlainText("quick open: no changed files");
+            return;
+        }
+        bool ok = false;
+        const auto selected = QInputDialog::getItem(this, "Quick open", "File:", choices, files_->currentRow(), true, &ok);
+        if (!ok || selected.trimmed().isEmpty()) return;
+        for (int i = 0; i < files_->count(); ++i) {
+            if (files_->item(i)->text() == selected) {
+                files_->setCurrentRow(i);
+                openEditor();
+                return;
+            }
+        }
     }
 
     QString list(const QStringList &items) const {
@@ -642,7 +664,7 @@ private:
     }
 
     void showPalette() {
-        const QStringList actions = {"Analyze evidence", "Review diff", "Run verification", "Create snapshot", "Create worktree", "Worktree action", "Run LSP check", "Run formal check", "Run Solidity tests", "Critic mode", "Compare agents", "Compare current/parent", "Time machine", "Handoff to agent", "Pin selected file", "Enable/disable paranoia"};
+        const QStringList actions = {"Analyze evidence", "Review diff", "Run verification", "Create snapshot", "Create worktree", "Worktree action", "Run LSP check", "Run formal check", "Run Solidity tests", "Critic mode", "Compare agents", "Compare current/parent", "Time machine", "Handoff to agent", "Pin selected file", "Enable/disable paranoia", "Quick open"};
         bool ok = false;
         const auto action = QInputDialog::getItem(this, "Aegis command palette", "Action:", actions, 0, false, &ok);
         if (!ok) return;
@@ -662,6 +684,7 @@ private:
         else if (action == actions[13]) handoffAgent();
         else if (action == actions[14]) pinSelected();
         else if (action == actions[15]) paranoia_->setChecked(!paranoia_->isChecked());
+        else if (action == actions[16]) quickOpen();
     }
 
     QString repo_;
