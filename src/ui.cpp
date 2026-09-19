@@ -2,6 +2,7 @@
 
 #include <QPaintEvent>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QResizeEvent>
 #include <QTextBlock>
 
@@ -97,6 +98,15 @@ QString activityLine(const QString &action, const QString &value, bool last) {
 
 QString diffLineMarker(const QString &line) {
     return line.isEmpty() ? " " : line.left(1);
+}
+
+QString cleanTerminalText(const QByteArray &data) {
+    auto text = QString::fromLocal8Bit(data);
+    static const QRegularExpression ansi(R"(\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)))");
+    text.remove(ansi);
+    text.remove(QChar(0x0007));
+    text.replace('\r', "");
+    return text;
 }
 
 QString deepViewTitle(const QString &mode) {

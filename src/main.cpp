@@ -284,7 +284,7 @@ public:
         process_.onError = [this](const QString &error) { appendTerminal(("\n[aegis] " + error + "\n").toUtf8()); };
         process_.onFinished = [this](int code) {
             trace_->appendPlainText("agent exited with code " + QString::number(code));
-            agentState_->setText("● IDLE");
+            agentState_->setText(agent_->currentText().compare("codex", Qt::CaseInsensitive) == 0 ? "● READY" : "● IDLE");
             refreshStatus();
         };
         connect(&timer_, &QTimer::timeout, this, [this] { refreshStatus(); });
@@ -319,7 +319,7 @@ private:
 
     void appendTerminal(const QByteArray &data) {
         terminal_->moveCursor(QTextCursor::End);
-        terminal_->insertPlainText(QString::fromLocal8Bit(data));
+        terminal_->insertPlainText(aegis::ui::cleanTerminalText(data));
         terminal_->ensureCursorVisible();
     }
 
@@ -346,6 +346,11 @@ private:
 
     void startAgent() {
         if (process_.isRunning()) return;
+        if (agent_->currentText().compare("codex", Qt::CaseInsensitive) == 0) {
+            agentState_->setText("● READY");
+            trace_->appendPlainText("CODEX exec mode ready");
+            return;
+        }
         const auto command = aegis::agentCommand(agent_->currentText());
         agentState_->setText("● RUNNING");
         trace_->appendPlainText(aegis::ui::activityHeader(agent_->currentText()));
@@ -394,6 +399,10 @@ private:
         const auto text = prompt_->text().trimmed();
         if (text.isEmpty()) return;
         lastPrompt_ = text;
+        if (agent_->currentText().compare("codex", Qt::CaseInsensitive) == 0) {
+            sendCodexPrompt(text);
+            return;
+        }
         if (!process_.isRunning()) startAgent();
         const auto line = (text.startsWith("revise:", Qt::CaseInsensitive)
                                ? "Please revise the current changeset: " + text.mid(7).trimmed()
@@ -401,6 +410,24 @@ private:
         process_.write(line.toUtf8());
         trace_->appendPlainText(aegis::ui::activityLine("prompt", line.trimmed(), true));
         aegis::session::appendEvent(repo_, "prompt", line.trimmed(), paranoia_->isChecked());
+        prompt_->clear();
+    }
+
+    void sendCodexPrompt(const QString &text) {
+        if (process_.isRunning()) {
+            terminal_->appendPlainText("\n[aegis] Codex is still processing the previous prompt.\n");
+            return;
+        }
+        const auto command = QStringList{"exec", "--ephemeral", "--color", "never", text};
+        agentState_->setText("● RUNNING");
+        trace_->appendPlainText(aegis::ui::activityLine("prompt", text, true));
+        trace_->appendPlainText("start codex " + command.join(' '));
+        if (!process_.start("codex", command, repo_)) {
+            agentState_->setText("● READY");
+            terminal_->appendPlainText("\n[aegis] failed to start codex exec\n");
+            return;
+        }
+        aegis::session::appendEvent(repo_, "prompt", text, paranoia_->isChecked());
         prompt_->clear();
     }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QPlainTextEdit>
 #include <QString>
 
@@ -12,6 +13,7 @@ QString reviewSummary(int files, int additions, int deletions, int findings);
 QString activityHeader(const QString &agent);
 QString activityLine(const QString &action, const QString &value, bool last);
 QString diffLineMarker(const QString &line);
+QString cleanTerminalText(const QByteArray &data);
 QString deepViewTitle(const QString &mode);
 
 class CodeView final : public QPlainTextEdit {
