@@ -25,7 +25,7 @@ target_link_libraries(aegis_terminal PUBLIC Qt6::Core util)
 
 add_library(aegis_ui src/ui.cpp)
 target_include_directories(aegis_ui PUBLIC include)
-target_link_libraries(aegis_ui PUBLIC Qt6::Core)
+target_link_libraries(aegis_ui PUBLIC Qt6::Core Qt6::Widgets)
 
 option(AEGIS_BUILD_APP "Build the Aegis UI" ON)
 if(AEGIS_BUILD_APP)

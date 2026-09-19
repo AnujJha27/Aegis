@@ -1,5 +1,10 @@
 #include "aegis/ui.h"
 
+#include <QPaintEvent>
+#include <QPainter>
+#include <QResizeEvent>
+#include <QTextBlock>
+
 namespace aegis::ui {
 
 QString styleSheet() {
@@ -84,6 +89,90 @@ QString activityHeader(const QString &agent) {
 
 QString activityLine(const QString &action, const QString &value, bool last) {
     return QString("  %1 %2 %3").arg(last ? "└" : "├", action, value);
+}
+
+QString diffLineMarker(const QString &line) {
+    return line.isEmpty() ? " " : line.left(1);
+}
+
+class CodeView::LineNumberArea final : public QWidget {
+public:
+    explicit LineNumberArea(CodeView *editor) : QWidget(editor), editor_(editor) {}
+
+    QSize sizeHint() const override { return {editor_->lineNumberWidth(), 0}; }
+
+protected:
+    void paintEvent(QPaintEvent *event) override { editor_->paintLineNumbers(event); }
+
+private:
+    CodeView *editor_;
+};
+
+CodeView::CodeView(QWidget *parent) : QPlainTextEdit(parent), lineNumbers_(new LineNumberArea(this)) {
+    setLineWrapMode(QPlainTextEdit::NoWrap);
+    connect(this, &QPlainTextEdit::blockCountChanged, this, [this](int count) { updateLineNumberWidth(count); });
+    connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect &rect, int delta) {
+        if (delta) lineNumbers_->scroll(0, delta);
+        else lineNumbers_->update(0, rect.y(), lineNumbers_->width(), rect.height());
+        if (rect.contains(viewport()->rect())) updateLineNumberWidth(0);
+    });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, lineNumbers_, qOverload<>(&QWidget::update));
+    updateLineNumberWidth(0);
+}
+
+int CodeView::lineNumberWidth() const {
+    int digits = 1;
+    auto value = qMax(1, blockCount());
+    while (value >= 10) {
+        value /= 10;
+        ++digits;
+    }
+    return 10 + fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
+}
+
+void CodeView::updateLineNumberWidth(int) {
+    setViewportMargins(lineNumberWidth(), 0, 0, 0);
+    lineNumbers_->setFixedWidth(lineNumberWidth());
+}
+
+void CodeView::resizeEvent(QResizeEvent *event) {
+    QPlainTextEdit::resizeEvent(event);
+    lineNumbers_->setGeometry(0, 0, lineNumberWidth(), height());
+}
+
+void CodeView::paintLineNumbers(QPaintEvent *event) {
+    QPainter painter(lineNumbers_);
+    painter.fillRect(event->rect(), QColor("#0E1217"));
+    auto block = firstVisibleBlock();
+    auto top = static_cast<int>(blockBoundingGeometry(block).translated(contentOffset()).top());
+    const auto bottom = event->rect().bottom();
+    while (block.isValid() && top <= bottom) {
+        const auto height = static_cast<int>(blockBoundingRect(block).height());
+        if (block.isVisible() && top + height >= event->rect().top()) {
+            painter.setPen(block == textCursor().block() ? QColor("#6EA8FE") : QColor("#52606D"));
+            painter.drawText(0, top, lineNumbers_->width() - 6, height, Qt::AlignRight, QString::number(block.blockNumber() + 1));
+        }
+        block = block.next();
+        top += height;
+    }
+}
+
+void CodeView::setDiffText(const QString &text) {
+    setPlainText(text);
+    QList<QTextEdit::ExtraSelection> selections;
+    auto block = document()->firstBlock();
+    while (block.isValid()) {
+        const auto marker = diffLineMarker(block.text());
+        if (marker == "+" || marker == "-") {
+            QTextEdit::ExtraSelection selection;
+            selection.cursor = QTextCursor(block);
+            selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+            selection.format.setBackground(QColor(marker == "+" ? "#18352C" : "#3A252B"));
+            selections.append(selection);
+        }
+        block = block.next();
+    }
+    setExtraSelections(selections);
 }
 
 }

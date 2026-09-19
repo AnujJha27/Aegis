@@ -171,9 +171,9 @@ public:
         files_->setMaximumHeight(120);
         rightLayout->addWidget(files_);
         tabs_ = new QTabWidget(reviewPanel_);
-        unified_ = new QPlainTextEdit(tabs_);
+        unified_ = new aegis::ui::CodeView(tabs_);
         unified_->setReadOnly(true);
-        side_ = new QPlainTextEdit(tabs_);
+        side_ = new aegis::ui::CodeView(tabs_);
         side_->setReadOnly(true);
         trace_ = new QPlainTextEdit(tabs_);
         trace_->setReadOnly(true);
@@ -338,8 +338,8 @@ private:
         runGitAsync({"diff", "HEAD", "--no-ext-diff", "--no-color"}, [this](QString result) {
             reviewRefreshInFlight_ = false;
             if (result.trimmed().isEmpty()) result = "(no tracked diff)";
-            unified_->setPlainText(result);
-            side_->setPlainText(aegis::sideBySideDiff(result));
+            unified_->setDiffText(result);
+            side_->setDiffText(aegis::sideBySideDiff(result));
         });
     }
 
@@ -696,8 +696,8 @@ private:
     QLabel *reviewSummary_ = nullptr;
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
-    QPlainTextEdit *unified_ = nullptr;
-    QPlainTextEdit *side_ = nullptr;
+    aegis::ui::CodeView *unified_ = nullptr;
+    aegis::ui::CodeView *side_ = nullptr;
     QPlainTextEdit *trace_ = nullptr;
     QPlainTextEdit *evidence_ = nullptr;
     QPlainTextEdit *symbols_ = nullptr;
