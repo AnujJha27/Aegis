@@ -100,7 +100,7 @@ void PtySession::reap() {
 
 void PtySession::terminate() {
     if (pid_ <= 0) return;
-    kill(pid_, SIGTERM);
+    if (kill(-pid_, SIGTERM) < 0 && errno != ESRCH) kill(pid_, SIGTERM);
     int status = 0;
     waitpid(pid_, &status, 0);
     if (notifier_) {

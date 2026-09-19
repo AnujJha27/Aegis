@@ -6,20 +6,22 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <cassert>
+
 using namespace aegis::analysis;
 
 static void writeFile(const QString &path, const QByteArray &data) {
     QFile file(path);
-    Q_ASSERT(file.open(QIODevice::WriteOnly));
-    Q_ASSERT(file.write(data) == data.size());
+    assert(file.open(QIODevice::WriteOnly));
+    assert(file.write(data) == data.size());
 }
 
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir repo;
-    Q_ASSERT(repo.isValid());
-    QDir().mkpath(repo.path() + "/src");
-    QDir().mkpath(repo.path() + "/test");
+    assert(repo.isValid());
+    assert(QDir().mkpath(repo.path() + "/src"));
+    assert(QDir().mkpath(repo.path() + "/test"));
     writeFile(repo.path() + "/src/auth.h", "struct User {};\n");
     writeFile(repo.path() + "/src/auth.cpp", "#include <cstring>\n#include \"auth.h\"\nint helper();\nint authenticateUser(User user) { char buf[16]; const char *input = \"\"; strcpy(buf, input); return helper(); }\nint helper() { return 1; }\n");
     writeFile(repo.path() + "/test/auth_test.cpp", "#include \"../src/auth.cpp\"\nvoid test_authenticateUser() {}\n");
@@ -41,7 +43,9 @@ int main(int argc, char **argv) {
     Q_ASSERT(auth->references >= 1);
     Q_ASSERT(auth->callers.contains("test/auth_test.cpp"));
     Q_ASSERT(!report.ast.isEmpty());
+    assert(report.ast.join('\n').contains("authenticateUser"));
     Q_ASSERT(!report.callGraph.isEmpty());
+    assert(report.callGraph.join('\n').contains("authenticateUser -> helper"));
     Q_ASSERT(!report.blastRadius.isEmpty());
     Q_ASSERT(report.provenance.contains("Codex -> src/auth.cpp"));
     Q_ASSERT(!report.findings.isEmpty());

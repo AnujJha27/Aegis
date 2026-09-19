@@ -14,6 +14,5 @@ struct ChangeSummary {
 
 QStringList agentCommand(const QString &agent);
 ChangeSummary summarizeGit(const QString &status, const QString &numstat);
-QString sideBySideDiff(const QString &diff);
 
 }

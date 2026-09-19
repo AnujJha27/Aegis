@@ -25,7 +25,7 @@ QStringList filesUnder(const QString &repo) {
     while (it.hasNext()) {
         const auto path = it.next();
         const auto rel = relativePath(repo, path);
-        if (rel.startsWith(".git/") || rel.startsWith("build") || rel.startsWith(".aegis/") ||
+        if (rel.startsWith(".git/") || rel.startsWith(".aegis-git/") || rel.startsWith("build") || rel.startsWith(".aegis/") ||
             rel.contains("/node_modules/")) continue;
         files << rel;
     }
@@ -134,31 +134,47 @@ void inspectCompilerAst(Report &report, const QString &repo, const QStringList &
     if (compiler.isEmpty()) return;
     QTemporaryDir scratch;
     if (!scratch.isValid()) return;
+    QStringList projectFlags;
+    const auto pkgConfig = QStandardPaths::findExecutable("pkg-config");
+    if (!pkgConfig.isEmpty()) {
+        QProcess flags;
+        flags.start(pkgConfig, {"--cflags", "Qt6Core", "Qt6Widgets"});
+        if (flags.waitForFinished(3000) && flags.exitCode() == 0)
+            projectFlags = QProcess::splitCommand(QString::fromLocal8Bit(flags.readAllStandardOutput()).trimmed());
+    }
     int index = 0;
     for (const auto &file : files) {
         if (!QRegularExpression("\\.(c|cc|cpp|cxx)$", QRegularExpression::CaseInsensitiveOption).match(file).hasMatch()) continue;
         const auto dump = scratch.path() + "/" + QString::number(index++) + ".tree";
         QProcess process;
         process.setWorkingDirectory(repo);
-        process.start(compiler, {"-std=c++23", "-fsyntax-only", "-I" + repo, "-I" + QDir(repo).filePath("include"), "-fdump-tree-original=" + dump, QDir(repo).filePath(file)});
-        if (!process.waitForFinished(10000)) {
+        QStringList arguments = {"-std=c++23", "-fsyntax-only", "-fno-diagnostics-color", "-I" + repo,
+                                 "-I" + QDir(repo).filePath("include")};
+        arguments += projectFlags;
+        arguments += {"-fdump-tree-original=" + dump, QDir(repo).filePath(file)};
+        process.start(compiler, arguments);
+        if (!process.waitForFinished(30000) || process.exitCode() != 0) {
             process.kill();
             continue;
         }
         QFile tree(dump);
         if (!tree.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
         const auto text = QString::fromUtf8(tree.read(16 * 1024 * 1024));
-        auto sections = QRegularExpression(";; Function ([^\\n]+)\\n(.*?)(?=\\n;; Function |\\z)", QRegularExpression::DotMatchesEverythingOption).globalMatch(text);
+        auto sections = QRegularExpression("^;; Function ([^\\n]+)\\n(.*?)(?=^;; Function |\\z)",
+                                            QRegularExpression::DotMatchesEverythingOption | QRegularExpression::MultilineOption).globalMatch(text);
         while (sections.hasNext()) {
             const auto match = sections.next();
             const auto function = match.captured(1).trimmed();
-            if (function.isEmpty() || function.contains("std::")) continue;
+            if (function.isEmpty() || function.contains("std::") || function.contains("QtPrivate::")) continue;
             report.ast << file + ": " + function;
-            auto calls = QRegularExpression("\\b([A-Za-z_]\\w*)\\s*\\(").globalMatch(match.captured(2));
+            const auto beforeArguments = function.section('(', 0, 0).trimmed();
+            const auto functionName = beforeArguments.section(' ', -1).remove(QRegularExpression("[*&]"));
+            auto calls = QRegularExpression("\\b([A-Za-z_]\\w*(?:::[A-Za-z_]\\w*)?)\\s*\\(").globalMatch(match.captured(2));
             while (calls.hasNext()) {
                 const auto callee = calls.next().captured(1);
-                if (!QStringList{"if", "for", "while", "switch", "return"}.contains(callee))
-                    report.callGraph << function.section('(', 0, 0) + " -> " + callee;
+                if (!QStringList{"if", "for", "while", "switch", "return", "sizeof"}.contains(callee) &&
+                    !callee.startsWith("std::") && !callee.startsWith("__"))
+                    report.callGraph << functionName + " -> " + callee;
             }
         }
     }

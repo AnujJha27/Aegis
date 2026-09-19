@@ -20,11 +20,6 @@ int main(int argc, char **argv) {
     Q_ASSERT(summary.insertions == 3);
     Q_ASSERT(summary.deletions == 1);
 
-    const auto rendered = sideBySideDiff(
-        "@@ -1,2 +1,2 @@\n-old\n+new\n same\n");
-    Q_ASSERT(rendered.contains("old\t|\tnew"));
-    Q_ASSERT(rendered.contains("same\t|\tsame"));
-
     qInfo() << "aegis_core_test: passed";
     return 0;
 }

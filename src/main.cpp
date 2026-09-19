@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QDateTime>
 #include <QDialog>
 #include <QDesktopServices>
@@ -22,6 +23,7 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTabWidget>
@@ -50,6 +52,15 @@ struct CommandResult {
 CommandResult runCommand(const QString &program, const QStringList &arguments, const QString &directory) {
     QProcess process;
     process.setWorkingDirectory(directory);
+    if (program == "git" && !arguments.contains("-C")) {
+        const auto privateGit = QDir(directory).filePath(".aegis-git");
+        if (QFileInfo(privateGit).isDir()) {
+            auto environment = QProcessEnvironment::systemEnvironment();
+            environment.insert("GIT_DIR", privateGit);
+            environment.insert("GIT_WORK_TREE", directory);
+            process.setProcessEnvironment(environment);
+        }
+    }
     process.start(program, arguments);
     if (!process.waitForStarted(3000)) return {-1, process.errorString()};
     process.waitForFinished(-1);
@@ -127,10 +138,10 @@ public:
         layout->setSpacing(6);
 
         auto *header = new QHBoxLayout;
-        auto *brand = new QLabel(root);
-        brand->setObjectName("brand");
-        brand->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), selectedAgent.toUpper()));
-        header->addWidget(brand, 1);
+        brand_ = new QLabel(root);
+        brand_->setObjectName("brand");
+        brand_->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), selectedAgent.toUpper()));
+        header->addWidget(brand_, 1);
         agent_ = new QComboBox(root);
         agent_->addItems({"shell", "codex", "claude", "opencode"});
         agent_->setCurrentText(selectedAgent);
@@ -184,8 +195,6 @@ public:
         tabs_ = new QTabWidget(reviewPanel_);
         unified_ = new aegis::ui::CodeView(tabs_);
         unified_->setReadOnly(true);
-        side_ = new aegis::ui::CodeView(tabs_);
-        side_->setReadOnly(true);
         trace_ = new QPlainTextEdit(tabs_);
         trace_->setReadOnly(true);
         evidence_ = new QPlainTextEdit(tabs_);
@@ -203,7 +212,6 @@ public:
         lenses_ = new QPlainTextEdit(tabs_);
         lenses_->setReadOnly(true);
         tabs_->addTab(unified_, "Unified diff");
-        tabs_->addTab(side_, "Side-by-side");
         tabs_->addTab(evidence_, "Evidence");
         tabs_->addTab(symbols_, "Symbols");
         tabs_->addTab(architecture_, "Architecture");
@@ -239,7 +247,7 @@ public:
         setCentralWidget(root);
         trace_->appendPlainText("session start " + QDateTime::currentDateTime().toString(Qt::ISODate) + " repo " + repo_);
 
-        connect(agent_, &QComboBox::currentTextChanged, this, [this] { if (!process_.isRunning()) startAgent(); });
+        connect(agent_, &QComboBox::currentTextChanged, this, [this](const QString &agent) { switchAgent(agent); });
         connect(send, &QPushButton::clicked, this, [this] { sendPrompt(); });
         connect(prompt_, &QLineEdit::returnPressed, this, [this] { sendPrompt(); });
         connect(review, &QPushButton::clicked, this, [this] { toggleReview(); });
@@ -278,7 +286,14 @@ public:
         startAgent();
     }
 
+    ~Window() override { process_.terminate(); }
+
 private:
+    void closeEvent(QCloseEvent *event) override {
+        process_.terminate();
+        QMainWindow::closeEvent(event);
+    }
+
     void appendTerminal(const QByteArray &data) {
         terminal_->moveCursor(QTextCursor::End);
         terminal_->insertPlainText(QString::fromLocal8Bit(data));
@@ -296,6 +311,16 @@ private:
             agentState_->setText("● IDLE");
             appendTerminal("\n[aegis] failed to start agent\n");
         }
+    }
+
+    void switchAgent(const QString &agent) {
+        if (process_.isRunning()) {
+            trace_->appendPlainText("switching agent to " + agent.toUpper());
+            appendTerminal(("\n[aegis] switching agent to " + agent + "\n").toUtf8());
+            process_.terminate();
+        }
+        brand_->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), agent.toUpper()));
+        startAgent();
     }
 
     void toggleReview() {
@@ -369,13 +394,21 @@ private:
             reviewRefreshInFlight_ = false;
             if (result.trimmed().isEmpty()) result = "(no tracked diff)";
             unified_->setDiffText(result);
-            side_->setDiffText(aegis::sideBySideDiff(result));
         });
     }
 
     void runGitAsync(const QStringList &arguments, std::function<void(QString)> callback) {
         auto *process = new QProcess(this);
         process->setWorkingDirectory(repo_);
+        if (!arguments.contains("-C")) {
+            const auto privateGit = QDir(repo_).filePath(".aegis-git");
+            if (QFileInfo(privateGit).isDir()) {
+                auto environment = QProcessEnvironment::systemEnvironment();
+                environment.insert("GIT_DIR", privateGit);
+                environment.insert("GIT_WORK_TREE", repo_);
+                process->setProcessEnvironment(environment);
+            }
+        }
         const auto completed = std::make_shared<bool>(false);
         const auto finish = [process, completed, callback = std::move(callback)](QString output) {
             if (*completed) return;
@@ -752,6 +785,7 @@ private:
     }
 
     QString repo_;
+    QLabel *brand_ = nullptr;
     QComboBox *agent_ = nullptr;
     QLabel *agentState_ = nullptr;
     QCheckBox *paranoia_ = nullptr;
@@ -764,7 +798,6 @@ private:
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
     aegis::ui::CodeView *unified_ = nullptr;
-    aegis::ui::CodeView *side_ = nullptr;
     QPlainTextEdit *trace_ = nullptr;
     QPlainTextEdit *evidence_ = nullptr;
     QPlainTextEdit *symbols_ = nullptr;
