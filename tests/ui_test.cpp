@@ -12,5 +12,6 @@ int main(int argc, char **argv) {
     assert(css.contains("#6EA8FE"));
     assert(css.contains("#5ED6C8"));
     assert(aegis::ui::statusRail(3, 9, 2, "CODEX IDLE") == "Δ 3 FILES    +9 −2    CODEX IDLE");
+    assert(aegis::ui::sessionHeader("vista", "CODEX") == "AEGIS   vista                              CODEX ●");
     return 0;
 }

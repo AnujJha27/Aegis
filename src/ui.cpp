@@ -69,4 +69,8 @@ QString statusRail(int files, int additions, int deletions, const QString &agent
     return QString("Δ %1 FILES    +%2 −%3    %4").arg(files).arg(additions).arg(deletions).arg(agentState);
 }
 
+QString sessionHeader(const QString &project, const QString &agent) {
+    return QString("AEGIS   %1                              %2 ●").arg(project, agent);
+}
+
 }

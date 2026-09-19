@@ -2,6 +2,7 @@
 #include "aegis/analysis.h"
 #include "aegis/session.h"
 #include "aegis/terminal.h"
+#include "aegis/ui.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -115,58 +116,50 @@ public:
         : repo_(QDir(std::move(repo)).absolutePath()) {
         setWindowTitle("AEGIS — " + QFileInfo(repo_).fileName());
         resize(1200, 760);
+        setMinimumSize(720, 480);
+        setStyleSheet(aegis::ui::styleSheet());
 
         auto *root = new QWidget(this);
         auto *layout = new QVBoxLayout(root);
-        auto *toolbar = new QHBoxLayout;
-        toolbar->addWidget(new QLabel("AEGIS", root));
+        layout->setContentsMargins(10, 8, 10, 8);
+        layout->setSpacing(6);
+
+        auto *header = new QHBoxLayout;
+        auto *brand = new QLabel(root);
+        brand->setObjectName("brand");
+        brand->setText(aegis::ui::sessionHeader(QFileInfo(repo_).fileName(), selectedAgent.toUpper()));
+        header->addWidget(brand, 1);
         agent_ = new QComboBox(root);
         agent_->addItems({"shell", "codex", "claude", "opencode"});
         agent_->setCurrentText(selectedAgent);
-        toolbar->addWidget(agent_);
-        auto *start = new QPushButton("Start", root);
-        toolbar->addWidget(start);
-        auto *review = new QPushButton("Review", root);
-        toolbar->addWidget(review);
-        auto *verify = new QPushButton("Verify", root);
-        toolbar->addWidget(verify);
-        auto *snapshot = new QPushButton("Snapshot", root);
-        toolbar->addWidget(snapshot);
-        auto *open = new QPushButton("Open editor", root);
-        toolbar->addWidget(open);
-        auto *analyze = new QPushButton("Analyze", root);
-        toolbar->addWidget(analyze);
-        auto *pin = new QPushButton("Pin", root);
-        toolbar->addWidget(pin);
-        auto *worktree = new QPushButton("Worktree", root);
-        toolbar->addWidget(worktree);
-        auto *critic = new QPushButton("Critic", root);
-        toolbar->addWidget(critic);
-        auto *compare = new QPushButton("Compare", root);
-        toolbar->addWidget(compare);
+        header->addWidget(agent_);
+        agentState_ = new QLabel("● IDLE", root);
+        agentState_->setObjectName("state");
+        header->addWidget(agentState_);
+        auto *review = new QPushButton("REVIEW  Ctrl+R", root);
+        header->addWidget(review);
         auto *palette = new QPushButton("Palette", root);
-        toolbar->addWidget(palette);
+        header->addWidget(palette);
         paranoia_ = new QCheckBox("Paranoia", root);
         paranoia_->setChecked(paranoia);
-        toolbar->addWidget(paranoia_);
-        toolbar->addStretch();
-        layout->addLayout(toolbar);
-
-        status_ = new QLabel(root);
-        status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        layout->addWidget(status_);
+        header->addWidget(paranoia_);
+        layout->addLayout(header);
 
         auto *split = new QSplitter(Qt::Horizontal, root);
         terminal_ = new QPlainTextEdit(split);
         terminal_->setReadOnly(true);
         terminal_->setPlaceholderText("Managed agent terminal output");
 
-        auto *right = new QWidget(split);
-        auto *rightLayout = new QVBoxLayout(right);
-        files_ = new QListWidget(right);
+        reviewPanel_ = new QWidget(split);
+        auto *rightLayout = new QVBoxLayout(reviewPanel_);
+        rightLayout->setContentsMargins(6, 0, 0, 0);
+        auto *reviewTitle = new QLabel("REVIEW / EVIDENCE", reviewPanel_);
+        reviewTitle->setObjectName("muted");
+        rightLayout->addWidget(reviewTitle);
+        files_ = new QListWidget(reviewPanel_);
         files_->setMaximumHeight(120);
         rightLayout->addWidget(files_);
-        tabs_ = new QTabWidget(right);
+        tabs_ = new QTabWidget(reviewPanel_);
         unified_ = new QPlainTextEdit(tabs_);
         unified_->setReadOnly(true);
         side_ = new QPlainTextEdit(tabs_);
@@ -198,18 +191,16 @@ public:
         tabs_->addTab(lenses_, "Lenses");
         tabs_->addTab(trace_, "Trace");
         rightLayout->addWidget(tabs_);
+        reviewPanel_->setMinimumWidth(360);
         split->addWidget(terminal_);
-        split->addWidget(right);
+        split->addWidget(reviewPanel_);
         split->setStretchFactor(0, 1);
-        split->setStretchFactor(1, 1);
+        split->setStretchFactor(1, 0);
+        reviewPanel_->setVisible(false);
         layout->addWidget(split, 1);
 
-        auto *verifyRow = new QHBoxLayout;
         verifyCommand_ = new QLineEdit("ctest --test-dir build", root);
-        verifyRow->addWidget(verifyCommand_);
-        auto *runVerify = new QPushButton("Run", root);
-        verifyRow->addWidget(runVerify);
-        layout->addLayout(verifyRow);
+        verifyCommand_->setVisible(false);
 
         auto *promptRow = new QHBoxLayout;
         prompt_ = new QLineEdit(root);
@@ -218,33 +209,32 @@ public:
         auto *send = new QPushButton("Send", root);
         promptRow->addWidget(send);
         layout->addLayout(promptRow);
+        status_ = new QLabel("Δ 0 FILES    +0 −0    IDLE", root);
+        status_->setObjectName("rail");
+        status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(status_);
         setCentralWidget(root);
         trace_->appendPlainText("session start " + QDateTime::currentDateTime().toString(Qt::ISODate) + " repo " + repo_);
 
-        connect(start, &QPushButton::clicked, this, [this] { startAgent(); });
         connect(agent_, &QComboBox::currentTextChanged, this, [this] { if (!process_.isRunning()) startAgent(); });
         connect(send, &QPushButton::clicked, this, [this] { sendPrompt(); });
         connect(prompt_, &QLineEdit::returnPressed, this, [this] { sendPrompt(); });
-        connect(review, &QPushButton::clicked, this, [this] { refreshReview(); });
-        connect(verify, &QPushButton::clicked, this, [this] { runVerification(); });
-        connect(runVerify, &QPushButton::clicked, this, [this] { runVerification(); });
-        connect(snapshot, &QPushButton::clicked, this, [this] { saveSnapshot(); });
-        connect(open, &QPushButton::clicked, this, [this] { openEditor(); });
-        connect(analyze, &QPushButton::clicked, this, [this] { analyzeChanges(); });
-        connect(pin, &QPushButton::clicked, this, [this] { pinSelected(); });
-        connect(worktree, &QPushButton::clicked, this, [this] { createWorktree(); });
-        connect(critic, &QPushButton::clicked, this, [this] { criticMode(); });
-        connect(compare, &QPushButton::clicked, this, [this] { compareWithParent(); });
+        connect(review, &QPushButton::clicked, this, [this] { toggleReview(); });
         connect(palette, &QPushButton::clicked, this, [this] { showPalette(); });
         process_.onOutput = [this](const QByteArray &data) { appendTerminal(data); };
         process_.onError = [this](const QString &error) { appendTerminal(("\n[aegis] " + error + "\n").toUtf8()); };
         process_.onFinished = [this](int code) {
             trace_->appendPlainText("agent exited with code " + QString::number(code));
+            agentState_->setText("● IDLE");
             refreshStatus();
         };
         connect(&timer_, &QTimer::timeout, this, [this] { refreshStatus(); });
         auto *paletteShortcut = new QShortcut(QKeySequence("Ctrl+Shift+P"), this);
         connect(paletteShortcut, &QShortcut::activated, this, [this] { showPalette(); });
+        auto *reviewShortcut = new QShortcut(QKeySequence("Ctrl+R"), this);
+        connect(reviewShortcut, &QShortcut::activated, this, [this] { toggleReview(); });
+        auto *closeReviewShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+        connect(closeReviewShortcut, &QShortcut::activated, this, [this] { if (reviewPanel_->isVisible()) toggleReview(); });
         auto *deepShortcut = new QShortcut(QKeySequence("Ctrl+Shift+O"), this);
         connect(deepShortcut, &QShortcut::activated, this, [this] { analyzeChanges(); tabs_->setCurrentWidget(evidence_); });
         timer_.start(1000);
@@ -263,9 +253,17 @@ private:
     void startAgent() {
         if (process_.isRunning()) return;
         const auto command = aegis::agentCommand(agent_->currentText());
+        agentState_->setText("● RUNNING");
         trace_->appendPlainText("start " + command.join(' '));
         if (!process_.start(command.first(), command.mid(1), repo_))
             appendTerminal("\n[aegis] failed to start agent\n");
+    }
+
+    void toggleReview() {
+        const auto open = !reviewPanel_->isVisible();
+        reviewPanel_->setVisible(open);
+        if (open) refreshReview();
+        trace_->appendPlainText(open ? "review opened" : "review closed");
     }
 
     void sendPrompt() {
@@ -292,10 +290,10 @@ private:
                     aegis::session::appendEvent(repo_, "repository", "working tree changed", paranoia_->isChecked());
                 lastStatus_ = status;
                 const auto summary = aegis::summarizeGit(status, numstat);
-                status_->setText(QString("%1 files  +%2 -%3  branch %4  agent %5  %6")
-                                     .arg(summary.files).arg(summary.insertions).arg(summary.deletions)
-                                     .arg(summary.branch.isEmpty() ? "(detached)" : summary.branch)
-                                     .arg(agent_->currentText()).arg(paranoia_->isChecked() ? "PARANOIA" : "local trace"));
+                status_->setText(aegis::ui::statusRail(summary.files, summary.insertions, summary.deletions,
+                                                       agent_->currentText().toUpper() +
+                                                           (paranoia_->isChecked() ? " PARANOIA" : " IDLE")) +
+                                 "    " + (summary.branch.isEmpty() ? "(detached)" : summary.branch));
                 const auto selected = files_->currentItem() ? files_->currentItem()->text() : QString();
                 files_->clear();
                 files_->addItems(changedFiles(status));
@@ -649,8 +647,10 @@ private:
 
     QString repo_;
     QComboBox *agent_ = nullptr;
+    QLabel *agentState_ = nullptr;
     QCheckBox *paranoia_ = nullptr;
     QLabel *status_ = nullptr;
+    QWidget *reviewPanel_ = nullptr;
     QListWidget *files_ = nullptr;
     QPlainTextEdit *terminal_ = nullptr;
     QPlainTextEdit *unified_ = nullptr;
