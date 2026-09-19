@@ -102,7 +102,20 @@ void PtySession::terminate() {
     if (pid_ <= 0) return;
     if (kill(-pid_, SIGTERM) < 0 && errno != ESRCH) kill(pid_, SIGTERM);
     int status = 0;
-    waitpid(pid_, &status, 0);
+    bool exited = false;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto result = waitpid(pid_, &status, WNOHANG);
+        if (result == pid_ || (result < 0 && errno == ECHILD)) {
+            exited = true;
+            break;
+        }
+        if (result < 0 && errno != EINTR) break;
+        usleep(10000);
+    }
+    if (!exited) {
+        if (kill(-pid_, SIGKILL) < 0 && errno != ESRCH) kill(pid_, SIGKILL);
+        waitpid(pid_, &status, 0);
+    }
     if (notifier_) {
         notifier_->setEnabled(false);
         notifier_->deleteLater();

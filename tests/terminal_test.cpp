@@ -23,5 +23,11 @@ int main(int argc, char **argv) {
     assert(terminated.start("/bin/sh", {"-c", "sleep 30"}, "."));
     terminated.terminate();
     assert(!terminated.isRunning());
+
+    aegis::terminal::PtySession stubborn;
+    assert(stubborn.start("/bin/sh", {"-c", "trap '' TERM; sleep 30"}, "."));
+    stubborn.terminate();
+    assert(!stubborn.isRunning());
+
     return 0;
 }
