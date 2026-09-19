@@ -4,6 +4,8 @@
 #include <QEventLoop>
 #include <QTimer>
 
+#include <cassert>
+
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     aegis::terminal::PtySession session;
@@ -16,5 +18,10 @@ int main(int argc, char **argv) {
     app.exec();
     Q_ASSERT(finished);
     Q_ASSERT(output.contains("pty-ok"));
+
+    aegis::terminal::PtySession terminated;
+    assert(terminated.start("/bin/sh", {"-c", "sleep 30"}, "."));
+    terminated.terminate();
+    assert(!terminated.isRunning());
     return 0;
 }
