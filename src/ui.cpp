@@ -17,7 +17,7 @@ QString styleSheet() {
             font-size: 13px;
         }
         QMainWindow { background: #0A0D10; }
-        QLineEdit, QPlainTextEdit, QListWidget, QComboBox {
+        QLineEdit, QPlainTextEdit, QTextBrowser, QListWidget, QComboBox {
             background: #0E1217;
             color: #D6DEE8;
             border: 1px solid #1C242E;
@@ -29,6 +29,11 @@ QString styleSheet() {
             font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
             font-size: 12px;
             padding: 8px;
+        }
+        QTextBrowser {
+            font-family: "IBM Plex Sans", "Inter", sans-serif;
+            font-size: 13px;
+            padding: 12px;
         }
         QPushButton {
             background: transparent;
