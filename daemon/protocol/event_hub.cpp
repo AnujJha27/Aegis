@@ -1,5 +1,7 @@
 #include "daemon/protocol/event_hub.h"
 
+#include <algorithm>
+
 namespace aegis::daemon {
 
 EventHub::Subscription EventHub::subscribe() {

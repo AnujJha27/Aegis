@@ -3,6 +3,7 @@
 #include "daemon/domain/types.h"
 
 #include <condition_variable>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>

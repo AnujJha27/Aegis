@@ -7,10 +7,16 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
 find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(aegis_daemon_session daemon/session/store.cpp daemon/protocol/event_hub.cpp)
 target_include_directories(aegis_daemon_session PUBLIC .)
 target_link_libraries(aegis_daemon_session PUBLIC SQLite3::SQLite3)
+
+add_library(aegis_daemon_api daemon/api/server.cpp daemon/api/routes.cpp)
+target_include_directories(aegis_daemon_api PUBLIC .)
+target_compile_definitions(aegis_daemon_api PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
+target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_session Threads::Threads)
 
 add_library(aegis_core src/core.cpp)
 target_include_directories(aegis_core PUBLIC include)
@@ -75,3 +81,7 @@ add_test(NAME aegis_transcript_test COMMAND aegis_transcript_test)
 add_executable(daemon_store_test tests/daemon_store_test.cpp)
 target_link_libraries(daemon_store_test PRIVATE aegis_daemon_session)
 add_test(NAME daemon_store_test COMMAND daemon_store_test)
+
+add_executable(daemon_api_test tests/daemon_api_test.cpp)
+target_link_libraries(daemon_api_test PRIVATE aegis_daemon_api)
+add_test(NAME daemon_api_test COMMAND daemon_api_test)
