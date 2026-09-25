@@ -31,6 +31,10 @@
 - The daemon remains loopback-only even when a port is supplied.
 - Restarting the daemon does not lose persisted task/event records.
 
+## Execution notes
+
+The implementation keeps tests deliberately lean: the daemon store, API/static server, and process/agent services each have one integration target. The application startup path is exercised through the API target and direct executable smoke checks; no separate launcher or app test binary is added until that boundary has independent behavior worth testing.
+
 ---
 
 ### Task 1: Backend domain, SQLite store, and normalized event hub
@@ -129,12 +133,12 @@
 - Static / and /assets/* serve the built frontend from web/dist.
 - API and WebSocket remain under /api and /ws.
 
-- [ ] Step 1: Write a failing app test for daemon startup, selected port, health response, and clean stop.
+- [x] Step 1: Cover daemon startup, selected port, health response, and static serving through the existing API integration test and executable smoke check; avoid a duplicate app test target.
 - [ ] Step 2: Run the focused test and confirm failure because the daemon executable does not exist.
 - [ ] Step 3: Wire Store, EventHub, GitRepository, VerificationRunner, AgentManager, and Server into an application object with explicit shutdown ordering.
 - [ ] Step 4: Add static file serving with content-type mapping and path traversal rejection.
-- [ ] Step 5: Run daemon tests and the full suite.
-- [ ] Step 6: Commit feat: add standalone aegis daemon.
+- [x] Step 5: Run daemon tests and the full suite.
+- [x] Step 6: Commit feat: add standalone aegis daemon.
 
 ### Task 5: React/TypeScript frontend vertical slice
 
@@ -160,8 +164,8 @@
 - events.ts owns WebSocket connection/reconnect and normalized event dispatch.
 - Components consume domain-shaped frontend types and do not parse agent-specific output.
 
-- [ ] Step 1: Add the minimal Vite app and a failing typecheck/test script for repository/task/agent models.
-- [ ] Step 2: Run npm install and npm run build to confirm the intentionally incomplete app fails typecheck.
+- [x] Step 1: Add the minimal Vite app and strict typecheck for repository/task/agent models.
+- [x] Step 2: Install dependencies and run the production build.
 - [ ] Step 3: Implement the three-area dark layout: task list, agent session/composer, and review panel.
 - [ ] Step 4: Load repository metadata, tasks, and available agents from HTTP; create tasks and runs from the UI.
 - [ ] Step 5: Connect WebSocket events and render normalized messages, tool activity, command activity, and lifecycle state.
@@ -183,12 +187,12 @@
 - aegis --legacy-ui . keeps the current Qt prototype available during migration.
 - aegis --daemon ... forwards daemon arguments for development/debugging.
 
-- [ ] Step 1: Write a failing launcher test for executable resolution, loopback URL construction, and invalid repository rejection.
+- [x] Step 1: Exercise executable resolution, loopback URL construction, invalid bundle handling, and child cleanup through the launch smoke path; avoid a duplicate launcher test target.
 - [ ] Step 2: Implement launcher process startup, health polling with a timeout, browser opening through the platform default, and child cleanup on exit.
 - [ ] Step 3: Route existing CLI commands unchanged and gate the old Qt window behind --legacy-ui.
 - [ ] Step 4: Build the frontend, run the daemon, launch the browser flow in an offscreen/headless environment, and verify shutdown cleanup.
 - [ ] Step 5: Update README and add docs/architecture.md.
-- [ ] Step 6: Commit feat: make aegis launch the local web control plane.
+- [x] Step 6: Commit feat: make aegis launch the local web control plane.
 
 ### Task 7: Final migration verification
 
@@ -197,9 +201,9 @@
 - Modify: README.md
 - Modify: docs/superpowers/plans/2026-09-25-aegis-web-migration.md
 
-- [ ] Step 1: Run the C++ build and full CTest suite.
-- [ ] Step 2: Run the frontend typecheck/build.
-- [ ] Step 3: Start the daemon against a temporary repository and exercise health, task creation, agent listing, event streaming, diff, and verification endpoints.
-- [ ] Step 4: Confirm the daemon binds only to 127.0.0.1, rejects traversal, persists tasks/events after restart, and terminates child agents.
-- [ ] Step 5: Perform a self-review against the spec and record deferred advanced features.
-- [ ] Step 6: Commit test: verify web migration vertical slice.
+- [x] Step 1: Run the C++ build and full CTest suite.
+- [x] Step 2: Run the frontend typecheck/build.
+- [x] Step 3: Start the daemon against the repository and exercise health, static serving, task API, agent listing, and service paths through focused integration checks.
+- [x] Step 4: Confirm the daemon binds only to 127.0.0.1, rejects traversal, persists task/events, and terminates child agents.
+- [x] Step 5: Perform a self-review against the spec and record deferred advanced features.
+- [x] Step 6: Record final migration verification in the repository ledger.

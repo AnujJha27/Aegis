@@ -12,3 +12,5 @@ Task 5: complete — React/TypeScript/Vite frontend added with task rail, termin
 Ruling: no frontend test framework yet — strict typecheck plus production build are the useful first checks for this thin presentation layer.
 Task 6: complete — default `aegis .` starts the local daemon, waits for its selected loopback URL, opens the browser, and cleans up the child on application exit or SIGINT/SIGTERM; `--legacy-ui` preserves the Qt prototype and `--daemon` forwards daemon arguments. Frontend assets install beside the binaries.
 Verification: built `aegis`, ran an offscreen launch smoke, confirmed the local URL path and confirmed no daemon remained after SIGINT.
+Task 7: complete — final C++ build, full CTest, frontend production build, daemon static/health smoke, and clean worktree verification passed. Final CTest result: 12/12 passed.
+Deferred by design: xterm.js fidelity, advanced analysis/graphs, LSP, Solidity/binary lenses, risk/provenance, proposal comparison, and richer handoff/review records.
