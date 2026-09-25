@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(SQLite3 REQUIRED)
+
+add_library(aegis_daemon_session daemon/session/store.cpp daemon/protocol/event_hub.cpp)
+target_include_directories(aegis_daemon_session PUBLIC .)
+target_link_libraries(aegis_daemon_session PUBLIC SQLite3::SQLite3)
 
 add_library(aegis_core src/core.cpp)
 target_include_directories(aegis_core PUBLIC include)
@@ -66,3 +71,7 @@ add_test(NAME aegis_ui_test COMMAND aegis_ui_test)
 add_executable(aegis_transcript_test tests/transcript_test.cpp)
 target_link_libraries(aegis_transcript_test PRIVATE aegis_transcript Qt6::Core)
 add_test(NAME aegis_transcript_test COMMAND aegis_transcript_test)
+
+add_executable(daemon_store_test tests/daemon_store_test.cpp)
+target_link_libraries(daemon_store_test PRIVATE aegis_daemon_session)
+add_test(NAME daemon_store_test COMMAND daemon_store_test)
