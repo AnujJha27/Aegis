@@ -18,6 +18,17 @@ target_include_directories(aegis_daemon_api PUBLIC .)
 target_compile_definitions(aegis_daemon_api PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
 target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_session Threads::Threads)
 
+add_library(aegis_daemon_services
+    daemon/process/process.cpp
+    daemon/repository/git.cpp
+    daemon/verification/runner.cpp
+    daemon/agents/pty_adapter.cpp
+    daemon/agents/codex_adapter.cpp
+    daemon/agents/manager.cpp)
+target_include_directories(aegis_daemon_services PUBLIC .)
+target_link_libraries(aegis_daemon_services PUBLIC aegis_daemon_session Threads::Threads util)
+target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_services)
+
 add_library(aegis_core src/core.cpp)
 target_include_directories(aegis_core PUBLIC include)
 target_link_libraries(aegis_core PUBLIC Qt6::Core)
@@ -85,3 +96,8 @@ add_test(NAME daemon_store_test COMMAND daemon_store_test)
 add_executable(daemon_api_test tests/daemon_api_test.cpp)
 target_link_libraries(daemon_api_test PRIVATE aegis_daemon_api)
 add_test(NAME daemon_api_test COMMAND daemon_api_test)
+
+add_executable(daemon_services_test tests/daemon_services_test.cpp)
+target_link_libraries(daemon_services_test PRIVATE aegis_daemon_services)
+add_test(NAME daemon_services_test COMMAND daemon_services_test)
+set_tests_properties(daemon_services_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

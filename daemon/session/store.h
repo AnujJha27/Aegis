@@ -3,6 +3,7 @@
 #include "daemon/domain/types.h"
 
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@ private:
     void execute(const char *sql) const;
 
     sqlite3 *database_ = nullptr;
+    mutable std::mutex mutex_;
 };
 
 }

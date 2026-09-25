@@ -66,6 +66,7 @@ void Store::execute(const char *sql) const {
 }
 
 Task Store::createTask(std::string prompt, std::string repository) {
+    std::lock_guard lock(mutex_);
     Task task{id("task"), std::move(prompt), std::move(repository), "open", now()};
     Statement statement(database_, "INSERT INTO tasks (id, prompt, repository, status, created_at) VALUES (?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, task.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
@@ -78,6 +79,7 @@ Task Store::createTask(std::string prompt, std::string repository) {
 }
 
 AgentRun Store::startRun(const std::string &taskId, std::string agent) {
+    std::lock_guard lock(mutex_);
     AgentRun run{id("run"), taskId, std::move(agent), "starting", now(), 0};
     Statement statement(database_, "INSERT INTO runs (id, task_id, agent, status, started_at) VALUES (?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, run.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run id");
@@ -90,6 +92,7 @@ AgentRun Store::startRun(const std::string &taskId, std::string agent) {
 }
 
 void Store::appendEvent(const AgentEvent &event) {
+    std::lock_guard lock(mutex_);
     Statement statement(database_, "INSERT INTO events (id, task_id, run_id, type, agent, content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
     const char *values[] = {event.id.c_str(), event.taskId.c_str(), event.runId.c_str(), event.type.c_str(), event.agent.c_str(), event.content.c_str()};
     for (int index = 0; index < 6; ++index)
@@ -99,6 +102,7 @@ void Store::appendEvent(const AgentEvent &event) {
 }
 
 std::vector<Task> Store::tasks() const {
+    std::lock_guard lock(mutex_);
     Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks ORDER BY created_at");
     std::vector<Task> result;
     while (sqlite3_step(statement.get()) == SQLITE_ROW) {
@@ -112,6 +116,7 @@ std::vector<Task> Store::tasks() const {
 }
 
 std::vector<AgentEvent> Store::events(const std::string &taskId) const {
+    std::lock_guard lock(mutex_);
     Statement statement(database_, "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp, rowid");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event task");
     std::vector<AgentEvent> result;

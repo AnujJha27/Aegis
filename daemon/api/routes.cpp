@@ -1,8 +1,13 @@
 #include "daemon/api/routes.h"
 
+#include "daemon/agents/manager.h"
 #include "daemon/protocol/json.h"
+#include "daemon/repository/git.h"
+#include "daemon/verification/runner.h"
 
 #include <nlohmann/json.hpp>
+
+#include <vector>
 
 namespace aegis::daemon::api {
 namespace {
@@ -31,8 +36,21 @@ Response handle(const Request &request, const Context &context) {
         return jsonResponse(boost::beast::http::status::ok, {{"status", "healthy"}});
 
     if (request.method() == boost::beast::http::verb::get && target == "/api/repository") {
-        return jsonResponse(boost::beast::http::status::ok,
-                            {{"path", context.repository.string()}, {"exists", isDirectory(context.repository.string())}});
+        if (context.git) return jsonResponse(boost::beast::http::status::ok, protocol::toJson(context.git->state()));
+        return jsonResponse(boost::beast::http::status::ok, {{"path", context.repository.string()}, {"exists", isDirectory(context.repository.string())}});
+    }
+
+    if (request.method() == boost::beast::http::verb::get && target == "/api/changes") {
+        if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
+        return jsonResponse(boost::beast::http::status::ok, {{"diff", context.git->diff()}});
+    }
+
+    if (request.method() == boost::beast::http::verb::get && target == "/api/agents") {
+        if (!context.agentManager) return error(boost::beast::http::status::internal_server_error, "agents_unavailable", "agent service is unavailable");
+        nlohmann::json result = nlohmann::json::array();
+        for (const auto &agent : context.agentManager->available())
+            result.push_back({{"name", agent.name}, {"available", agent.available}, {"structured", agent.capabilities.structured}, {"interactive", agent.capabilities.interactive}});
+        return jsonResponse(boost::beast::http::status::ok, result);
     }
 
     if (request.method() == boost::beast::http::verb::get && target == "/api/tasks") {
@@ -58,6 +76,54 @@ Response handle(const Request &request, const Context &context) {
             if (prompt.empty()) return error(boost::beast::http::status::bad_request, "missing_prompt", "prompt is required");
             if (!isDirectory(repository)) return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a directory");
             return jsonResponse(boost::beast::http::status::created, protocol::toJson(context.store->createTask(prompt, repository)));
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
+
+    if (request.method() == boost::beast::http::verb::post && target.starts_with("/api/tasks/") && target.ends_with("/runs")) {
+        if (!context.agentManager) return error(boost::beast::http::status::internal_server_error, "agents_unavailable", "agent service is unavailable");
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            const auto agent = body.value("agent", std::string{});
+            const auto taskId = target.substr(11, target.size() - 16);
+            if (agent.empty()) return error(boost::beast::http::status::bad_request, "missing_agent", "agent is required");
+            const auto run = context.agentManager->launch(taskId, agent);
+            if (!run) return error(boost::beast::http::status::bad_request, "agent_start_failed", "agent could not be started");
+            return jsonResponse(boost::beast::http::status::created, protocol::toJson(*run));
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
+
+    if (request.method() == boost::beast::http::verb::post && target.starts_with("/api/runs/") && target.ends_with("/messages")) {
+        if (!context.agentManager) return error(boost::beast::http::status::internal_server_error, "agents_unavailable", "agent service is unavailable");
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            const auto message = body.value("message", std::string{});
+            const auto runId = target.substr(10, target.size() - 19);
+            if (message.empty()) return error(boost::beast::http::status::bad_request, "missing_message", "message is required");
+            if (!context.agentManager->send(runId, message)) return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+            return jsonResponse(boost::beast::http::status::accepted, {{"status", "sent"}});
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
+
+    if (request.method() == boost::beast::http::verb::post && target.starts_with("/api/runs/") && target.ends_with("/interrupt")) {
+        if (!context.agentManager) return error(boost::beast::http::status::internal_server_error, "agents_unavailable", "agent service is unavailable");
+        const auto runId = target.substr(10, target.size() - 20);
+        if (!context.agentManager->interrupt(runId)) return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+        return jsonResponse(boost::beast::http::status::accepted, {{"status", "interrupted"}});
+    }
+
+    if (request.method() == boost::beast::http::verb::post && target == "/api/verify") {
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            if (!body.contains("command") || !body["command"].is_array()) return error(boost::beast::http::status::bad_request, "invalid_command", "command must be an argument array");
+            std::vector<std::string> command;
+            for (const auto &part : body["command"]) command.push_back(part.get<std::string>());
+            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(aegis::daemon::verification::run(command, context.repository)));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
         }
