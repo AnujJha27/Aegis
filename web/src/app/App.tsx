@@ -20,7 +20,7 @@ export function App() {
   const [error, setError] = useState("");
 
   const currentRun = runs.at(-1);
-  const currentEvents = useMemo(() => events.filter((event) => !currentRun || event.runId === currentRun.id), [events, currentRun]);
+  const currentEvents = useMemo(() => events.filter((event) => !selectedTask || event.taskId === selectedTask.id), [events, selectedTask]);
 
   useEffect(() => {
     Promise.all([api.repository(), api.tasks(), api.agents(), api.changes()])
