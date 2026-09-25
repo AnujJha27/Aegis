@@ -19,6 +19,7 @@ struct Context {
     agents::Manager *agentManager = nullptr;
     repository::GitRepository *git = nullptr;
     std::filesystem::path repository;
+    std::filesystem::path webRoot;
 };
 
 using Request = boost::beast::http::request<boost::beast::http::string_body>;

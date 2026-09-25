@@ -29,6 +29,10 @@ target_include_directories(aegis_daemon_services PUBLIC .)
 target_link_libraries(aegis_daemon_services PUBLIC aegis_daemon_session Threads::Threads util)
 target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_services)
 
+add_executable(aegis_daemon daemon/main.cpp daemon/app.cpp)
+target_include_directories(aegis_daemon PRIVATE .)
+target_link_libraries(aegis_daemon PRIVATE aegis_daemon_api aegis_daemon_services)
+
 add_library(aegis_core src/core.cpp)
 target_include_directories(aegis_core PUBLIC include)
 target_link_libraries(aegis_core PUBLIC Qt6::Core)
@@ -62,7 +66,7 @@ if(AEGIS_BUILD_APP)
     add_test(NAME aegis_cli_help COMMAND aegis --help)
 endif()
 
-install(TARGETS aegis RUNTIME DESTINATION bin)
+install(TARGETS aegis aegis_daemon RUNTIME DESTINATION bin)
 
 enable_testing()
 add_executable(aegis_core_test tests/core_test.cpp)

@@ -9,6 +9,7 @@
 
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -36,10 +37,13 @@ http::response<http::string_body> request(std::uint16_t port, http::verb method,
 
 int main() {
     const auto database = std::filesystem::temp_directory_path() / "aegis-daemon-api-test.sqlite";
+    const auto webRoot = std::filesystem::temp_directory_path() / "aegis-daemon-api-web";
     std::filesystem::remove(database);
+    std::filesystem::create_directories(webRoot);
+    std::ofstream(webRoot / "index.html") << "Aegis UI";
     aegis::daemon::Store store(database);
     aegis::daemon::EventHub events;
-    aegis::daemon::api::Server server({&store, &events, std::filesystem::current_path()});
+    aegis::daemon::api::Server server({&store, &events, nullptr, nullptr, std::filesystem::current_path(), webRoot});
     assert(server.start(0));
     assert(server.port() != 0);
 
@@ -59,6 +63,14 @@ int main() {
     assert(invalid.result() == http::status::bad_request);
     assert(invalid.body().find("invalid_json") != std::string::npos);
 
+    const auto index = request(server.port(), http::verb::get, "/");
+    assert(index.result() == http::status::ok);
+    assert(index.body() == "Aegis UI");
+
+    const auto traversal = request(server.port(), http::verb::get, "/../CMakeLists.txt");
+    assert(traversal.result() == http::status::bad_request);
+
     server.stop();
     std::filesystem::remove(database);
+    std::filesystem::remove_all(webRoot);
 }

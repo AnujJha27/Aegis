@@ -8,6 +8,9 @@
 
 #include <system_error>
 #include <thread>
+#include <fstream>
+#include <filesystem>
+#include <cctype>
 
 namespace aegis::daemon::api {
 
@@ -76,9 +79,34 @@ void Server::serve(boost::asio::ip::tcp::socket socket) {
         serveWebSocket(std::move(socket), request);
         return;
     }
-    const auto response = handle(request, context_);
+    const auto response = request.target().starts_with("/api/") ? handle(request, context_) : serveStatic(request);
     boost::beast::http::write(socket, response, error);
     socket.shutdown(boost::asio::ip::tcp::socket::shutdown_send, error);
+}
+
+Response Server::serveStatic(const Request &request) const {
+    const auto target = std::string(request.target());
+    std::string normalized = target;
+    for (auto &character : normalized) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    if (target.find("..") != std::string::npos || normalized.find("%2e") != std::string::npos)
+        return Response{boost::beast::http::status::bad_request, 11};
+    if (context_.webRoot.empty()) return Response{boost::beast::http::status::not_found, 11};
+    const auto root = std::filesystem::absolute(context_.webRoot).lexically_normal();
+    const auto relative = target == "/" ? "index.html" : target.substr(1);
+    const auto candidate = (root / relative).lexically_normal();
+    const auto relativeCandidate = std::filesystem::relative(candidate, root);
+    if (relativeCandidate.empty() || relativeCandidate.string().starts_with(".."))
+        return Response{boost::beast::http::status::bad_request, 11};
+    std::ifstream input(candidate, std::ios::binary);
+    if (!input) return Response{boost::beast::http::status::not_found, 11};
+    std::string body((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    Response response{boost::beast::http::status::ok, 11};
+    const auto extension = candidate.extension().string();
+    const auto contentType = extension == ".html" ? "text/html" : extension == ".js" ? "text/javascript" : extension == ".css" ? "text/css" : "application/octet-stream";
+    response.set(boost::beast::http::field::content_type, contentType);
+    response.body() = std::move(body);
+    response.prepare_payload();
+    return response;
 }
 
 void Server::serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &request) {
