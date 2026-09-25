@@ -10,3 +10,5 @@ Task 4: complete — standalone `aegis_daemon` owns lifecycle and loopback Beast
 Ruling: no extra daemon app test binary — startup is covered by the executable smoke check and API integration path.
 Task 5: complete — React/TypeScript/Vite frontend added with task rail, terminal-first agent session, bottom composer dock, full-width Review/Graphs/Activity drawer, typed API client, normalized WebSocket events, readable PTY output, diff review, and verification action. Verification: `npm run build` and daemon loopback smoke served `/api/health` plus `web/dist/index.html`.
 Ruling: no frontend test framework yet — strict typecheck plus production build are the useful first checks for this thin presentation layer.
+Task 6: complete — default `aegis .` starts the local daemon, waits for its selected loopback URL, opens the browser, and cleans up the child on application exit or SIGINT/SIGTERM; `--legacy-ui` preserves the Qt prototype and `--daemon` forwards daemon arguments. Frontend assets install beside the binaries.
+Verification: built `aegis`, ran an offscreen launch smoke, confirmed the local URL path and confirmed no daemon remained after SIGINT.

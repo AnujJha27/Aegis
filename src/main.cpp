@@ -8,7 +8,6 @@
 #include "aegis/window.h"
 
 #include <QApplication>
-#include <QCoreApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCloseEvent>
@@ -38,6 +37,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QCommandLineParser>
+#include <QCoreApplication>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QJsonDocument>
@@ -47,9 +47,16 @@
 #include <QTextStream>
 
 #include <functional>
+#include <csignal>
 #include <memory>
 
 namespace {
+
+volatile std::sig_atomic_t stopRequested = 0;
+
+void requestStop(int) {
+    stopRequested = 1;
+}
 
 using aegis::app::git;
 using aegis::app::runCommand;
@@ -68,6 +75,88 @@ QString renderReport(const aegis::analysis::Report &report) {
     output += "\n\nCall graph\n" + (report.callGraph.isEmpty() ? "(none)" : report.callGraph.join('\n'));
     output += "\n\nSpecialized lenses\n" + (report.solidity + report.binary + report.systems + report.formal).join('\n');
     return output;
+}
+
+QString daemonExecutable() {
+    const auto sibling = QDir(QCoreApplication::applicationDirPath()).filePath("aegis_daemon");
+    if (QFileInfo(sibling).isExecutable()) return sibling;
+    return QStandardPaths::findExecutable("aegis_daemon");
+}
+
+QString frontendRoot(const QString &repository) {
+    const QStringList candidates = {
+        QDir(QCoreApplication::applicationDirPath()).filePath("web/dist"),
+        QDir::cleanPath(QDir::current().filePath("web/dist")),
+        QDir(repository).filePath("web/dist")};
+    for (const auto &candidate : candidates)
+        if (QFileInfo(candidate).isDir()) return candidate;
+    return {};
+}
+
+int runDaemon(const QStringList &arguments) {
+    const auto executable = daemonExecutable();
+    if (executable.isEmpty()) {
+        QTextStream(stderr) << "aegis: aegis_daemon was not found beside the executable or on PATH\n";
+        return 1;
+    }
+    auto forwarded = arguments.mid(1);
+    forwarded.removeAll("--daemon");
+    return QProcess::execute(executable, forwarded);
+}
+
+int runWebApp(QApplication &app, const QString &repository) {
+    const auto executable = daemonExecutable();
+    const auto webRoot = frontendRoot(repository);
+    if (executable.isEmpty() || webRoot.isEmpty()) {
+        QTextStream(stderr) << "aegis: daemon or frontend bundle not found; build web first\n";
+        return 1;
+    }
+
+    QProcess daemon;
+    daemon.setProcessChannelMode(QProcess::SeparateChannels);
+    const QStringList daemonArguments{"--repo", repository, "--port", "0", "--web-root", webRoot};
+    QString url;
+    QEventLoop startup;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&daemon, &QProcess::readyReadStandardOutput, &startup, [&] {
+        const auto output = QString::fromLocal8Bit(daemon.readAllStandardOutput()).trimmed();
+        if (output.startsWith("http://127.0.0.1:")) {
+            url = output.split('\n').first().trimmed();
+            startup.quit();
+        }
+    });
+    QObject::connect(&daemon, &QProcess::errorOccurred, &startup, [&] { startup.quit(); });
+    QObject::connect(&daemon, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &startup, [&] { startup.quit(); });
+    QObject::connect(&timeout, &QTimer::timeout, &startup, &QEventLoop::quit);
+    daemon.start(executable, daemonArguments);
+    if (!daemon.waitForStarted(1500)) {
+        QTextStream(stderr) << "aegis: could not start local daemon\n";
+        return 1;
+    }
+    timeout.start(5000);
+    startup.exec();
+    if (url.isEmpty()) {
+        QTextStream(stderr) << "aegis: local daemon did not become ready\n" << daemon.readAllStandardError();
+        daemon.terminate();
+        daemon.waitForFinished(1000);
+        return 1;
+    }
+    if (!QDesktopServices::openUrl(QUrl(url)))
+        QTextStream(stderr) << "aegis: browser could not be opened; use " << url << '\n';
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &daemon, [&] {
+        if (daemon.state() == QProcess::NotRunning) return;
+        daemon.terminate();
+        if (!daemon.waitForFinished(1500)) daemon.kill();
+    });
+    std::signal(SIGINT, requestStop);
+    std::signal(SIGTERM, requestStop);
+    QTimer signalPoll;
+    QObject::connect(&signalPoll, &QTimer::timeout, &app, [&] {
+        if (stopRequested) app.quit();
+    });
+    signalPoll.start(100);
+    return app.exec();
 }
 
 int runCli(const QStringList &args) {
@@ -149,6 +238,15 @@ int main(int argc, char **argv) {
         QCoreApplication app(argc, argv);
         return runCli(app.arguments());
     }
+    const auto rawArguments = [&] {
+        QStringList result;
+        for (int index = 0; index < argc; ++index) result << QString::fromLocal8Bit(argv[index]);
+        return result;
+    }();
+    if (rawArguments.contains("--daemon")) {
+        QCoreApplication app(argc, argv);
+        return runDaemon(rawArguments);
+    }
     for (int i = 1; i < argc; ++i) {
         if (QString::fromLocal8Bit(argv[i]) == "--help" || QString::fromLocal8Bit(argv[i]) == "-h") {
             QTextStream(stdout) << "Usage: aegis [path] [--agent shell|codex|claude|opencode] [--paranoia]\n"
@@ -164,6 +262,7 @@ int main(int argc, char **argv) {
     parser.addHelpOption();
     parser.addOption({{"a", "agent"}, "Agent to run: shell, codex, claude, or opencode", "agent", "shell"});
     parser.addOption({"paranoia", "Disable snapshot persistence and keep the session local"});
+    parser.addOption({"legacy-ui", "Open the Qt prototype instead of the browser control plane"});
     parser.addPositionalArgument("path", "Repository path", ".");
     parser.process(app);
     const auto path = parser.positionalArguments().value(0, ".");
@@ -177,6 +276,7 @@ int main(int argc, char **argv) {
         QTextStream(stderr) << "aegis: not a repository directory: " << QDir(actualPath).absolutePath() << '\n';
         return 2;
     }
+    if (!parser.isSet("legacy-ui")) return runWebApp(app, actualPath);
     std::unique_ptr<QMainWindow> window(aegis::app::createWindow(actualPath, agent, parser.isSet("paranoia")));
     window->show();
     return app.exec();

@@ -67,6 +67,7 @@ if(AEGIS_BUILD_APP)
 endif()
 
 install(TARGETS aegis aegis_daemon RUNTIME DESTINATION bin)
+install(DIRECTORY web/dist/ DESTINATION bin/web)
 
 enable_testing()
 add_executable(aegis_core_test tests/core_test.cpp)
