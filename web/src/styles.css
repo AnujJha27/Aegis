@@ -55,6 +55,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .session-heading h1 { margin: 7px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -.025em; color: #edf2f8; }
 .session-id { padding: 5px 8px; border-radius: 4px; background: #161d28; color: var(--muted); font-size: 10px; letter-spacing: .09em; }
 .output-surface { flex: 1; min-height: 300px; overflow: auto; padding: 30px 9%; }
+.terminal-wrap { max-width: 850px; margin: 0 auto 18px; border: 1px solid #252f3d; border-radius: 8px; overflow: hidden; background: #0b0f15; }
+.terminal-label { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #202936; color: var(--faint); font-size: 9px; letter-spacing: .12em; font-weight: 750; }
+.terminal-label span { color: var(--muted); text-transform: capitalize; letter-spacing: 0; font-weight: 400; }
+.xterm-host { min-height: 170px; padding: 12px; }
+.xterm { height: 100%; }
 .empty-output { display: grid; place-items: center; align-content: center; min-height: 100%; text-align: center; color: var(--muted); }
 .empty-icon { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 14px; border: 1px solid #344456; border-radius: 12px; color: var(--accent); font-size: 21px; background: #141d27; }
 .empty-output h2 { margin: 0 0 7px; color: #d1d9e5; font-size: 15px; font-weight: 600; }
