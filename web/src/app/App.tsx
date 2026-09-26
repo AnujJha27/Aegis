@@ -27,6 +27,7 @@ export function App() {
   const [error, setError] = useState("");
   const ptySocket = useRef<WebSocket | null>(null);
   const ptyPending = useRef<string[]>([]);
+  const ptySize = useRef({ cols: 100, rows: 30 });
 
   const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
   const currentEvents = useMemo(() => selectedTask ? events.filter((event) => event.taskId === selectedTask.id) : [], [events, selectedTask]);
@@ -71,6 +72,7 @@ export function App() {
     const socket = connectPty(currentRun.id);
     ptySocket.current = socket;
     socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "resize", ...ptySize.current }));
       for (const input of ptyPending.current) socket.send(input);
       ptyPending.current = [];
     };
@@ -130,6 +132,6 @@ export function App() {
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} onPtyResize={(cols, rows) => { ptySize.current = { cols, rows }; if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(JSON.stringify({ type: "resize", cols, rows })); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
     screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }

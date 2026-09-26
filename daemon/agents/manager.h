@@ -32,6 +32,7 @@ public:
     std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent);
     bool send(const std::string &runId, std::string_view message);
     bool sendPty(const std::string &runId, std::string_view input);
+    bool resizePty(const std::string &runId, unsigned short cols, unsigned short rows);
     bool interrupt(const std::string &runId);
     bool terminate(const std::string &runId);
 

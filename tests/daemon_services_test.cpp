@@ -1,5 +1,6 @@
 #include "daemon/agents/codex_adapter.h"
 #include "daemon/agents/manager.h"
+#include "daemon/agents/pty_adapter.h"
 #include "daemon/process/process.h"
 #include "daemon/protocol/event_hub.h"
 #include "daemon/repository/git.h"
@@ -7,7 +8,10 @@
 #include "daemon/verification/runner.h"
 
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
+#include <mutex>
 
 int main() {
     const auto repository = std::filesystem::current_path();
@@ -37,6 +41,29 @@ int main() {
     assert(codexEvents.size() == 1);
     assert(codexEvents.front().type == "agent.message.completed");
     assert(codexEvents.front().content == "visible answer");
+
+    std::mutex ptyMutex;
+    std::condition_variable ptyOutputChanged;
+    std::string ptyOutput;
+    aegis::daemon::agents::PtyAdapter pty("shell", {"/bin/sh", "-c", "stty size; read line; stty size"},
+        [&](aegis::daemon::AgentEvent event) {
+            if (event.type != "agent.message.delta") return;
+            std::lock_guard lock(ptyMutex);
+            ptyOutput += event.content;
+            ptyOutputChanged.notify_all();
+        });
+    assert(pty.start({"task", "pty-run", "shell", repository}));
+    {
+        std::unique_lock lock(ptyMutex);
+        assert(ptyOutputChanged.wait_for(lock, std::chrono::seconds(2), [&] { return ptyOutput.find("30 100") != std::string::npos; }));
+    }
+    assert(pty.resizePty(120, 40));
+    assert(pty.sendPty("go\n"));
+    {
+        std::unique_lock lock(ptyMutex);
+        assert(ptyOutputChanged.wait_for(lock, std::chrono::seconds(2), [&] { return ptyOutput.find("40 120") != std::string::npos; }));
+    }
+    pty.terminate();
 
     aegis::daemon::Store store(std::filesystem::temp_directory_path() / "aegis-daemon-services-test.sqlite");
     aegis::daemon::EventHub events;

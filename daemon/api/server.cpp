@@ -6,6 +6,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/websocket.hpp>
+#include <nlohmann/json.hpp>
 
 #include <system_error>
 #include <thread>
@@ -146,6 +147,17 @@ void Server::servePtyWebSocket(boost::asio::ip::tcp::socket socket, const Reques
         if (error) break;
         const auto input = boost::beast::buffers_to_string(buffer.data());
         buffer.consume(buffer.size());
+        try {
+            const auto message = nlohmann::json::parse(input);
+            if (message.value("type", std::string{}) == "resize") {
+                const auto cols = message.value("cols", 0);
+                const auto rows = message.value("rows", 0);
+                if (cols > 0 && cols <= 500 && rows > 0 && rows <= 300 && context_.agentManager)
+                    context_.agentManager->resizePty(runId, static_cast<unsigned short>(cols), static_cast<unsigned short>(rows));
+                continue;
+            }
+        } catch (const nlohmann::json::exception &) {
+        }
         if (!context_.agentManager || !context_.agentManager->sendPty(runId, input)) {
             websocket.close(boost::beast::websocket::close_code::policy_error, error);
             return;

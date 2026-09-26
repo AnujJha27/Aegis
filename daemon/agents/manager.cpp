@@ -88,6 +88,12 @@ bool Manager::sendPty(const std::string &runId, std::string_view input) {
     return found != active_.end() && found->second->sendPty(input);
 }
 
+bool Manager::resizePty(const std::string &runId, unsigned short cols, unsigned short rows) {
+    std::lock_guard lock(mutex_);
+    const auto found = active_.find(runId);
+    return found != active_.end() && found->second->resizePty(cols, rows);
+}
+
 bool Manager::interrupt(const std::string &runId) {
     std::lock_guard lock(mutex_);
     const auto found = active_.find(runId);

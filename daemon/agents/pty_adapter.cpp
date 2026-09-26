@@ -4,6 +4,7 @@
 #include <csignal>
 #include <cstring>
 #include <pty.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -40,7 +41,10 @@ bool PtyAdapter::start(const RunContext &context) {
     argv.reserve(command_.size() + 1);
     for (auto &argument : command_) argv.push_back(argument.data());
     argv.push_back(nullptr);
-    pid_ = forkpty(&master_, nullptr, nullptr, nullptr);
+    winsize size{};
+    size.ws_col = 100;
+    size.ws_row = 30;
+    pid_ = forkpty(&master_, nullptr, nullptr, &size);
     if (pid_ < 0) return false;
     if (pid_ == 0) {
         if (chdir(context_.repository.c_str()) != 0) _exit(126);
@@ -75,6 +79,17 @@ bool PtyAdapter::sendPty(std::string_view input) {
         cursor += written;
         remaining -= static_cast<std::size_t>(written);
     }
+    return true;
+}
+
+bool PtyAdapter::resizePty(unsigned short cols, unsigned short rows) {
+    std::lock_guard lock(writeMutex_);
+    if (!running_ || master_ < 0 || cols == 0 || rows == 0) return false;
+    winsize size{};
+    size.ws_col = cols;
+    size.ws_row = rows;
+    if (ioctl(master_, TIOCSWINSZ, &size) != 0) return false;
+    if (pid_ > 0) kill(pid_, SIGWINCH);
     return true;
 }
 

@@ -30,6 +30,7 @@ public:
     virtual bool start(const RunContext &context) = 0;
     virtual void send(std::string_view message) = 0;
     virtual bool sendPty(std::string_view) { return false; }
+    virtual bool resizePty(unsigned short, unsigned short) { return false; }
     virtual void interrupt() = 0;
     virtual void terminate() = 0;
 };

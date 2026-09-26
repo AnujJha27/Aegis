@@ -18,6 +18,7 @@ public:
     bool start(const RunContext &context) override;
     void send(std::string_view message) override;
     bool sendPty(std::string_view input) override;
+    bool resizePty(unsigned short cols, unsigned short rows) override;
     void interrupt() override;
     void terminate() override;
 
