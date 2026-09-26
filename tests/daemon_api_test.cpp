@@ -6,6 +6,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <filesystem>
@@ -54,6 +55,7 @@ int main() {
     const auto created = request(server.port(), http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);
     assert(created.body().find("inspect this") != std::string::npos);
+    const auto taskId = nlohmann::json::parse(created.body()).at("id").get<std::string>();
 
     const auto tasks = request(server.port(), http::verb::get, "/api/tasks");
     assert(tasks.result() == http::status::ok);
@@ -69,6 +71,21 @@ int main() {
 
     const auto traversal = request(server.port(), http::verb::get, "/../CMakeLists.txt");
     assert(traversal.result() == http::status::bad_request);
+
+    const auto handoff = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/handoff");
+    assert(handoff.result() == http::status::ok);
+    assert(handoff.body().find("inspect this") != std::string::npos);
+
+    const auto graph = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/graph");
+    assert(graph.result() == http::status::ok);
+    assert(graph.body().find("nodes") != std::string::npos);
+
+    const auto provenance = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/provenance");
+    assert(provenance.result() == http::status::ok);
+    assert(provenance.body().find("records") != std::string::npos);
+
+    const auto missing = request(server.port(), http::verb::get, "/api/tasks/missing/handoff");
+    assert(missing.result() == http::status::not_found);
 
     server.stop();
     std::filesystem::remove(database);

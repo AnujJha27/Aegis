@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <optional>
 #include <vector>
 
 namespace aegis::daemon::api {
@@ -26,6 +28,26 @@ Response error(boost::beast::http::status status, const char *code, const char *
 
 bool isDirectory(const std::string &path) {
     return std::filesystem::is_directory(std::filesystem::path(path));
+}
+
+std::optional<std::string> pathId(const std::string &target, const std::string &suffix) {
+    constexpr std::string_view prefix = "/api/tasks/";
+    if (!target.starts_with(prefix) || !target.ends_with(suffix)) return std::nullopt;
+    const auto id = target.substr(prefix.size(), target.size() - prefix.size() - suffix.size());
+    return id.empty() ? std::nullopt : std::optional{id};
+}
+
+std::vector<std::string> changedFiles(const std::string &diff) {
+    std::vector<std::string> files;
+    std::size_t start = 0;
+    while (start < diff.size()) {
+        const auto end = diff.find('\n', start);
+        const auto line = diff.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (line.starts_with("+++ b/") && line != "+++ /dev/null") files.push_back(line.substr(6));
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return files;
 }
 
 }
@@ -57,6 +79,56 @@ Response handle(const Request &request, const Context &context) {
         nlohmann::json result = nlohmann::json::array();
         for (const auto &task : context.store->tasks()) result.push_back(protocol::toJson(task));
         return jsonResponse(boost::beast::http::status::ok, result);
+    }
+
+    if (request.method() == boost::beast::http::verb::get) {
+        if (const auto taskId = pathId(target, "/handoff")) {
+            const auto task = context.store->task(*taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            auto events = context.store->events(*taskId);
+            constexpr std::size_t maxEvents = 20;
+            if (events.size() > maxEvents) events.erase(events.begin(), events.end() - maxEvents);
+            for (auto &event : events) {
+                constexpr std::size_t maxContent = 4000;
+                if (event.content.size() > maxContent) event.content.resize(maxContent);
+            }
+            const auto diff = context.git ? context.git->diff() : std::string{};
+            HandoffContext handoff{task->id, task->prompt, std::move(events), diff, changedFiles(diff), std::nullopt};
+            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
+        }
+        if (const auto taskId = pathId(target, "/graph")) {
+            if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            TaskGraph graph{*taskId, {{"task:" + *taskId, "task", "Task"}}, {}};
+            for (const auto &run : context.store->runs(*taskId)) {
+                const auto runNode = "run:" + run.id;
+                graph.nodes.push_back({runNode, "run", run.agent});
+                graph.edges.push_back({"task:" + *taskId, runNode});
+                for (const auto &event : context.store->events(*taskId)) {
+                    if (event.runId != run.id) continue;
+                    const auto eventNode = "event:" + event.id;
+                    graph.nodes.push_back({eventNode, "event", event.type});
+                    graph.edges.push_back({runNode, eventNode});
+                }
+            }
+            const auto files = changedFiles(context.git ? context.git->diff() : std::string{});
+            const auto runId = context.store->runs(*taskId);
+            for (const auto &file : files) {
+                const auto fileNode = "file:" + file;
+                graph.nodes.push_back({fileNode, "file", file});
+                graph.edges.push_back({runId.empty() ? "task:" + *taskId : "run:" + runId.back().id, fileNode});
+            }
+            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(graph));
+        }
+        if (const auto taskId = pathId(target, "/provenance")) {
+            if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            nlohmann::json records = nlohmann::json::array();
+            for (const auto &event : context.store->events(*taskId)) {
+                ProvenanceRecord record{event.id, event.taskId, event.runId, event.agent, event.type, event.timestamp};
+                if (event.type == "file.changed" && !event.content.empty()) record.changedFiles.push_back(event.content);
+                records.push_back(protocol::toJson(record));
+            }
+            return jsonResponse(boost::beast::http::status::ok, {{"task_id", *taskId}, {"records", records}});
+        }
     }
 
     if (request.method() == boost::beast::http::verb::get && target.starts_with("/api/events")) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,43 @@ struct VerificationRun {
     std::string output;
     std::int64_t startedAt = 0;
     std::int64_t finishedAt = 0;
+};
+
+struct HandoffContext {
+    std::string taskId;
+    std::string prompt;
+    std::vector<AgentEvent> recentEvents;
+    std::string diff;
+    std::vector<std::string> changedFiles;
+    std::optional<VerificationRun> verification;
+};
+
+struct GraphNode {
+    std::string id;
+    std::string type;
+    std::string label;
+};
+
+struct GraphEdge {
+    std::string from;
+    std::string to;
+};
+
+struct TaskGraph {
+    std::string taskId;
+    std::vector<GraphNode> nodes;
+    std::vector<GraphEdge> edges;
+};
+
+struct ProvenanceRecord {
+    std::string eventId;
+    std::string taskId;
+    std::string runId;
+    std::string agent;
+    std::string eventType;
+    std::int64_t timestamp = 0;
+    std::string attribution = "unknown";
+    std::vector<std::string> changedFiles;
 };
 
 }

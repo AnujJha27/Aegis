@@ -101,6 +101,34 @@ void Store::appendEvent(const AgentEvent &event) {
     check(sqlite3_step(statement.get()), database_, "insert event");
 }
 
+std::optional<Task> Store::task(const std::string &taskId) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks WHERE id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    return Task{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
+                reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
+                reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
+                reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
+                sqlite3_column_int64(statement.get(), 4)};
+}
+
+std::vector<AgentRun> Store::runs(const std::string &taskId) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT id, task_id, agent, status, started_at, finished_at FROM runs WHERE task_id = ? ORDER BY started_at, rowid");
+    check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run task");
+    std::vector<AgentRun> result;
+    while (sqlite3_step(statement.get()) == SQLITE_ROW) {
+        result.push_back({reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
+                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
+                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
+                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
+                          sqlite3_column_int64(statement.get(), 4),
+                          sqlite3_column_int64(statement.get(), 5)});
+    }
+    return result;
+}
+
 std::vector<Task> Store::tasks() const {
     std::lock_guard lock(mutex_);
     Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks ORDER BY created_at");
