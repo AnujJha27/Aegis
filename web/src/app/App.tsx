@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type Agent, type AgentEvent, type AgentRun, type Repository, type Task, type VerificationRun } from "./api";
+import { api, type Agent, type AgentEvent, type AgentRun, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
 import { connectEvents } from "./events";
 import { Layout } from "../components/Layout";
 
@@ -12,10 +12,13 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [diff, setDiff] = useState("");
   const [verification, setVerification] = useState<VerificationRun>();
+  const [handoff, setHandoff] = useState<HandoffContext>();
+  const [graph, setGraph] = useState<TaskGraph>();
+  const [provenance, setProvenance] = useState<ProvenanceRecord[]>([]);
   const [selectedAgent, setSelectedAgent] = useState("shell");
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity">();
+  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity" | "handoff">();
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [error, setError] = useState("");
 
@@ -42,7 +45,7 @@ export function App() {
 
   useEffect(() => {
     if (!selectedTask) return;
-    Promise.all([api.events(selectedTask.id), api.changes()]).then(([loadedEvents, changes]) => { setEvents(loadedEvents); setDiff(changes.diff); });
+    Promise.all([api.events(selectedTask.id), api.changes(), api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]).then(([loadedEvents, changes, loadedHandoff, loadedGraph, loadedProvenance]) => { setEvents(loadedEvents); setDiff(changes.diff); setHandoff(loadedHandoff); setGraph(loadedGraph); setProvenance(loadedProvenance.records); });
   }, [selectedTask]);
 
   async function createTask() {
@@ -84,5 +87,5 @@ export function App() {
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
     run={currentRun} events={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
-    drawer={drawer} onDrawer={setDrawer} diff={diff} verification={verification} onVerify={verify} error={error} />;
+    drawer={drawer} onDrawer={setDrawer} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }

@@ -1,0 +1,11 @@
+import { useState } from "react";
+import type { HandoffContext } from "../../app/api";
+import { readable } from "../../app/events";
+
+export function HandoffPanel({ context }: { context?: HandoffContext }) {
+  const [copied, setCopied] = useState(false);
+  if (!context) return <p className="muted">Select a task to build handoff context.</p>;
+  const text = [`Task: ${context.prompt}`, "", "Recent activity:", ...context.recent_events.map((event) => `- ${event.agent}: ${readable(event.content).slice(0, 800)}`), "", "Changed files:", ...context.changed_files.map((file) => `- ${file}`), "", "Diff:", context.diff].join("\n");
+  async function copy() { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1200); }
+  return <div className="handoff"><div className="handoff-actions"><span>Bounded context · {context.recent_events.length} recent events</span><button onClick={copy}>{copied ? "Copied" : "Copy context"}</button></div><div className="handoff-grid"><div><div className="subheading">TASK</div><p>{context.prompt}</p><div className="subheading">CHANGED FILES</div>{context.changed_files.length ? <ul>{context.changed_files.map((file) => <li key={file}>{file}</li>)}</ul> : <p className="muted">No changed files.</p>}</div><div><div className="subheading">RECENT ACTIVITY</div><pre>{context.recent_events.map((event) => `${event.agent} · ${event.type}\n${readable(event.content).slice(0, 800)}`).join("\n\n") || "No activity yet."}</pre></div></div></div>;
+}
