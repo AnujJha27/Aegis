@@ -67,6 +67,35 @@ Response handle(const Request &request, const Context &context) {
         return jsonResponse(boost::beast::http::status::ok, {{"diff", context.git->diff()}});
     }
 
+    if (request.method() == boost::beast::http::verb::get && target == "/api/git/status") {
+        if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
+        nlohmann::json files = nlohmann::json::array();
+        for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
+        return jsonResponse(boost::beast::http::status::ok, {{"repository", protocol::toJson(context.git->state())}, {"files", files}});
+    }
+
+    if (request.method() == boost::beast::http::verb::post && (target == "/api/git/stage" || target == "/api/git/unstage" || target == "/api/git/commit")) {
+        if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            std::string output;
+            bool succeeded = false;
+            if (target == "/api/git/commit") {
+                const auto message = body.value("message", std::string{});
+                succeeded = context.git->commit(message, output);
+            } else {
+                const auto path = body.value("path", std::string{});
+                succeeded = target == "/api/git/stage" ? context.git->stage(path, output) : context.git->unstage(path, output);
+            }
+            if (!succeeded) return error(boost::beast::http::status::bad_request, "git_operation_failed", output.empty() ? "Git operation failed" : output.c_str());
+            nlohmann::json files = nlohmann::json::array();
+            for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
+            return jsonResponse(boost::beast::http::status::ok, {{"repository", protocol::toJson(context.git->state())}, {"files", files}, {"output", output}});
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
+
     if (request.method() == boost::beast::http::verb::get && target == "/api/agents") {
         if (!context.agentManager) return error(boost::beast::http::status::internal_server_error, "agents_unavailable", "agent service is unavailable");
         nlohmann::json result = nlohmann::json::array();
@@ -79,6 +108,14 @@ Response handle(const Request &request, const Context &context) {
         nlohmann::json result = nlohmann::json::array();
         for (const auto &task : context.store->tasks()) result.push_back(protocol::toJson(task));
         return jsonResponse(boost::beast::http::status::ok, result);
+    }
+
+    if (request.method() == boost::beast::http::verb::get) {
+        if (const auto taskId = pathId(target, "/runs")) {
+            nlohmann::json result = nlohmann::json::array();
+            for (const auto &run : context.store->runs(*taskId)) result.push_back(protocol::toJson(run));
+            return jsonResponse(boost::beast::http::status::ok, result);
+        }
     }
 
     if (request.method() == boost::beast::http::verb::get) {

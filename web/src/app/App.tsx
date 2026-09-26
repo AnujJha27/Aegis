@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { api, type Agent, type AgentEvent, type AgentRun, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
-import { connectEvents } from "./events";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type Agent, type AgentEvent, type AgentRun, type GitChange, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
+import { connectEvents, connectPty } from "./events";
 import { Layout } from "../components/Layout";
 
 export function App() {
@@ -9,8 +9,10 @@ export function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task>();
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [diff, setDiff] = useState("");
+  const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [verification, setVerification] = useState<VerificationRun>();
   const [handoff, setHandoff] = useState<HandoffContext>();
   const [graph, setGraph] = useState<TaskGraph>();
@@ -19,20 +21,25 @@ export function App() {
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [drawer, setDrawer] = useState<"review" | "graphs" | "activity" | "handoff">();
+  const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [error, setError] = useState("");
+  const ptySocket = useRef<WebSocket | null>(null);
+  const ptyPending = useRef<string[]>([]);
 
-  const currentRun = runs.at(-1);
+  const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
   const currentEvents = useMemo(() => events.filter((event) => !selectedTask || event.taskId === selectedTask.id), [events, selectedTask]);
+  const runFinished = currentRun ? events.some((event) => event.runId === currentRun.id && (event.type === "agent.finished" || event.type === "agent.failed")) : false;
 
   useEffect(() => {
-    Promise.all([api.repository(), api.tasks(), api.agents(), api.changes()])
-      .then(([repo, loadedTasks, loadedAgents, changes]) => {
+    Promise.all([api.repository(), api.tasks(), api.agents(), api.changes(), api.gitStatus()])
+      .then(([repo, loadedTasks, loadedAgents, changes, git]) => {
         setRepository(repo);
         setTasks(loadedTasks);
         setSelectedTask(loadedTasks[0]);
         setAgents(loadedAgents);
         setDiff(changes.diff);
+        setGitChanges(git.files);
         setBusy("Ready");
         if (loadedAgents.find((agent) => agent.available)?.name) setSelectedAgent(loadedAgents.find((agent) => agent.available)!.name);
       })
@@ -40,13 +47,45 @@ export function App() {
     return connectEvents((event) => {
       setEvents((current) => [...current.slice(-499), event]);
       if (event.type === "agent.finished" || event.type === "agent.failed") setBusy(event.type === "agent.failed" ? "Agent failed" : "Ready");
+      if (event.type === "file.changed") void refreshGit(event.taskId).catch((reason: Error) => setError(reason.message));
     });
   }, []);
 
   useEffect(() => {
     if (!selectedTask) return;
-    Promise.all([api.events(selectedTask.id), api.changes(), api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]).then(([loadedEvents, changes, loadedHandoff, loadedGraph, loadedProvenance]) => { setEvents(loadedEvents); setDiff(changes.diff); setHandoff(loadedHandoff); setGraph(loadedGraph); setProvenance(loadedProvenance.records); });
+    setRuns([]);
+    setSelectedRunId("");
+    Promise.all([api.events(selectedTask.id), api.runs(selectedTask.id), api.changes(), api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]).then(([loadedEvents, loadedRuns, changes, loadedHandoff, loadedGraph, loadedProvenance]) => { setEvents(loadedEvents); setRuns(loadedRuns); setSelectedRunId(loadedRuns.at(-1)?.id ?? ""); setDiff(changes.diff); setHandoff(loadedHandoff); setGraph(loadedGraph); setProvenance(loadedProvenance.records); });
   }, [selectedTask]);
+
+  useEffect(() => {
+    if (!currentRun || !agents.find((agent) => agent.name === currentRun.agent)?.interactive || runFinished) {
+      ptySocket.current?.close();
+      ptySocket.current = null;
+      return;
+    }
+    ptyPending.current = [];
+    const socket = connectPty(currentRun.id);
+    ptySocket.current = socket;
+    socket.onopen = () => {
+      for (const input of ptyPending.current) socket.send(input);
+      ptyPending.current = [];
+    };
+    return () => { socket.close(); if (ptySocket.current === socket) ptySocket.current = null; };
+  }, [currentRun?.id, agents, runFinished]);
+
+  async function refreshGit(taskId = selectedTask?.id) {
+    const [git, changes] = await Promise.all([api.gitStatus(), api.changes()]);
+    setRepository(git.repository);
+    setGitChanges(git.files);
+    setDiff(changes.diff);
+    if (taskId) {
+      const [loadedHandoff, loadedGraph, loadedProvenance] = await Promise.all([api.handoff(taskId), api.graph(taskId), api.provenance(taskId)]);
+      setHandoff(loadedHandoff);
+      setGraph(loadedGraph);
+      setProvenance(loadedProvenance.records);
+    }
+  }
 
   async function createTask() {
     if (!taskPrompt.trim()) return;
@@ -64,6 +103,7 @@ export function App() {
     try {
       const run = await api.launch(selectedTask.id, selectedAgent);
       setRuns((current) => [...current, run]);
+      setSelectedRunId(run.id);
       setBusy(`${selectedAgent} active`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not start agent"); setBusy("Start failed"); }
   }
@@ -86,6 +126,6 @@ export function App() {
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} events={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
-    drawer={drawer} onDrawer={setDrawer} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
+    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} events={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }

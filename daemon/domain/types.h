@@ -42,6 +42,12 @@ struct RepositoryState {
     int deletions = 0;
 };
 
+struct GitChange {
+    std::string path;
+    std::string indexStatus;
+    std::string worktreeStatus;
+};
+
 struct VerificationRun {
     std::string id;
     std::string command;

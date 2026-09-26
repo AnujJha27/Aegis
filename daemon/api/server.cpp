@@ -1,6 +1,7 @@
 #include "daemon/api/server.h"
 
 #include "daemon/protocol/json.h"
+#include "daemon/agents/manager.h"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -75,9 +76,15 @@ void Server::serve(boost::asio::ip::tcp::socket socket) {
     boost::system::error_code error;
     boost::beast::http::read(socket, buffer, request, error);
     if (error) return;
-    if (boost::beast::websocket::is_upgrade(request) && request.target() == "/ws/events") {
-        serveWebSocket(std::move(socket), request);
-        return;
+    if (boost::beast::websocket::is_upgrade(request)) {
+        if (request.target() == "/ws/events") {
+            serveWebSocket(std::move(socket), request);
+            return;
+        }
+        if (request.target().starts_with("/ws/pty/")) {
+            servePtyWebSocket(std::move(socket), request);
+            return;
+        }
     }
     const auto response = request.target().starts_with("/api/") ? handle(request, context_) : serveStatic(request);
     boost::beast::http::write(socket, response, error);
@@ -123,6 +130,27 @@ void Server::serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &
     }
     context_.events->unsubscribe(subscription);
     websocket.close(boost::beast::websocket::close_code::normal, error);
+}
+
+void Server::servePtyWebSocket(boost::asio::ip::tcp::socket socket, const Request &request) {
+    boost::beast::websocket::stream<boost::asio::ip::tcp::socket> websocket(std::move(socket));
+    boost::system::error_code error;
+    websocket.accept(request, error);
+    if (error) return;
+    const std::string target(request.target());
+    const auto runId = target.substr(std::string("/ws/pty/").size());
+    websocket.read_message_max(16 * 1024);
+    boost::beast::flat_buffer buffer;
+    while (running_) {
+        websocket.read(buffer, error);
+        if (error) break;
+        const auto input = boost::beast::buffers_to_string(buffer.data());
+        buffer.consume(buffer.size());
+        if (!context_.agentManager || !context_.agentManager->sendPty(runId, input)) {
+            websocket.close(boost::beast::websocket::close_code::policy_error, error);
+            return;
+        }
+    }
 }
 
 }

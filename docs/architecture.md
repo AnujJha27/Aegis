@@ -50,8 +50,13 @@ The API is intentionally small:
 | GET | `/api/health` | daemon health |
 | GET | `/api/repository` | branch and change summary |
 | GET | `/api/changes` | current diff |
+| GET | `/api/git/status` | changed paths with index/worktree state |
+| POST | `/api/git/stage` | stage one repository-relative path |
+| POST | `/api/git/unstage` | unstage one path without discarding its worktree changes |
+| POST | `/api/git/commit` | commit the staged index with a message |
 | GET | `/api/agents` | available adapters and capabilities |
 | GET | `/api/tasks` | persisted tasks |
+| GET | `/api/tasks/:id/runs` | task run history |
 | GET | `/api/events?task_id=...` | persisted task events |
 | GET | `/api/tasks/:id/handoff` | bounded context preview for another agent |
 | GET | `/api/tasks/:id/graph` | task/run/event/file relationship graph |
@@ -75,7 +80,7 @@ Errors use one shape:
 
 ## WebSocket event protocol
 
-`GET /ws/events` upgrades to a WebSocket. Events are normalized before they reach the browser:
+`GET /ws/events` upgrades to a WebSocket. Events are normalized before they reach the browser. Interactive runs also accept terminal input on `GET /ws/pty/:run_id`; WebSocket text frames are written as raw PTY bytes, while PTY output continues through the normalized event stream.
 
 ```json
 {
@@ -89,7 +94,7 @@ Errors use one shape:
 }
 ```
 
-The first slice uses lifecycle, message, command, and failure events. Raw PTY bytes are rendered by xterm.js at the presentation edge; agent-specific JSON parsing stays in the daemon adapter.
+The first slice uses lifecycle, message, command, file-change, and failure events. File-change events are emitted when Git status changes during a run; they do not claim attribution for files already in the same state before the run. Raw PTY bytes are rendered by xterm.js at the presentation edge; agent-specific JSON parsing stays in the daemon adapter.
 
 ## Agent adapters
 

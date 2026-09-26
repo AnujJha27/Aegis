@@ -3,8 +3,26 @@
 #include "daemon/process/process.h"
 
 #include <sstream>
+#include <filesystem>
 
 namespace aegis::daemon::repository {
+namespace {
+
+bool validPath(const std::string &value, std::string &error) {
+    const std::filesystem::path path(value);
+    if (value.empty() || value.find('\0') != std::string::npos || path.is_absolute() || value == ".") {
+        error = "path must name a repository-relative file";
+        return false;
+    }
+    for (const auto &component : path)
+        if (component == "..") {
+            error = "path must stay inside the repository";
+            return false;
+        }
+    return true;
+}
+
+}
 
 GitRepository::GitRepository(std::filesystem::path path) : path_(std::move(path)) {}
 
@@ -41,8 +59,52 @@ RepositoryState GitRepository::state() const {
     return result;
 }
 
+std::vector<GitChange> GitRepository::changes() const {
+    const auto output = process::run({"git", "status", "--porcelain=v1", "-z", "--untracked-files=all"}, path_).output;
+    std::vector<GitChange> result;
+    for (std::size_t offset = 0; offset + 3 <= output.size();) {
+        const auto index = output[offset];
+        const auto worktree = output[offset + 1];
+        const auto pathStart = offset + 3;
+        const auto pathEnd = output.find('\0', pathStart);
+        if (pathEnd == std::string::npos) break;
+        result.push_back({output.substr(pathStart, pathEnd - pathStart), std::string(1, index), std::string(1, worktree)});
+        offset = pathEnd + 1;
+        if ((index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') && offset < output.size()) {
+            const auto originalEnd = output.find('\0', offset);
+            if (originalEnd == std::string::npos) break;
+            offset = originalEnd + 1;
+        }
+    }
+    return result;
+}
+
 std::string GitRepository::diff() const {
     return process::run({"git", "diff", "HEAD", "--no-ext-diff", "--no-color"}, path_).output;
+}
+
+bool GitRepository::stage(const std::string &path, std::string &error) const {
+    if (!validPath(path, error)) return false;
+    const auto result = process::run({"git", "add", "--", ":(literal)" + path}, path_);
+    error = result.output;
+    return result.exitCode == 0;
+}
+
+bool GitRepository::unstage(const std::string &path, std::string &error) const {
+    if (!validPath(path, error)) return false;
+    const auto result = process::run({"git", "restore", "--staged", "--", ":(literal)" + path}, path_);
+    error = result.output;
+    return result.exitCode == 0;
+}
+
+bool GitRepository::commit(const std::string &message, std::string &error) const {
+    if (message.empty() || message.find('\0') != std::string::npos) {
+        error = "commit message is required";
+        return false;
+    }
+    const auto result = process::run({"git", "commit", "-m", message}, path_);
+    error = result.output;
+    return result.exitCode == 0;
 }
 
 }

@@ -2,8 +2,11 @@
 
 #include "daemon/agents/codex_adapter.h"
 #include "daemon/agents/pty_adapter.h"
+#include "daemon/repository/git.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <atomic>
 #include <unistd.h>
 
 namespace aegis::daemon::agents {
@@ -47,7 +50,18 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     if (agent == "codex") adapter = std::make_unique<CodexAdapter>(std::move(sink));
     else if (agent == "shell") adapter = std::make_unique<PtyAdapter>(agent, std::vector<std::string>{"/bin/sh"}, std::move(sink));
     else adapter = std::make_unique<PtyAdapter>(agent, std::vector<std::string>{agent}, std::move(sink));
-    if (!adapter->start({taskId, run.id, agent, repository_})) return std::nullopt;
+    repository::GitRepository git(repository_);
+    std::map<std::string, std::string> baseline;
+    for (const auto &change : git.changes()) baseline[change.path] = change.indexStatus + change.worktreeStatus;
+    {
+        std::lock_guard lock(provenanceMutex_);
+        initialGitStatus_[run.id] = std::move(baseline);
+    }
+    if (!adapter->start({taskId, run.id, agent, repository_})) {
+        std::lock_guard lock(provenanceMutex_);
+        initialGitStatus_.erase(run.id);
+        return std::nullopt;
+    }
     std::lock_guard lock(mutex_);
     active_[run.id] = std::move(adapter);
     return run;
@@ -59,6 +73,12 @@ bool Manager::send(const std::string &runId, std::string_view message) {
     if (found == active_.end()) return false;
     found->second->send(message);
     return true;
+}
+
+bool Manager::sendPty(const std::string &runId, std::string_view input) {
+    std::lock_guard lock(mutex_);
+    const auto found = active_.find(runId);
+    return found != active_.end() && found->second->sendPty(input);
 }
 
 bool Manager::interrupt(const std::string &runId) {
@@ -85,6 +105,26 @@ bool Manager::terminate(const std::string &runId) {
 void Manager::publish(AgentEvent event) {
     store_.appendEvent(event);
     events_.publish(event);
+    if (event.type != "agent.finished" && event.type != "agent.failed") return;
+    std::map<std::string, std::string> baseline;
+    {
+        std::lock_guard lock(provenanceMutex_);
+        const auto found = initialGitStatus_.find(event.runId);
+        if (found == initialGitStatus_.end()) return;
+        baseline = std::move(found->second);
+        initialGitStatus_.erase(found);
+    }
+    repository::GitRepository git(repository_);
+    static std::atomic_uint64_t sequence = 0;
+    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (const auto &change : git.changes()) {
+        const auto current = change.indexStatus + change.worktreeStatus;
+        const auto previous = baseline.find(change.path);
+        if (previous != baseline.end() && previous->second == current) continue;
+        AgentEvent fileEvent{"file-" + std::to_string(timestamp) + "-" + std::to_string(++sequence), event.taskId, event.runId, "file.changed", event.agent, change.path, timestamp};
+        store_.appendEvent(fileEvent);
+        events_.publish(fileEvent);
+    }
 }
 
 }

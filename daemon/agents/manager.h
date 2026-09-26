@@ -29,6 +29,7 @@ public:
     std::vector<AgentInfo> available() const;
     std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent);
     bool send(const std::string &runId, std::string_view message);
+    bool sendPty(const std::string &runId, std::string_view input);
     bool interrupt(const std::string &runId);
     bool terminate(const std::string &runId);
 
@@ -40,6 +41,8 @@ private:
     EventHub &events_;
     mutable std::mutex mutex_;
     std::map<std::string, std::unique_ptr<Adapter>> active_;
+    std::mutex provenanceMutex_;
+    std::map<std::string, std::map<std::string, std::string>> initialGitStatus_;
 };
 
 }

@@ -26,6 +26,7 @@ private:
     void acceptLoop();
     void serve(boost::asio::ip::tcp::socket socket);
     void serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &request);
+    void servePtyWebSocket(boost::asio::ip::tcp::socket socket, const Request &request);
     Response serveStatic(const Request &request) const;
 
     Context context_;

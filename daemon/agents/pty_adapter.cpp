@@ -55,22 +55,27 @@ bool PtyAdapter::start(const RunContext &context) {
 }
 
 void PtyAdapter::send(std::string_view message) {
-    std::lock_guard lock(writeMutex_);
-    if (!running_ || master_ < 0) return;
     std::string line(message);
     line += '\n';
-    const char *cursor = line.data();
-    auto remaining = line.size();
+    if (!sendPty(line)) return;
+    publish("agent.message.sent", std::string(message));
+}
+
+bool PtyAdapter::sendPty(std::string_view input) {
+    std::lock_guard lock(writeMutex_);
+    if (!running_ || master_ < 0) return false;
+    const char *cursor = input.data();
+    auto remaining = input.size();
     while (remaining > 0) {
         const auto written = ::write(master_, cursor, remaining);
         if (written < 0) {
             if (errno == EINTR) continue;
-            return;
+            return false;
         }
         cursor += written;
         remaining -= static_cast<std::size_t>(written);
     }
-    publish("agent.message.sent", std::string(message));
+    return true;
 }
 
 void PtyAdapter::interrupt() {

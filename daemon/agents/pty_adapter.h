@@ -17,6 +17,7 @@ public:
     Capabilities capabilities() const override { return {false, true}; }
     bool start(const RunContext &context) override;
     void send(std::string_view message) override;
+    bool sendPty(std::string_view input) override;
     void interrupt() override;
     void terminate() override;
 

@@ -75,11 +75,13 @@ See [docs/architecture.md](docs/architecture.md) for the domain model, API, even
 
 - task list and task creation;
 - agent availability and explicit agent launch;
+- interactive PTY input and output, plus per-task run history;
 - persistent task/run/event records;
 - terminal/session output in the primary surface;
 - one bottom composer for agent selection, status, prompt, send, and loading state;
 - Review, Graphs, and Activity as a full-width secondary drawer;
 - native SVG task/run/change graphs, provenance evidence rows, and bounded handoff context;
+- full-screen Session/Review toggle; Review includes changed-file staging, unstaging, and local commits;
 - current Git diff and configurable verification command;
 - Codex JSON events and PTY output normalized at the daemon boundary.
 

@@ -22,6 +22,10 @@ inline nlohmann::json toJson(const RepositoryState &state) {
     return {{"path", state.path}, {"branch", state.branch}, {"files", state.files}, {"insertions", state.insertions}, {"deletions", state.deletions}};
 }
 
+inline nlohmann::json toJson(const GitChange &change) {
+    return {{"path", change.path}, {"index_status", change.indexStatus}, {"worktree_status", change.worktreeStatus}};
+}
+
 inline nlohmann::json toJson(const VerificationRun &run) {
     return {{"id", run.id}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
 }
