@@ -41,6 +41,7 @@ int main() {
     aegis::daemon::AgentEvent event;
     assert(hub.wait(subscription, event, std::chrono::milliseconds(10)));
     assert(event.type == "agent.finished");
+    assert(!hub.wait(subscription, event, std::chrono::milliseconds(10)));
     hub.unsubscribe(subscription);
     assert(!hub.wait(subscription, event, std::chrono::milliseconds(1)));
 }

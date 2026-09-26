@@ -29,7 +29,7 @@ export function App() {
   const ptyPending = useRef<string[]>([]);
 
   const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
-  const currentEvents = useMemo(() => events.filter((event) => !selectedTask || event.taskId === selectedTask.id), [events, selectedTask]);
+  const currentEvents = useMemo(() => selectedTask ? events.filter((event) => event.taskId === selectedTask.id) : [], [events, selectedTask]);
   const runFinished = currentRun ? events.some((event) => event.runId === currentRun.id && (event.type === "agent.finished" || event.type === "agent.failed")) : false;
 
   useEffect(() => {

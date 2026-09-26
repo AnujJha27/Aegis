@@ -39,8 +39,7 @@ void EventHub::publish(const AgentEvent &event) {
 bool EventHub::wait(const Subscription &subscription, AgentEvent &event, std::chrono::milliseconds timeout) {
     if (!subscription) return false;
     std::unique_lock lock(subscription->mutex);
-    subscription->condition.wait_for(lock, timeout, [&] { return subscription->closed || !subscription->events.empty(); });
-    if (subscription->events.empty()) return !subscription->closed;
+    if (!subscription->condition.wait_for(lock, timeout, [&] { return subscription->closed || !subscription->events.empty(); }) || subscription->events.empty()) return false;
     event = std::move(subscription->events.front());
     subscription->events.pop_front();
     return true;

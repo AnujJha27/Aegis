@@ -124,7 +124,7 @@ void Server::serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &
     const auto subscription = context_.events->subscribe();
     while (running_) {
         AgentEvent event;
-        if (!context_.events->wait(subscription, event, std::chrono::milliseconds(250))) break;
+        if (!context_.events->wait(subscription, event, std::chrono::milliseconds(250))) continue;
         websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
         if (error) break;
     }
