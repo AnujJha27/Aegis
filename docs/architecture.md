@@ -53,6 +53,9 @@ The API is intentionally small:
 | GET | `/api/agents` | available adapters and capabilities |
 | GET | `/api/tasks` | persisted tasks |
 | GET | `/api/events?task_id=...` | persisted task events |
+| GET | `/api/tasks/:id/handoff` | bounded context preview for another agent |
+| GET | `/api/tasks/:id/graph` | task/run/event/file relationship graph |
+| GET | `/api/tasks/:id/provenance` | evidence links for task activity |
 | POST | `/api/tasks` | create a task |
 | POST | `/api/tasks/:id/runs` | launch an agent run |
 | POST | `/api/runs/:id/messages` | send a prompt/message |
@@ -86,7 +89,7 @@ Errors use one shape:
 }
 ```
 
-The first slice uses lifecycle, message, command, and failure events. Raw PTY control sequences are presentation noise and are cleaned at the UI edge; agent-specific JSON parsing stays in the daemon adapter.
+The first slice uses lifecycle, message, command, and failure events. Raw PTY bytes are rendered by xterm.js at the presentation edge; agent-specific JSON parsing stays in the daemon adapter.
 
 ## Agent adapters
 
@@ -110,4 +113,4 @@ Each opened repository gets `.aegis/aegis.sqlite`. The daemon initializes its sc
 
 ## Deliberately deferred
 
-Binary analysis, Solidity views, LSP exploration, architecture/call graphs, risk heatmaps, investigation boards, time machine, multi-agent proposal comparison, advanced provenance, and xterm.js fidelity are not part of the first migration slice. The task/run/event boundaries leave room for them without putting their rendering concepts into the daemon core.
+Binary analysis, Solidity views, LSP exploration, compiler-level architecture/call graphs, risk heatmaps, investigation boards, time machine, and multi-agent proposal comparison remain deferred. The current provenance is intentionally conservative and only claims file attribution when an explicit file event exists.

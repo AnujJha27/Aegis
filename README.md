@@ -79,10 +79,11 @@ See [docs/architecture.md](docs/architecture.md) for the domain model, API, even
 - terminal/session output in the primary surface;
 - one bottom composer for agent selection, status, prompt, send, and loading state;
 - Review, Graphs, and Activity as a full-width secondary drawer;
+- native SVG task/run/change graphs, provenance evidence rows, and bounded handoff context;
 - current Git diff and configurable verification command;
 - Codex JSON events and PTY output normalized at the daemon boundary.
 
-Advanced analysis, Solidity/binary lenses, LSP exploration, architecture graphs, risk heatmaps, proposal comparison, and provenance remain deferred until the vertical slice is solid.
+Compiler-level analysis, Solidity/binary lenses, LSP exploration, architecture/call graphs, risk heatmaps, and proposal comparison remain deferred until the vertical slice is solid.
 
 ## CLI
 
