@@ -17,6 +17,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 980px; background: radial-gradient(circle at 72% -18%, rgba(40, 78, 82, .2), transparent 38%), linear-gradient(rgba(124, 167, 166, .025) 1px, transparent 1px), linear-gradient(90deg, rgba(124, 167, 166, .025) 1px, transparent 1px), var(--bg); background-size: auto, 32px 32px, 32px 32px, auto; }
 button, textarea, select { font: inherit; }
+select { color-scheme: dark; }
+option { color: #dce7f5; background: #0f141b; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 .app-shell { min-height: 100vh; display: flex; flex-direction: column; }

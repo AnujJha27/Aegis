@@ -5,10 +5,15 @@
 #include <atomic>
 #include <optional>
 #include <thread>
+#include <vector>
 
 namespace aegis::daemon::agents {
 
 std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
+                                             const std::string &taskId,
+                                             const std::string &runId,
+                                             const std::string &agent);
+std::vector<AgentEvent> parseCodexJsonOutput(std::string_view output,
                                              const std::string &taskId,
                                              const std::string &runId,
                                              const std::string &agent);

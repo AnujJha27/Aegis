@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <sstream>
+#include <vector>
 
 namespace aegis::daemon::agents {
 namespace {
@@ -45,6 +46,18 @@ std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
     return std::nullopt;
 }
 
+std::vector<AgentEvent> parseCodexJsonOutput(std::string_view output,
+                                             const std::string &taskId,
+                                             const std::string &runId,
+                                             const std::string &agent) {
+    std::istringstream lines{std::string(output)};
+    std::vector<AgentEvent> events;
+    std::string line;
+    while (std::getline(lines, line))
+        if (auto event = parseCodexJsonLine(line, taskId, runId, agent)) events.push_back(std::move(*event));
+    return events;
+}
+
 CodexAdapter::CodexAdapter(EventSink sink) : sink_(std::move(sink)) {}
 
 CodexAdapter::~CodexAdapter() {
@@ -65,18 +78,11 @@ void CodexAdapter::send(std::string_view message) {
     const auto prompt = std::string(message);
     worker_ = std::thread([this, prompt] {
         const auto result = process::run({"codex", "exec", "--json", "--color", "never", prompt}, context_.repository, std::chrono::seconds(120));
-        std::istringstream lines(result.output);
-        std::string line;
-        bool parsed = false;
-        while (std::getline(lines, line)) {
-            if (const auto event = parseCodexJsonLine(line, context_.taskId, context_.runId, "codex")) {
-                parsed = true;
-                if (sink_) sink_(*event);
-            }
-        }
-        if (!parsed && !result.output.empty() && sink_)
-            sink_({eventId(), context_.taskId, context_.runId, "agent.message.completed", "codex", result.output, now()});
-        if (sink_) sink_({eventId(), context_.taskId, context_.runId, result.exitCode == 0 ? "agent.finished" : "agent.failed", "codex", result.output, now()});
+        for (const auto &event : parseCodexJsonOutput(result.output, context_.taskId, context_.runId, "codex"))
+            if (sink_) sink_(event);
+        if (sink_) sink_({eventId(), context_.taskId, context_.runId,
+                          result.exitCode == 0 ? "agent.finished" : "agent.failed", "codex",
+                          result.exitCode == 0 ? "" : "Codex exited with status " + std::to_string(result.exitCode), now()});
     });
 }
 

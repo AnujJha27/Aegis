@@ -30,6 +30,7 @@ export function App() {
 
   const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
   const currentEvents = useMemo(() => selectedTask ? events.filter((event) => event.taskId === selectedTask.id) : [], [events, selectedTask]);
+  const currentRunEvents = useMemo(() => currentRun ? currentEvents.filter((event) => event.runId === currentRun.id) : [], [currentEvents, currentRun]);
   const runFinished = currentRun ? events.some((event) => event.runId === currentRun.id && (event.type === "agent.finished" || event.type === "agent.failed")) : false;
 
   useEffect(() => {
@@ -129,6 +130,6 @@ export function App() {
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} events={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
     screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }

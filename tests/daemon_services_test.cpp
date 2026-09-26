@@ -28,6 +28,16 @@ int main() {
     assert(event->type == "agent.message.completed");
     assert(event->content == "implemented");
 
+    const auto codexEvents = aegis::daemon::agents::parseCodexJsonOutput(
+        R"({"type":"item.completed","item":{"type":"reasoning","text":"private instructions"}})"
+        "\n"
+        R"({"type":"item.completed","item":{"type":"agent_message","text":"visible answer"}})"
+        "\n"
+        R"({"type":"turn.completed","usage":{"input_tokens":10}})", "task", "run", "codex");
+    assert(codexEvents.size() == 1);
+    assert(codexEvents.front().type == "agent.message.completed");
+    assert(codexEvents.front().content == "visible answer");
+
     aegis::daemon::Store store(std::filesystem::temp_directory_path() / "aegis-daemon-services-test.sqlite");
     aegis::daemon::EventHub events;
     aegis::daemon::agents::Manager manager(repository, store, events);
