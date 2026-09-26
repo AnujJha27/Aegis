@@ -149,7 +149,7 @@ bool GitRepository::pull(std::string &output) const {
         output = "commit or discard working tree changes before pulling";
         return false;
     }
-    const auto result = process::run({"git", "pull", "--ff-only"}, path_, std::chrono::seconds(120));
+    const auto result = process::run({"git", "-c", "pull.ff=true", "pull", "--no-rebase"}, path_, std::chrono::seconds(120));
     output = result.output;
     return result.exitCode == 0;
 }

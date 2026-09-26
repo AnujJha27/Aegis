@@ -55,7 +55,7 @@ The API is intentionally small:
 | POST | `/api/git/unstage` | unstage one path without discarding its worktree changes |
 | POST | `/api/git/commit` | commit the staged index with a message |
 | POST | `/api/git/branch` | switch to an existing local branch (clean tree and no running agent required) |
-| POST | `/api/git/pull` | fast-forward-only pull (clean tree and no running agent required) |
+| POST | `/api/git/pull` | merge-based pull, fast-forwarding when possible (clean tree and no running agent required) |
 | POST | `/api/git/push` | push the current branch to its configured upstream |
 | GET | `/api/agents` | available adapters and capabilities |
 | GET | `/api/tasks` | persisted tasks |
