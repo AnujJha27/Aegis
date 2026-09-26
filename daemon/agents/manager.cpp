@@ -42,6 +42,11 @@ std::vector<AgentInfo> Manager::available() const {
             {"opencode", executable("opencode"), {false, true}}};
 }
 
+bool Manager::hasRunningRuns() const {
+    std::lock_guard lock(provenanceMutex_);
+    return !running_.empty();
+}
+
 std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent) {
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
     const auto run = store_.startRun(taskId, agent);
@@ -56,10 +61,12 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     {
         std::lock_guard lock(provenanceMutex_);
         initialGitStatus_[run.id] = std::move(baseline);
+        running_.insert(run.id);
     }
     if (!adapter->start({taskId, run.id, agent, repository_})) {
         std::lock_guard lock(provenanceMutex_);
         initialGitStatus_.erase(run.id);
+        running_.erase(run.id);
         return std::nullopt;
     }
     std::lock_guard lock(mutex_);
@@ -98,6 +105,11 @@ bool Manager::terminate(const std::string &runId) {
         adapter = std::move(found->second);
         active_.erase(found);
     }
+    {
+        std::lock_guard lock(provenanceMutex_);
+        running_.erase(runId);
+        initialGitStatus_.erase(runId);
+    }
     adapter->terminate();
     return true;
 }
@@ -109,6 +121,7 @@ void Manager::publish(AgentEvent event) {
     std::map<std::string, std::string> baseline;
     {
         std::lock_guard lock(provenanceMutex_);
+        running_.erase(event.runId);
         const auto found = initialGitStatus_.find(event.runId);
         if (found == initialGitStatus_.end()) return;
         baseline = std::move(found->second);

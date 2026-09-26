@@ -2,8 +2,10 @@
 
 #include "daemon/process/process.h"
 
-#include <sstream>
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <sstream>
 
 namespace aegis::daemon::repository {
 namespace {
@@ -79,6 +81,26 @@ std::vector<GitChange> GitRepository::changes() const {
     return result;
 }
 
+std::vector<std::string> GitRepository::branches() const {
+    const auto output = process::run({"git", "branch", "--format=%(refname:short)"}, path_).output;
+    std::vector<std::string> result;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line)) if (!line.empty()) result.push_back(line);
+    return result;
+}
+
+std::string GitRepository::currentBranch() const {
+    auto branch = process::run({"git", "branch", "--show-current"}, path_).output;
+    if (!branch.empty() && branch.back() == '\n') branch.pop_back();
+    return branch;
+}
+
+bool GitRepository::clean() const {
+    const auto result = process::run({"git", "status", "--porcelain=v1", "-z", "--untracked-files=all"}, path_);
+    return result.exitCode == 0 && result.output.empty();
+}
+
 std::string GitRepository::diff() const {
     return process::run({"git", "diff", "HEAD", "--no-ext-diff", "--no-color"}, path_).output;
 }
@@ -104,6 +126,37 @@ bool GitRepository::commit(const std::string &message, std::string &error) const
     }
     const auto result = process::run({"git", "commit", "-m", message}, path_);
     error = result.output;
+    return result.exitCode == 0;
+}
+
+bool GitRepository::switchBranch(const std::string &branch, std::string &error) const {
+    const auto available = branches();
+    if (std::find(available.begin(), available.end(), branch) == available.end()) {
+        error = "branch does not exist locally";
+        return false;
+    }
+    if (!clean()) {
+        error = "commit or discard working tree changes before switching branches";
+        return false;
+    }
+    const auto result = process::run({"git", "switch", "--", branch}, path_);
+    error = result.output;
+    return result.exitCode == 0;
+}
+
+bool GitRepository::pull(std::string &output) const {
+    if (!clean()) {
+        output = "commit or discard working tree changes before pulling";
+        return false;
+    }
+    const auto result = process::run({"git", "pull", "--ff-only"}, path_, std::chrono::seconds(120));
+    output = result.output;
+    return result.exitCode == 0;
+}
+
+bool GitRepository::push(std::string &output) const {
+    const auto result = process::run({"git", "push"}, path_, std::chrono::seconds(120));
+    output = result.output;
     return result.exitCode == 0;
 }
 

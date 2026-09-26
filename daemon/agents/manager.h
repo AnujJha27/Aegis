@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ public:
     ~Manager();
 
     std::vector<AgentInfo> available() const;
+    bool hasRunningRuns() const;
     std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent);
     bool send(const std::string &runId, std::string_view message);
     bool sendPty(const std::string &runId, std::string_view input);
@@ -41,7 +43,8 @@ private:
     EventHub &events_;
     mutable std::mutex mutex_;
     std::map<std::string, std::unique_ptr<Adapter>> active_;
-    std::mutex provenanceMutex_;
+    mutable std::mutex provenanceMutex_;
+    std::set<std::string> running_;
     std::map<std::string, std::map<std::string, std::string>> initialGitStatus_;
 };
 

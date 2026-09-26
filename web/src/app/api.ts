@@ -8,7 +8,7 @@ export type Repository = {
 };
 
 export type GitChange = { path: string; index_status: string; worktree_status: string };
-export type GitStatus = { repository: Repository; files: GitChange[]; output?: string };
+export type GitStatus = { repository: Repository; files: GitChange[]; branches: string[]; current_branch: string; clean: boolean; agent_running: boolean; output?: string };
 
 export type Task = {
   id: string;
@@ -101,6 +101,9 @@ export const api = {
   stage: (path: string) => request<GitStatus>("/api/git/stage", { method: "POST", body: JSON.stringify({ path }) }),
   unstage: (path: string) => request<GitStatus>("/api/git/unstage", { method: "POST", body: JSON.stringify({ path }) }),
   commit: (message: string) => request<GitStatus>("/api/git/commit", { method: "POST", body: JSON.stringify({ message }) }),
+  switchBranch: (branch: string) => request<GitStatus>("/api/git/branch", { method: "POST", body: JSON.stringify({ branch }) }),
+  pull: () => request<GitStatus>("/api/git/pull", { method: "POST", body: "{}" }),
+  push: () => request<GitStatus>("/api/git/push", { method: "POST", body: "{}" }),
   runs: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/runs`)).map(run),
   handoff: async (taskId: string) => {
     const context = await request<Omit<HandoffContext, "recent_events"> & { recent_events: Record<string, unknown>[] }>(`/api/tasks/${taskId}/handoff`);

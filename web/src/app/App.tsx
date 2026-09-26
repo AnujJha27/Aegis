@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Agent, type AgentEvent, type AgentRun, type GitChange, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
+import { api, type Agent, type AgentEvent, type AgentRun, type GitChange, type GitStatus, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
 import { connectEvents, connectPty } from "./events";
 import { Layout } from "../components/Layout";
 
@@ -13,6 +13,7 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [diff, setDiff] = useState("");
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
+  const [gitStatus, setGitStatus] = useState<GitStatus>();
   const [verification, setVerification] = useState<VerificationRun>();
   const [handoff, setHandoff] = useState<HandoffContext>();
   const [graph, setGraph] = useState<TaskGraph>();
@@ -40,6 +41,7 @@ export function App() {
         setAgents(loadedAgents);
         setDiff(changes.diff);
         setGitChanges(git.files);
+        setGitStatus(git);
         setBusy("Ready");
         if (loadedAgents.find((agent) => agent.available)?.name) setSelectedAgent(loadedAgents.find((agent) => agent.available)!.name);
       })
@@ -78,6 +80,7 @@ export function App() {
     const [git, changes] = await Promise.all([api.gitStatus(), api.changes()]);
     setRepository(git.repository);
     setGitChanges(git.files);
+    setGitStatus(git);
     setDiff(changes.diff);
     if (taskId) {
       const [loadedHandoff, loadedGraph, loadedProvenance] = await Promise.all([api.handoff(taskId), api.graph(taskId), api.provenance(taskId)]);
@@ -127,5 +130,5 @@ export function App() {
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
     run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} events={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
-    screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
+    screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }

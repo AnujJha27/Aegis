@@ -1,4 +1,4 @@
-import type { Agent, AgentEvent, AgentRun, GitChange, HandoffContext, ProvenanceRecord, Repository, Task, TaskGraph, VerificationRun } from "../app/api";
+import type { Agent, AgentEvent, AgentRun, GitChange, GitStatus, HandoffContext, ProvenanceRecord, Repository, Task, TaskGraph, VerificationRun } from "../app/api";
 import { AgentPicker } from "../features/agents/AgentPicker";
 import { ReviewPanel } from "../features/review/ReviewPanel";
 import { TaskList } from "../features/tasks/TaskList";
@@ -12,7 +12,7 @@ type Props = {
   run?: AgentRun; runs: AgentRun[]; onSelectRun: (id: string) => void; runFinished: boolean; onPtyInput: (input: string) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string;
   screen: "session" | "review"; onScreen: (screen: "session" | "review") => void;
   drawer: "review" | "graphs" | "activity" | "handoff"; onDrawer: (drawer: "review" | "graphs" | "activity" | "handoff") => void;
-  diff: string; gitChanges: GitChange[]; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string;
+  diff: string; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string;
 };
 
 export function Layout(props: Props) {
@@ -23,7 +23,7 @@ export function Layout(props: Props) {
       <AgentSession task={props.selectedTask} run={props.run} runs={props.runs} runFinished={props.runFinished} onPtyInput={props.onPtyInput} events={props.events} prompt={props.prompt} onPrompt={props.onPrompt} onSend={props.onSend} busy={props.busy}>
         <AgentPicker agents={props.agents} selected={props.selectedAgent} onChange={props.onAgentChange} onLaunch={props.onLaunch} runs={props.runs} run={props.run} onSelectRun={props.onSelectRun} />
       </AgentSession>
-    </section> : <><nav className="review-tabs"><button className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Changes</button><button className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button><button className={props.drawer === "handoff" ? "active" : ""} onClick={() => props.onDrawer("handoff")}>Handoff</button></nav><ReviewPanel view={props.drawer} diff={props.diff} events={props.events} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} onGitChanged={props.onGitChanged} verification={<VerificationPanel run={props.verification} onVerify={props.onVerify} />} /></>}
+    </section> : <><nav className="review-tabs"><button className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Changes</button><button className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button><button className={props.drawer === "handoff" ? "active" : ""} onClick={() => props.onDrawer("handoff")}>Handoff</button></nav><ReviewPanel view={props.drawer} diff={props.diff} events={props.events} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={<VerificationPanel run={props.verification} onVerify={props.onVerify} />} /></>}
     {props.error && <button className="error-toast" onClick={() => window.location.reload()}>{props.error} <span>reload</span></button>}
   </main>;
 }

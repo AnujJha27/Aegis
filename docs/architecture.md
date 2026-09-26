@@ -50,10 +50,13 @@ The API is intentionally small:
 | GET | `/api/health` | daemon health |
 | GET | `/api/repository` | branch and change summary |
 | GET | `/api/changes` | current diff |
-| GET | `/api/git/status` | changed paths with index/worktree state |
+| GET | `/api/git/status` | changed paths, local branches, current branch, and operation safety state |
 | POST | `/api/git/stage` | stage one repository-relative path |
 | POST | `/api/git/unstage` | unstage one path without discarding its worktree changes |
 | POST | `/api/git/commit` | commit the staged index with a message |
+| POST | `/api/git/branch` | switch to an existing local branch (clean tree and no running agent required) |
+| POST | `/api/git/pull` | fast-forward-only pull (clean tree and no running agent required) |
+| POST | `/api/git/push` | push the current branch to its configured upstream |
 | GET | `/api/agents` | available adapters and capabilities |
 | GET | `/api/tasks` | persisted tasks |
 | GET | `/api/tasks/:id/runs` | task run history |

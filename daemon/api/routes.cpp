@@ -50,6 +50,17 @@ std::vector<std::string> changedFiles(const std::string &diff) {
     return files;
 }
 
+nlohmann::json gitSnapshot(const Context &context) {
+    nlohmann::json files = nlohmann::json::array();
+    for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
+    return {{"repository", protocol::toJson(context.git->state())},
+            {"files", files},
+            {"branches", context.git->branches()},
+            {"current_branch", context.git->currentBranch()},
+            {"clean", context.git->clean()},
+            {"agent_running", context.agentManager && context.agentManager->hasRunningRuns()}};
+}
+
 }
 
 Response handle(const Request &request, const Context &context) {
@@ -69,9 +80,30 @@ Response handle(const Request &request, const Context &context) {
 
     if (request.method() == boost::beast::http::verb::get && target == "/api/git/status") {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
-        nlohmann::json files = nlohmann::json::array();
-        for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
-        return jsonResponse(boost::beast::http::status::ok, {{"repository", protocol::toJson(context.git->state())}, {"files", files}});
+        return jsonResponse(boost::beast::http::status::ok, gitSnapshot(context));
+    }
+
+    if (request.method() == boost::beast::http::verb::post && (target == "/api/git/branch" || target == "/api/git/pull" || target == "/api/git/push")) {
+        if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
+        if (target != "/api/git/push" && context.agentManager && context.agentManager->hasRunningRuns())
+            return error(boost::beast::http::status::conflict, "agent_running", "stop the active agent before switching branches or pulling");
+        try {
+            const auto body = request.body().empty() ? nlohmann::json::object() : nlohmann::json::parse(request.body());
+            std::string output;
+            bool succeeded = false;
+            if (target == "/api/git/branch") {
+                const auto branch = body.value("branch", std::string{});
+                succeeded = context.git->switchBranch(branch, output);
+            } else if (target == "/api/git/pull") succeeded = context.git->pull(output);
+            else succeeded = context.git->push(output);
+            if (!succeeded) return jsonResponse(target == "/api/git/push" || target == "/api/git/pull" ? boost::beast::http::status::bad_gateway : boost::beast::http::status::bad_request,
+                                                {{"error", {{"code", "git_operation_failed"}, {"message", output.empty() ? "Git operation failed" : output}}}});
+            auto result = gitSnapshot(context);
+            result["output"] = output;
+            return jsonResponse(boost::beast::http::status::ok, result);
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
     }
 
     if (request.method() == boost::beast::http::verb::post && (target == "/api/git/stage" || target == "/api/git/unstage" || target == "/api/git/commit")) {
@@ -88,9 +120,9 @@ Response handle(const Request &request, const Context &context) {
                 succeeded = target == "/api/git/stage" ? context.git->stage(path, output) : context.git->unstage(path, output);
             }
             if (!succeeded) return error(boost::beast::http::status::bad_request, "git_operation_failed", output.empty() ? "Git operation failed" : output.c_str());
-            nlohmann::json files = nlohmann::json::array();
-            for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
-            return jsonResponse(boost::beast::http::status::ok, {{"repository", protocol::toJson(context.git->state())}, {"files", files}, {"output", output}});
+            auto result = gitSnapshot(context);
+            result["output"] = output;
+            return jsonResponse(boost::beast::http::status::ok, result);
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
         }
