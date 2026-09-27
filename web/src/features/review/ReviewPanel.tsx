@@ -1,13 +1,20 @@
-import type { AgentEvent, GitChange, GitStatus, HandoffContext, ProvenanceRecord, TaskGraph } from "../../app/api";
-import type { ReactNode } from "react";
-import { GitPanel } from "../git/GitPanel";
+import type { AgentEvent, GitChange, GitStatus, HandoffContext, ProvenanceRecord, TaskGraph, VerificationRun } from "../../app/api";
+import { CodeWorkspace } from "../code/CodeWorkspace";
 import { GraphView } from "./GraphView";
 import { HandoffPanel } from "./HandoffPanel";
 import { ProvenancePanel } from "./ProvenancePanel";
 
-export function ReviewPanel({ view, diff, events, verification, graph, provenance, handoff, gitChanges, gitStatus, onGitChanged }: { view: "review" | "graphs" | "activity" | "handoff"; diff: string; events: AgentEvent[]; verification: ReactNode; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void> }) {
-  if (view === "graphs") return <section className="review-content"><div className="drawer-title"><span>Graphs</span><small>Task context map</small></div><GraphView graph={graph} /></section>;
-  if (view === "activity") return <section className="review-content"><div className="drawer-title"><span>Activity</span><small>{events.length} events · evidence trail</small></div><ProvenancePanel records={provenance} /></section>;
-  if (view === "handoff") return <section className="review-content"><div className="drawer-title"><span>Handoff</span><small>Bounded context for the next agent</small></div><HandoffPanel context={handoff} /></section>;
-  return <section className="review-screen"><div className="review-grid"><div><div className="subheading">DIFF</div><pre className="diff">{diff || "No changes yet."}</pre></div><div><GitPanel changes={gitChanges} status={gitStatus} onChanged={onGitChanged} /><div className="subheading verification-heading">VERIFICATION</div>{verification}</div></div></section>;
+type Props = { view: "review" | "graphs" | "activity"; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; onVerify: () => void; openFilePath?: string; onOpenFile: (path: string) => void };
+
+export function ReviewPanel(props: Props) {
+  if (props.view === "graphs") return <section className="review-content"><div className="drawer-title"><span>Graphs</span><small>Task context map</small></div><GraphView graph={props.graph} /></section>;
+  if (props.view === "activity") return <section className="review-content"><div className="drawer-title"><span>Activity</span><small>{props.events.length} events · task evidence</small></div>
+    <section className="activity-file-links"><h2>Files mentioned by agent activity</h2>
+      {props.events.filter((event) => event.type === "file.changed" && event.content.trim()).map((event) => <button key={event.id} onClick={() => props.onOpenFile(event.content.trim())}><span>{event.content.trim()}</span><small>{event.agent} · run {event.runId.slice(0, 8)} · Open diff ↗</small></button>)}
+      {!props.events.some((event) => event.type === "file.changed" && event.content.trim()) && <p className="muted">No file-change events recorded for this task.</p>}
+    </section>
+    <ProvenancePanel records={props.provenance} />
+    <details className="activity-handoff"><summary>Handoff context</summary><HandoffPanel context={props.handoff} /></details>
+  </section>;
+  return <CodeWorkspace taskPrompt={props.taskPrompt} events={props.events} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} onVerify={props.onVerify} handoff={props.handoff} openFilePath={props.openFilePath} />;
 }

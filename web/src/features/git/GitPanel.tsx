@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type GitChange, type GitStatus } from "../../app/api";
 
-export function GitPanel({ changes, status, onChanged }: { changes: GitChange[]; status?: GitStatus; onChanged: () => Promise<void> }) {
+export function GitPanel({ changes, status, onChanged, showFiles = true }: { changes: GitChange[]; status?: GitStatus; onChanged: () => Promise<void>; showFiles?: boolean }) {
   const [message, setMessage] = useState("");
   const [branch, setBranch] = useState(status?.current_branch ?? "");
   const [busy, setBusy] = useState(false);
@@ -36,8 +36,8 @@ export function GitPanel({ changes, status, onChanged }: { changes: GitChange[];
       <button disabled={busy} onClick={() => void action(api.push)}>Push</button>
     </div>
     {status?.agent_running && <small className="muted">Stop the active agent before switching branches or pulling.</small>}
-    {!changes.length && <p className="muted">Working tree clean.</p>}
-    <div className="git-files">{changes.map((file) => { const isStaged = file.index_status !== " " && file.index_status !== "?"; const isUnstaged = file.worktree_status !== " " || file.index_status === "?"; return <div className="git-file" key={file.path}><code>{file.path}</code><span className="git-file-status">{file.index_status}{file.worktree_status}</span><div className="git-file-actions">{isUnstaged && <button disabled={busy} onClick={() => void action(() => api.stage(file.path))}>Stage</button>}{isStaged && <button disabled={busy} onClick={() => void action(() => api.unstage(file.path))}>Unstage</button>}</div></div>; })}</div>
+    {showFiles && !changes.length && <p className="muted">Working tree clean.</p>}
+    {showFiles && <div className="git-files">{changes.map((file) => { const isStaged = file.index_status !== " " && file.index_status !== "?"; const isUnstaged = file.worktree_status !== " " || file.index_status === "?"; return <div className="git-file" key={file.path}><code>{file.path}</code><span className="git-file-status">{file.index_status}{file.worktree_status}</span><div className="git-file-actions">{isUnstaged && <button disabled={busy} onClick={() => void action(() => api.stage(file.path))}>Stage</button>}{isStaged && <button disabled={busy} onClick={() => void action(() => api.unstage(file.path))}>Unstage</button>}</div></div>; })}</div>}
     <form className="git-commit" onSubmit={(event) => { event.preventDefault(); if (message.trim()) void action(async () => { const result = await api.commit(message.trim()); setMessage(""); return result; }); }}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Commit message" aria-label="Commit message" /><button disabled={busy || !staged.length || !message.trim()}>{busy ? "Working…" : "Commit staged"}</button></form>
     {notice && <p className="git-notice">{notice}</p>}{error && <p className="git-error" role="alert">{error}</p>}
   </section>;

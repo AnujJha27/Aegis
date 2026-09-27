@@ -44,7 +44,7 @@ std::string languageFor(const std::filesystem::path &path) {
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (extension == ".cpp" || extension == ".cc" || extension == ".cxx" || extension == ".h" || extension == ".hpp" || extension == ".hh") return "cpp";
-    if (extension == ".c") return "c";
+    if (extension == ".c") return "cpp";
     if (extension == ".ts" || extension == ".tsx") return "typescript";
     if (extension == ".js" || extension == ".jsx" || extension == ".mjs" || extension == ".cjs") return "javascript";
     if (extension == ".json") return "json";
@@ -56,8 +56,8 @@ std::string languageFor(const std::filesystem::path &path) {
     if (extension == ".rs") return "rust";
     if (extension == ".go") return "go";
     if (extension == ".yaml" || extension == ".yml") return "yaml";
-    if (extension == ".toml") return "toml";
-    if (extension == ".sol") return "sol";
+    if (extension == ".toml") return "ini";
+    if (extension == ".sol") return "solidity";
     return "plaintext";
 }
 
@@ -73,6 +73,12 @@ std::string statusFor(const GitChange &change) {
 
 bool containsNul(std::string_view content) {
     return content.find('\0') != std::string_view::npos;
+}
+
+bool internalPath(const std::string &path) {
+    for (const auto &component : std::filesystem::path(path))
+        if (component == ".git" || component == ".aegis" || component == "node_modules") return true;
+    return false;
 }
 
 std::string objectIdFromOutput(const std::string &output, FileSource source, const std::string &path) {
@@ -136,7 +142,7 @@ std::optional<FileSource> parseFileSource(const std::string &source) {
     return std::nullopt;
 }
 
-FileListing Files::list(const std::string &path, FileScope scope, std::size_t limit) const {
+FileListing Files::list(const std::string &path, FileScope scope, std::size_t limit, bool recursive) const {
     const auto relative = relativePath(path, true);
     const auto prefix = relative == "." ? std::string{} : relative.generic_string() + "/";
     if (!git_.validRepository_ && scope == FileScope::all) return {};
@@ -146,16 +152,17 @@ FileListing Files::list(const std::string &path, FileScope scope, std::size_t li
     bool truncated = false;
     std::vector<std::string> paths;
     if (scope == FileScope::changed) {
-        for (const auto &[file, change] : changes) paths.push_back(file);
-    } else paths = gitPaths(prefix, truncated);
+        for (const auto &[file, change] : changes) if (!internalPath(file)) paths.push_back(file);
+    } else paths = gitPaths(recursive ? std::string{} : prefix, truncated);
 
     std::map<std::string, FileEntry> entries;
     for (const auto &file : paths) {
+        if (internalPath(file)) continue;
         if (!prefix.empty() && !file.starts_with(prefix)) continue;
         const auto tail = prefix.empty() ? file : file.substr(prefix.size());
         if (tail.empty()) continue;
         const auto slash = tail.find('/');
-        const bool directory = slash != std::string::npos;
+        const bool directory = slash != std::string::npos && !recursive;
         const auto entryPath = prefix + (directory ? tail.substr(0, slash) : tail);
         auto [where, inserted] = entries.try_emplace(entryPath);
         auto &entry = where->second;
@@ -189,6 +196,7 @@ FileListing Files::list(const std::string &path, FileScope scope, std::size_t li
                 if (where->second.gitStatus.empty()) where->second.gitStatus = statusFor(change->second);
             }
         }
+        if (entries.size() > limit) { truncated = true; break; }
     }
 
     FileListing result;

@@ -15,6 +15,7 @@ std::optional<Response> files(const Request &request, const Context &context) {
     bool validQuery = true;
     const auto requestedPath = queryValue(target, "path", validQuery);
     const auto scopeText = queryValue(target, "scope", validQuery);
+    const auto recursiveText = queryValue(target, "recursive", validQuery);
     const auto sourceText = queryValue(target, "source", validQuery);
     const auto baseText = queryValue(target, "base", validQuery);
     const auto targetText = queryValue(target, "target", validQuery);
@@ -26,7 +27,8 @@ std::optional<Response> files(const Request &request, const Context &context) {
             const auto scope = scopeText.value_or("changed") == "all" ? repository::FileScope::all : repository::FileScope::changed;
             if (scopeText && *scopeText != "all" && *scopeText != "changed")
                 return error(boost::beast::http::status::bad_request, "invalid_scope", "scope must be changed or all");
-            const auto listing = context.files->list(requestedPath.value_or(""), scope);
+            const auto recursive = recursiveText && (*recursiveText == "1" || *recursiveText == "true");
+            const auto listing = context.files->list(requestedPath.value_or(""), scope, 500, recursive);
             nlohmann::json entries = nlohmann::json::array();
             for (const auto &entry : listing.entries) entries.push_back(protocol::toJson(entry));
             return jsonResponse(boost::beast::http::status::ok, {{"entries", entries}, {"truncated", listing.truncated}});

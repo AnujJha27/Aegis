@@ -83,7 +83,11 @@ int main() {
 
     const auto nested = files.list("nested", aegis::daemon::repository::FileScope::all);
     assert(std::any_of(nested.entries.begin(), nested.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp"; }));
+    const auto quickOpen = files.list("", aegis::daemon::repository::FileScope::all, 500, true);
+    assert(std::any_of(quickOpen.entries.begin(), quickOpen.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp" && entry.kind == "file"; }));
+    assert(std::none_of(quickOpen.entries.begin(), quickOpen.entries.end(), [](const auto &entry) { return entry.path.starts_with(".aegis/") || entry.path.starts_with("node_modules/"); }));
     const auto changed = files.list("", aegis::daemon::repository::FileScope::changed);
+    assert(std::any_of(changed.entries.begin(), changed.entries.end(), [](const auto &entry) { return entry.path == "nested" && entry.changed; }));
     assert(std::none_of(changed.entries.begin(), changed.entries.end(), [](const auto &entry) { return entry.path.starts_with(".aegis/") || entry.path.starts_with("node_modules/"); }));
     assert(std::none_of(changed.entries.begin(), changed.entries.end(), [](const auto &entry) { return entry.path == ".git"; }));
 

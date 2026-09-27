@@ -1,6 +1,7 @@
 import type { Agent, AgentEvent, AgentRun, GitChange, GitStatus, HandoffContext, ProvenanceRecord, Repository, Task, TaskGraph, VerificationRun } from "../app/api";
 import { AgentPicker } from "../features/agents/AgentPicker";
-import { ReviewPanel } from "../features/review/ReviewPanel";
+import { lazy, Suspense } from "react";
+const ReviewPanel = lazy(() => import("../features/review/ReviewPanel").then((module) => ({ default: module.ReviewPanel })));
 import { TaskList } from "../features/tasks/TaskList";
 import { AgentSession } from "../features/terminal/AgentSession";
 import { VerificationPanel } from "../features/verification/VerificationPanel";
@@ -11,8 +12,8 @@ type Props = {
   agents: Agent[]; selectedAgent: string; onAgentChange: (agent: string) => void; onLaunch: () => void;
   run?: AgentRun; runs: AgentRun[]; onSelectRun: (id: string) => void; onDeleteRun: (id: string) => void; runFinished: boolean; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; activityEvents: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string;
   screen: "session" | "review"; onScreen: (screen: "session" | "review") => void;
-  drawer: "review" | "graphs" | "activity" | "handoff"; onDrawer: (drawer: "review" | "graphs" | "activity" | "handoff") => void;
-  diff: string; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string;
+  drawer: "review" | "graphs" | "activity"; onDrawer: (drawer: "review" | "graphs" | "activity") => void;
+  gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string; openFilePath?: string; onOpenFile: (path: string) => void;
 };
 
 export function Layout(props: Props) {
@@ -23,7 +24,7 @@ export function Layout(props: Props) {
       <AgentSession task={props.selectedTask} run={props.run} runs={props.runs} runFinished={props.runFinished} interactive={Boolean(props.agents.find((agent) => agent.name === props.run?.agent)?.interactive)} onPtyInput={props.onPtyInput} onPtyResize={props.onPtyResize} events={props.events} prompt={props.prompt} onPrompt={props.onPrompt} onSend={props.onSend} busy={props.busy}>
         <AgentPicker agents={props.agents} selected={props.selectedAgent} onChange={props.onAgentChange} onLaunch={props.onLaunch} runs={props.runs} run={props.run} runFinished={props.runFinished} onSelectRun={props.onSelectRun} onDeleteRun={props.onDeleteRun} />
       </AgentSession>
-    </section> : <><nav className="review-tabs"><button className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Changes</button><button className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button><button className={props.drawer === "handoff" ? "active" : ""} onClick={() => props.onDrawer("handoff")}>Handoff</button></nav><ReviewPanel view={props.drawer} diff={props.diff} events={props.activityEvents} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={<VerificationPanel run={props.verification} onVerify={props.onVerify} />} /></>}
+    </section> : <><nav className="review-tabs"><button className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Review</button><button className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button></nav><Suspense fallback={<div className="code-state">Loading review workspace…</div>}><ReviewPanel view={props.drawer} taskPrompt={props.selectedTask?.prompt} events={props.activityEvents} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} onVerify={props.onVerify} openFilePath={props.openFilePath} onOpenFile={props.onOpenFile} /></Suspense></>}
     {props.error && <button className="error-toast" onClick={() => window.location.reload()}>{props.error} <span>reload</span></button>}
   </main>;
 }

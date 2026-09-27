@@ -18,7 +18,8 @@ export function App() {
   const [selectedAgent, setSelectedAgent] = useState("shell");
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity" | "handoff">("review");
+  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity">("review");
+  const [openFilePath, setOpenFilePath] = useState("");
   const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [error, setError] = useState("");
@@ -104,6 +105,12 @@ export function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed"); setBusy("Verification failed"); }
   }
 
+  function openReviewFile(path: string) {
+    setOpenFilePath(path);
+    setDrawer("review");
+    setScreen("review");
+  }
+
   return <Layout
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
@@ -112,7 +119,7 @@ export function App() {
     onPtyInput={pty.send} onPtyResize={pty.resize} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
     prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer}
-    gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={review.diff}
+    gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
-    onVerify={verify} error={error} />;
+    onVerify={verify} error={error} openFilePath={openFilePath} onOpenFile={openReviewFile} />;
 }
