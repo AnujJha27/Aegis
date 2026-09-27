@@ -12,5 +12,6 @@ std::optional<Response> runs(const Request &, const Context &);
 std::optional<Response> git(const Request &, const Context &);
 std::optional<Response> verification(const Request &, const Context &);
 std::optional<Response> review(const Request &, const Context &);
+std::optional<Response> files(const Request &, const Context &);
 
 }

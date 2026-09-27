@@ -15,6 +15,7 @@ target_link_libraries(aegis_daemon_session PUBLIC SQLite3::SQLite3)
 add_library(aegis_daemon_services
     daemon/process/process.cpp
     daemon/repository/git.cpp
+    daemon/repository/files.cpp
     daemon/verification/runner.cpp
     daemon/agents/pty_adapter.cpp
     daemon/agents/codex_adapter.cpp
@@ -30,7 +31,8 @@ add_library(aegis_daemon_api
     daemon/api/routes/runs.cpp
     daemon/api/routes/git.cpp
     daemon/api/routes/verification.cpp
-    daemon/api/routes/review.cpp)
+    daemon/api/routes/review.cpp
+    daemon/api/routes/files.cpp)
 target_include_directories(aegis_daemon_api PUBLIC .)
 target_compile_definitions(aegis_daemon_api PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
 target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_session aegis_daemon_services Threads::Threads)
@@ -51,11 +53,16 @@ add_test(NAME daemon_store_test COMMAND daemon_store_test)
 add_executable(daemon_api_test tests/daemon_api_test.cpp)
 target_link_libraries(daemon_api_test PRIVATE aegis_daemon_api)
 add_test(NAME daemon_api_test COMMAND daemon_api_test)
+set_tests_properties(daemon_api_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(daemon_services_test tests/daemon_services_test.cpp)
 target_link_libraries(daemon_services_test PRIVATE aegis_daemon_services)
 add_test(NAME daemon_services_test COMMAND daemon_services_test)
 set_tests_properties(daemon_services_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(daemon_repository_test tests/daemon_repository_test.cpp)
+target_link_libraries(daemon_repository_test PRIVATE aegis_daemon_services)
+add_test(NAME daemon_repository_test COMMAND daemon_repository_test)
 
 add_test(NAME aegis_launcher_help COMMAND aegis --help)
 

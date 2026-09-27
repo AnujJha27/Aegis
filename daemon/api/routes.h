@@ -9,7 +9,7 @@
 
 namespace aegis::daemon {
 namespace agents { class Manager; }
-namespace repository { class GitRepository; }
+namespace repository { class Files; class GitRepository; }
 
 namespace api {
 
@@ -18,6 +18,7 @@ struct Context {
     EventHub *events = nullptr;
     agents::Manager *agentManager = nullptr;
     repository::GitRepository *git = nullptr;
+    repository::Files *files = nullptr;
     std::filesystem::path repository;
     std::filesystem::path webRoot;
 };

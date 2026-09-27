@@ -8,6 +8,8 @@
 
 namespace aegis::daemon::repository {
 
+class Files;
+
 class GitRepository final {
 public:
     explicit GitRepository(std::filesystem::path path);
@@ -27,6 +29,7 @@ public:
     bool push(std::string &output) const;
 
 private:
+    friend class Files;
     std::vector<std::string> command(std::vector<std::string> arguments) const;
 
     std::filesystem::path path_;

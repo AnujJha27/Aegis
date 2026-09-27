@@ -1,6 +1,7 @@
 #pragma once
 
 #include "daemon/domain/types.h"
+#include "daemon/repository/files.h"
 
 #include <nlohmann/json.hpp>
 
@@ -23,7 +24,27 @@ inline nlohmann::json toJson(const RepositoryState &state) {
 }
 
 inline nlohmann::json toJson(const GitChange &change) {
-    return {{"path", change.path}, {"index_status", change.indexStatus}, {"worktree_status", change.worktreeStatus}};
+    return {{"path", change.path}, {"old_path", change.oldPath ? nlohmann::json(*change.oldPath) : nlohmann::json(nullptr)},
+            {"index_status", change.indexStatus}, {"worktree_status", change.worktreeStatus},
+            {"additions", change.additions}, {"deletions", change.deletions}, {"binary", change.binary}};
+}
+
+inline nlohmann::json toJson(const repository::FileEntry &entry) {
+    return {{"path", entry.path}, {"name", entry.name}, {"kind", entry.kind}, {"language", entry.language},
+            {"size", entry.size}, {"changed", entry.changed}, {"git_status", entry.gitStatus},
+            {"old_path", entry.oldPath ? nlohmann::json(*entry.oldPath) : nlohmann::json(nullptr)},
+            {"additions", entry.additions}, {"deletions", entry.deletions}, {"binary", entry.binary}};
+}
+
+inline nlohmann::json toJson(const repository::FileContent &content) {
+    return {{"source", repository::fileSourceName(content.source)}, {"size", content.size}, {"exists", content.exists},
+            {"binary", content.binary}, {"truncated", content.truncated}, {"content", content.content}};
+}
+
+inline nlohmann::json toJson(const repository::FileComparison &comparison) {
+    return {{"path", comparison.path}, {"old_path", comparison.oldPath ? nlohmann::json(*comparison.oldPath) : nlohmann::json(nullptr)},
+            {"status", comparison.status}, {"original", toJson(comparison.original)}, {"modified", toJson(comparison.modified)},
+            {"binary", comparison.binary}, {"truncated", comparison.truncated}};
 }
 
 inline nlohmann::json toJson(const VerificationRun &run) {

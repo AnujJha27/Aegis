@@ -45,8 +45,12 @@ struct RepositoryState {
 
 struct GitChange {
     std::string path;
+    std::optional<std::string> oldPath;
     std::string indexStatus;
     std::string worktreeStatus;
+    int additions = 0;
+    int deletions = 0;
+    bool binary = false;
 };
 
 struct VerificationRun {

@@ -3,6 +3,7 @@
 #include "daemon/agents/manager.h"
 #include "daemon/api/server.h"
 #include "daemon/repository/git.h"
+#include "daemon/repository/files.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -25,6 +26,7 @@ private:
     Store store_;
     EventHub events_;
     repository::GitRepository git_;
+    repository::Files files_;
     agents::Manager agents_;
     api::Server server_;
 };

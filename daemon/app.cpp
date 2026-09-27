@@ -12,8 +12,9 @@ App::App(std::filesystem::path repository, std::filesystem::path webRoot)
           return repository_ / ".aegis" / "aegis.sqlite";
       }()),
       git_(repository_),
+      files_(git_),
       agents_(repository_, store_, events_),
-      server_({&store_, &events_, &agents_, &git_, repository_, webRoot_}) {}
+      server_({&store_, &events_, &agents_, &git_, &files_, repository_, webRoot_}) {}
 
 App::~App() {
     stop();

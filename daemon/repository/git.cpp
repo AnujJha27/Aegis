@@ -119,13 +119,18 @@ std::vector<GitChange> GitRepository::changes() const {
         const auto pathStart = offset + 3;
         const auto pathEnd = output.find('\0', pathStart);
         if (pathEnd == std::string::npos) break;
-        result.push_back({output.substr(pathStart, pathEnd - pathStart), std::string(1, index), std::string(1, worktree)});
+        GitChange change;
+        change.path = output.substr(pathStart, pathEnd - pathStart);
+        change.indexStatus = std::string(1, index);
+        change.worktreeStatus = std::string(1, worktree);
         offset = pathEnd + 1;
         if ((index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') && offset < output.size()) {
             const auto originalEnd = output.find('\0', offset);
             if (originalEnd == std::string::npos) break;
+            change.oldPath = output.substr(offset, originalEnd - offset);
             offset = originalEnd + 1;
         }
+        result.push_back(std::move(change));
     }
     return result;
 }
