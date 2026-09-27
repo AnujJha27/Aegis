@@ -21,6 +21,7 @@ select { color-scheme: dark; }
 option { color: #dce7f5; background: #0f141b; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar { height: 58px; display: flex; align-items: center; gap: 28px; padding: 0 24px; border-bottom: 1px solid var(--line); background: rgba(11, 14, 19, .88); }
 .brand { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
@@ -48,10 +49,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .task-item.selected { background: #18212d; border-color: #2b4152; }
 .task-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--accent); }
 .task-item strong { display: block; color: #d8e0eb; font-size: 12px; font-weight: 550; line-height: 1.35; }
-.task-item small, .muted, .rail-footer, .event-meta, .composer-hint, .drawer-title small, .verification small { display: block; color: var(--muted); font-size: 10px; }
+.task-item small, .muted, .event-meta, .composer-hint, .drawer-title small, .verification small { display: block; color: var(--muted); font-size: 10px; }
 .task-item small { margin-top: 5px; }
-.rail-footer { padding: 16px; border-top: 1px solid var(--line); color: #aab5c3; }
-.rail-footer span { color: var(--faint); margin-left: 7px; }
 .session { min-width: 0; display: flex; flex-direction: column; }
 .session-heading { display: flex; justify-content: space-between; align-items: start; padding: 26px 34px 19px; border-bottom: 1px solid var(--line); }
 .eyebrow, .picker-label, .subheading { color: var(--faint); font-size: 9px; letter-spacing: .14em; font-weight: 750; }
@@ -107,6 +106,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .verification-status { display: flex; gap: 11px; align-items: center; padding: 13px; border: 1px solid var(--line); border-radius: 6px; background: #0b0f15; }
 .verification-status > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); background: #202731; }
 .verification-status.passed { border-color: #335b45; }.verification-status.passed > span { color: var(--accent); background: #193322; }.verification-status.failed { border-color: #6a3942; }.verification-status.failed > span { color: var(--danger); background: #3b1f28; }
+.verification-status.running { border-color: #3e6268; }.verification-status.running > span { color: var(--blue); background: #172b30; }
 .verification strong { display: block; font-size: 12px; }.verification small { margin-top: 4px; }.verification pre { max-height: 100px; overflow: auto; margin-top: 12px; padding: 10px; border-radius: 5px; background: #0b0f15; }
 .graph-placeholder { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; max-width: 700px; margin: 35px auto; }.graph-node { padding: 13px 21px; border: 1px solid #334b65; border-radius: 8px; background: #142131; color: #cfe0f2; font-size: 12px; }.graph-node.root { border-color: #587744; background: #19271c; }.graph-line { width: 48px; height: 1px; background: #4a6178; }.graph-placeholder p { width: 100%; margin: 25px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
 .graph-view, .provenance-list, .handoff { max-width: 1000px; margin: auto; }.graph-view svg { display: block; width: 100%; min-height: 280px; border: 1px solid var(--line); border-radius: 7px; background: #0b0f15; }.graph-link { stroke: #43566c; stroke-width: 1.5; }.graph-view text { font: 11px ui-sans-serif, system-ui, sans-serif; }.graph-legend { display: flex; justify-content: center; gap: 18px; margin-top: 11px; color: var(--muted); font-size: 10px; text-transform: capitalize; }.graph-legend span { display: flex; align-items: center; gap: 5px; }.graph-legend i { width: 7px; height: 7px; display: inline-block; border-radius: 50%; }

@@ -3,11 +3,14 @@
 #include "daemon/process/process.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <sstream>
+#include <string_view>
 
 namespace aegis::daemon::repository {
 namespace {
@@ -131,6 +134,40 @@ std::vector<GitChange> GitRepository::changes() const {
             offset = originalEnd + 1;
         }
         result.push_back(std::move(change));
+    }
+
+    std::map<std::string, std::size_t> indexes;
+    for (std::size_t index = 0; index < result.size(); ++index) indexes.emplace(result[index].path, index);
+    const auto numstat = process::run(command({"diff", "--numstat", "-z", "HEAD"}), path_).output;
+    const auto parseCount = [](std::string_view value) {
+        int count = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
+        return error == std::errc{} && end == value.data() + value.size() ? count : 0;
+    };
+    for (std::size_t offset = 0; offset < numstat.size();) {
+        const auto firstTab = numstat.find('\t', offset);
+        const auto secondTab = firstTab == std::string::npos ? std::string::npos : numstat.find('\t', firstTab + 1);
+        if (firstTab == std::string::npos || secondTab == std::string::npos) break;
+        const auto addedField = std::string_view(numstat).substr(offset, firstTab - offset);
+        const auto removedField = std::string_view(numstat).substr(firstTab + 1, secondTab - firstTab - 1);
+        const auto pathStart = secondTab + 1;
+        const auto pathEnd = numstat.find('\0', pathStart);
+        if (pathEnd == std::string::npos) break;
+        auto filePath = numstat.substr(pathStart, pathEnd - pathStart);
+        offset = pathEnd + 1;
+        if (filePath.empty()) {
+            const auto oldEnd = numstat.find('\0', offset);
+            const auto newEnd = oldEnd == std::string::npos ? std::string::npos : numstat.find('\0', oldEnd + 1);
+            if (oldEnd == std::string::npos || newEnd == std::string::npos) break;
+            filePath = numstat.substr(oldEnd + 1, newEnd - oldEnd - 1);
+            offset = newEnd + 1;
+        }
+        const auto found = indexes.find(filePath);
+        if (found == indexes.end()) continue;
+        auto &change = result[found->second];
+        change.additions = parseCount(addedField);
+        change.deletions = parseCount(removedField);
+        change.binary = change.binary || addedField == "-" || removedField == "-";
     }
     return result;
 }

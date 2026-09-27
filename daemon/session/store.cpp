@@ -38,6 +38,21 @@ std::optional<AgentRun> readRun(sqlite3_stmt *statement) {
     return result;
 }
 
+ReviewFinding readFinding(sqlite3_stmt *statement) {
+    ReviewFinding result;
+    result.id = columnText(statement, 0);
+    result.taskId = columnText(statement, 1);
+    if (sqlite3_column_type(statement, 2) != SQLITE_NULL) result.runId = columnText(statement, 2);
+    result.filePath = columnText(statement, 3);
+    if (sqlite3_column_type(statement, 4) != SQLITE_NULL) result.startLine = sqlite3_column_int(statement, 4);
+    if (sqlite3_column_type(statement, 5) != SQLITE_NULL) result.endLine = sqlite3_column_int(statement, 5);
+    result.message = columnText(statement, 6);
+    result.status = columnText(statement, 7);
+    result.createdAt = sqlite3_column_int64(statement, 8);
+    result.updatedAt = sqlite3_column_int64(statement, 9);
+    return result;
+}
+
 void check(int result, sqlite3 *database, const char *operation) {
     if (result == SQLITE_OK || result == SQLITE_DONE || result == SQLITE_ROW) return;
     throw std::runtime_error(std::string(operation) + ": " + sqlite3_errmsg(database));
@@ -77,7 +92,7 @@ Store::Store(const std::filesystem::path &path) {
         Statement schemaVersion(database_, "PRAGMA user_version");
         check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
         const auto previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
-        if (previousVersion > 1) throw std::runtime_error("database schema is newer than this Aegis build");
+        if (previousVersion > currentSchemaVersion) throw std::runtime_error("database schema is newer than this Aegis build");
         execute("PRAGMA foreign_keys = ON;");
         execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
         execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);");
@@ -86,8 +101,10 @@ Store::Store(const std::filesystem::path &path) {
             execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
         execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
         execute("CREATE INDEX IF NOT EXISTS verifications_task_finished ON verifications(task_id, finished_at DESC);");
+        execute("CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line));");
+        execute("CREATE INDEX IF NOT EXISTS findings_task_created ON findings(task_id, created_at DESC);");
         execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
-        execute("PRAGMA user_version = 1;");
+        execute("PRAGMA user_version = 2;");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -216,6 +233,53 @@ void Store::saveVerification(const VerificationRun &verification) {
     check(sqlite3_step(statement.get()), database_, "insert verification");
 }
 
+ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std::string> runId,
+                                   std::string filePath, std::optional<int> startLine,
+                                   std::optional<int> endLine, std::string message) {
+    if (filePath.empty() || message.empty() || (startLine && *startLine <= 0) ||
+        (endLine && *endLine <= 0) || (startLine && endLine && *endLine < *startLine))
+        throw std::invalid_argument("invalid review finding fields");
+    std::lock_guard lock(mutex_);
+    if (runId) {
+        Statement runStatement(database_, "SELECT task_id FROM runs WHERE id = ?");
+        check(sqlite3_bind_text(runStatement.get(), 1, runId->c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding run");
+        if (sqlite3_step(runStatement.get()) != SQLITE_ROW || columnText(runStatement.get(), 0) != taskId)
+            throw std::invalid_argument("finding run must belong to its task");
+    }
+    ReviewFinding finding{id("finding"), taskId, std::move(runId), std::move(filePath), startLine, endLine,
+                          std::move(message), "open", now(), now()};
+    Statement statement(database_, "INSERT INTO findings (id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    const auto bindText = [&](int index, const std::string &value) {
+        check(sqlite3_bind_text(statement.get(), index, value.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding");
+    };
+    bindText(1, finding.id);
+    bindText(2, finding.taskId);
+    if (finding.runId) bindText(3, *finding.runId);
+    else check(sqlite3_bind_null(statement.get(), 3), database_, "bind finding run");
+    bindText(4, finding.filePath);
+    if (finding.startLine) check(sqlite3_bind_int(statement.get(), 5, *finding.startLine), database_, "bind finding start line");
+    else check(sqlite3_bind_null(statement.get(), 5), database_, "bind finding start line");
+    if (finding.endLine) check(sqlite3_bind_int(statement.get(), 6, *finding.endLine), database_, "bind finding end line");
+    else check(sqlite3_bind_null(statement.get(), 6), database_, "bind finding end line");
+    bindText(7, finding.message);
+    bindText(8, finding.status);
+    check(sqlite3_bind_int64(statement.get(), 9, finding.createdAt), database_, "bind finding timestamp");
+    check(sqlite3_bind_int64(statement.get(), 10, finding.updatedAt), database_, "bind finding timestamp");
+    check(sqlite3_step(statement.get()), database_, "insert finding");
+    return finding;
+}
+
+bool Store::updateFindingStatus(const std::string &findingId, const std::string &status) {
+    if (status != "open" && status != "resolved") return false;
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "UPDATE findings SET status = ?, updated_at = ? WHERE id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, status.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding status");
+    check(sqlite3_bind_int64(statement.get(), 2, now()), database_, "bind finding timestamp");
+    check(sqlite3_bind_text(statement.get(), 3, findingId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding id");
+    check(sqlite3_step(statement.get()), database_, "update finding status");
+    return sqlite3_changes(database_) != 0;
+}
+
 std::optional<Task> Store::task(const std::string &taskId) const {
     std::lock_guard lock(mutex_);
     Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks WHERE id = ?");
@@ -258,6 +322,16 @@ std::vector<VerificationRun> Store::verifications(const std::string &taskId, std
         verification.finishedAt = sqlite3_column_int64(statement.get(), 7);
         result.push_back(std::move(verification));
     }
+    return result;
+}
+
+std::vector<ReviewFinding> Store::findings(const std::string &taskId, std::size_t limit) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at FROM findings WHERE task_id = ? ORDER BY created_at DESC LIMIT ?");
+    check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding task");
+    check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit)), database_, "bind finding limit");
+    std::vector<ReviewFinding> result;
+    while (sqlite3_step(statement.get()) == SQLITE_ROW) result.push_back(readFinding(statement.get()));
     return result;
 }
 

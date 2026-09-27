@@ -16,6 +16,8 @@ int main() {
     fixture.write("unstaged.cpp", "int unstaged = 0;\n");
     fixture.write("deleted.cpp", "int deleted = 0;\n");
     fixture.write("old name.cpp", "int renamed = 0;\n");
+    fixture.write("space name.cpp", "int spaced = 0;\n");
+    fixture.write("tracked-binary.dat", std::string("a\0b", 3));
     fixture.commit("base");
 
     fixture.write("staged.cpp", "int staged = 1;\n");
@@ -24,9 +26,11 @@ int main() {
     fixture.git({"add", "--", "mixed.cpp"});
     fixture.write("mixed.cpp", "int mixed = 2;\n");
     fixture.write("unstaged.cpp", "int unstaged = 1;\n");
+    fixture.write("space name.cpp", "int spaced = 1;\n");
     std::filesystem::remove(fixture.root() / "deleted.cpp");
     fixture.git({"mv", "--", "old name.cpp", "new name.cpp"});
     fixture.write("nested/new file.cpp", "int fresh = 1;\n");
+    fixture.write("tracked-binary.dat", std::string("c\0d", 3));
 
     aegis::daemon::repository::GitRepository repository(fixture.root());
     const auto changes = repository.changes();
@@ -35,10 +39,14 @@ int main() {
         return item == changes.end() ? nullptr : &*item;
     };
     assert(find("staged.cpp") && find("staged.cpp")->indexStatus == "M" && find("staged.cpp")->worktreeStatus == " ");
+    assert(find("staged.cpp")->additions == 1 && find("staged.cpp")->deletions == 1);
     assert(find("mixed.cpp") && find("mixed.cpp")->indexStatus == "M" && find("mixed.cpp")->worktreeStatus == "M");
+    assert(find("mixed.cpp")->additions == 1 && find("mixed.cpp")->deletions == 1);
+    assert(find("space name.cpp") && find("space name.cpp")->additions == 1 && find("space name.cpp")->deletions == 1);
     assert(find("unstaged.cpp") && find("unstaged.cpp")->indexStatus == " " && find("unstaged.cpp")->worktreeStatus == "M");
-    assert(find("deleted.cpp") && find("deleted.cpp")->worktreeStatus == "D");
+    assert(find("deleted.cpp") && find("deleted.cpp")->worktreeStatus == "D" && find("deleted.cpp")->deletions == 1);
     assert(find("nested/new file.cpp") && find("nested/new file.cpp")->indexStatus == "?");
+    assert(find("tracked-binary.dat") && find("tracked-binary.dat")->binary);
 
     const auto renamed = find("new name.cpp");
     assert(renamed && renamed->indexStatus == "R");
@@ -51,6 +59,7 @@ int main() {
     fixture.write("node_modules/pkg/index.js", "ignored");
     fixture.write("binary.dat", std::string("x\0y", 3));
     fixture.write("empty.txt", "");
+    fixture.write("large.txt", std::string(1024 * 1024 + 1, 'x'));
 
     aegis::daemon::repository::Files files(repository);
     const auto head = files.read("mixed.cpp", aegis::daemon::repository::FileSource::head);
@@ -80,6 +89,10 @@ int main() {
     assert(binary.binary && binary.content.empty());
     const auto empty = files.read("empty.txt", aegis::daemon::repository::FileSource::worktree);
     assert(empty.exists && empty.content.empty());
+    const auto large = files.read("large.txt", aegis::daemon::repository::FileSource::worktree);
+    assert(large.exists && large.truncated && large.content.empty());
+    const auto explicitlyLoaded = files.read("large.txt", aegis::daemon::repository::FileSource::worktree, true);
+    assert(explicitlyLoaded.exists && !explicitlyLoaded.truncated && explicitlyLoaded.content.size() == 1024 * 1024 + 1);
 
     const auto nested = files.list("nested", aegis::daemon::repository::FileScope::all);
     assert(std::any_of(nested.entries.begin(), nested.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp"; }));

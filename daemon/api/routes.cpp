@@ -18,9 +18,9 @@ Response handle(const Request &request, const Context &context) {
         return routes::jsonResponse(boost::beast::http::status::ok, {{"status", "healthy"}});
     if (request.method() == boost::beast::http::verb::get && request.target() == "/api/version")
         return routes::jsonResponse(boost::beast::http::status::ok,
-                                    {{"version", AEGIS_VERSION}, {"git_commit", AEGIS_GIT_COMMIT}, {"schema_version", 1}});
+                                    {{"version", AEGIS_VERSION}, {"git_commit", AEGIS_GIT_COMMIT}, {"schema_version", Store::currentSchemaVersion}});
     try {
-        for (const auto handler : {routes::agents, routes::tasks, routes::runs, routes::git, routes::verification, routes::review, routes::files})
+        for (const auto handler : {routes::agents, routes::tasks, routes::runs, routes::git, routes::verification, routes::review, routes::files, routes::findings})
             if (auto response = handler(request, context)) return std::move(*response);
         return routes::error(boost::beast::http::status::not_found, "not_found", "route not found");
     } catch (const std::exception &error) {

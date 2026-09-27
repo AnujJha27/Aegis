@@ -14,6 +14,8 @@ namespace aegis::daemon {
 
 class Store final {
 public:
+    static constexpr int currentSchemaVersion = 2;
+
     explicit Store(const std::filesystem::path &path);
     ~Store();
 
@@ -28,11 +30,16 @@ public:
     bool deleteRun(const std::string &runId);
     void appendEvent(const AgentEvent &event);
     void saveVerification(const VerificationRun &verification);
+    ReviewFinding createFinding(const std::string &taskId, std::optional<std::string> runId,
+                                std::string filePath, std::optional<int> startLine,
+                                std::optional<int> endLine, std::string message);
+    bool updateFindingStatus(const std::string &findingId, const std::string &status);
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;
     std::vector<Task> tasks() const;
     std::vector<AgentEvent> events(const std::string &taskId) const;
     std::vector<VerificationRun> verifications(const std::string &taskId, std::size_t limit = 20) const;
+    std::vector<ReviewFinding> findings(const std::string &taskId, std::size_t limit = 100) const;
 
 private:
     void execute(const char *sql) const;

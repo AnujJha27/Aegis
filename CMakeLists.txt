@@ -60,7 +60,8 @@ add_library(aegis_daemon_api
     daemon/api/routes/git.cpp
     daemon/api/routes/verification.cpp
     daemon/api/routes/review.cpp
-    daemon/api/routes/files.cpp)
+    daemon/api/routes/files.cpp
+    daemon/api/routes/findings.cpp)
 target_include_directories(aegis_daemon_api PUBLIC .)
 target_compile_definitions(aegis_daemon_api PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
 target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_session aegis_daemon_services Threads::Threads)

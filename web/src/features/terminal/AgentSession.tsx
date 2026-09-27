@@ -73,7 +73,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, onPtyI
     <div className="composer">
       <div className="composer-tools">{children}</div>
       {interactive ? <div className="composer-hint pty-hint">{runFinished ? "Run ended · terminal is read-only" : "Interactive CLI · click the terminal or start typing to answer prompts (e.g. project trust)"}<span className="composer-status"><i />{busy}</span></div> : <>
-        <div className="prompt-row"><textarea value={prompt} onChange={(event) => onPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }} placeholder={run && !runFinished ? "Message the active agent…" : "Launch an agent to start prompting…"} disabled={!run || runFinished} /><button className="send-button" onClick={onSend} disabled={!run || runFinished || !prompt.trim()}>{busy.includes("working") ? "…" : "Send"}<span>↗</span></button></div>
+        <div className="prompt-row"><textarea aria-label="Message the active agent" value={prompt} onChange={(event) => onPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }} placeholder={run && !runFinished ? "Message the active agent…" : "Launch an agent to start prompting…"} disabled={!run || runFinished} /><button className="send-button" onClick={onSend} disabled={!run || runFinished || !prompt.trim()}>{busy.includes("working") ? "…" : "Send"}<span>↗</span></button></div>
         <div className="composer-hint"><span>Enter to send</span><span>Shift + Enter for newline</span><span className="composer-status"><i />{busy}</span></div>
       </>}
     </div>

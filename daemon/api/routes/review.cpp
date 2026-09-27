@@ -22,9 +22,11 @@ std::optional<Response> review(const Request &request, const Context &context) {
             verification = std::move(verificationHistory.front());
             if (verification->output.size() > 8000) verification->output.resize(8000);
         }
+        auto findings = context.store->findings(*taskId, 20);
+        for (auto &finding : findings) if (finding.message.size() > 2000) finding.message.resize(2000);
         auto prompt = task->prompt;
         if (prompt.size() > 8000) prompt.resize(8000);
-        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, changedFiles(diff), std::move(verification)};
+        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, changedFiles(diff), std::move(verification), std::move(findings)};
         return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
     }
     if (const auto taskId = pathId(target, "/graph")) {

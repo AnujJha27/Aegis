@@ -64,6 +64,19 @@ struct VerificationRun {
     std::int64_t finishedAt = 0;
 };
 
+struct ReviewFinding {
+    std::string id;
+    std::string taskId;
+    std::optional<std::string> runId;
+    std::string filePath;
+    std::optional<int> startLine;
+    std::optional<int> endLine;
+    std::string message;
+    std::string status = "open";
+    std::int64_t createdAt = 0;
+    std::int64_t updatedAt = 0;
+};
+
 struct HandoffContext {
     std::string taskId;
     std::string prompt;
@@ -71,6 +84,7 @@ struct HandoffContext {
     std::string diff;
     std::vector<std::string> changedFiles;
     std::optional<VerificationRun> verification;
+    std::vector<ReviewFinding> findings;
 };
 
 struct GraphNode {

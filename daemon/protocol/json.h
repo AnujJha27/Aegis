@@ -51,11 +51,23 @@ inline nlohmann::json toJson(const VerificationRun &run) {
     return {{"id", run.id}, {"task_id", run.taskId}, {"run_id", run.runId ? nlohmann::json(*run.runId) : nlohmann::json(nullptr)}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
 }
 
+inline nlohmann::json toJson(const ReviewFinding &finding) {
+    return {{"id", finding.id}, {"task_id", finding.taskId},
+            {"run_id", finding.runId ? nlohmann::json(*finding.runId) : nlohmann::json(nullptr)},
+            {"file_path", finding.filePath}, {"start_line", finding.startLine ? nlohmann::json(*finding.startLine) : nlohmann::json(nullptr)},
+            {"end_line", finding.endLine ? nlohmann::json(*finding.endLine) : nlohmann::json(nullptr)},
+            {"message", finding.message}, {"status", finding.status},
+            {"created_at", finding.createdAt}, {"updated_at", finding.updatedAt}};
+}
+
 inline nlohmann::json toJson(const HandoffContext &context) {
     nlohmann::json events = nlohmann::json::array();
     for (const auto &event : context.recentEvents) events.push_back(toJson(event));
+    nlohmann::json findings = nlohmann::json::array();
+    for (const auto &finding : context.findings) findings.push_back(toJson(finding));
     nlohmann::json result{{"task_id", context.taskId}, {"prompt", context.prompt}, {"recent_events", events}, {"diff", context.diff}, {"changed_files", context.changedFiles}};
     result["verification"] = context.verification ? toJson(*context.verification) : nlohmann::json(nullptr);
+    result["findings"] = findings;
     return result;
 }
 

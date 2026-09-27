@@ -40,7 +40,7 @@ int main() {
     assert(health.body().find("healthy") != std::string::npos);
     const auto version = request(context, http::verb::get, "/api/version");
     assert(version.result() == http::status::ok);
-    assert(nlohmann::json::parse(version.body()).at("schema_version") == 1);
+    assert(nlohmann::json::parse(version.body()).at("schema_version") == 2);
 
     const auto file = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&source=worktree");
     assert(file.result() == http::status::ok);
@@ -55,6 +55,28 @@ int main() {
     assert(created.result() == http::status::created);
     assert(created.body().find("inspect this") != std::string::npos);
     const auto taskId = nlohmann::json::parse(created.body()).at("id").get<std::string>();
+
+    const auto findingRun = store.startRun(taskId, "codex");
+    const auto findingCreated = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
+        nlohmann::json{{"run_id", findingRun.id}, {"file_path", "src/main.cpp"}, {"start_line", 7},
+                       {"end_line", 9}, {"message", "Check cleanup on early return."}}.dump());
+    assert(findingCreated.result() == http::status::created);
+    const auto finding = nlohmann::json::parse(findingCreated.body());
+    assert(finding.at("status") == "open" && finding.at("run_id") == findingRun.id);
+    const auto findingId = finding.at("id").get<std::string>();
+    const auto findingList = request(context, http::verb::get, "/api/tasks/" + taskId + "/findings");
+    assert(findingList.result() == http::status::ok && nlohmann::json::parse(findingList.body()).size() == 1);
+    const auto findingResolved = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"resolved"})");
+    assert(findingResolved.result() == http::status::ok && findingResolved.body().find("resolved") != std::string::npos);
+    const auto findingInvalidStatus = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"critical"})");
+    assert(findingInvalidStatus.result() == http::status::bad_request);
+    const auto findingInvalidPath = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
+        R"({"file_path":"../outside.cpp","message":"unsafe reference"})");
+    assert(findingInvalidPath.result() == http::status::bad_request);
+    assert(store.updateRunStatus(findingRun.id, "running"));
+    assert(store.updateRunStatus(findingRun.id, "completed"));
+    assert(store.deleteRun(findingRun.id));
+    assert(!store.findings(taskId).front().runId);
 
     const auto missingTaskRun = request(context, http::verb::post, "/api/tasks/missing/runs", R"({"agent":"codex"})");
     assert(missingTaskRun.result() == http::status::not_found);
@@ -85,6 +107,7 @@ int main() {
     assert(handoff.result() == http::status::ok);
     assert(handoff.body().find("inspect this") != std::string::npos);
     assert(handoff.body().find("verification-ok") != std::string::npos);
+    assert(nlohmann::json::parse(handoff.body()).at("findings").size() == 1);
 
     const auto graph = request(context, http::verb::get, "/api/tasks/" + taskId + "/graph");
     assert(graph.result() == http::status::ok);

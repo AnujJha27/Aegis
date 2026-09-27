@@ -21,7 +21,7 @@ describe("read-only review workspace", () => {
     vi.spyOn(api, "files").mockImplementation(async (path = "") => ({ entries: path ? [file] : [{ ...file, path: "src", name: "src", kind: "directory", language: "", changed: true }], truncated: false }));
     const stage = vi.spyOn(api, "stage").mockResolvedValue({} as never);
     const onGitChanged = vi.fn().mockResolvedValue(undefined);
-    render(<CodeWorkspace events={[]} gitChanges={[change]} onGitChanged={onGitChanged} onVerify={() => {}} />);
+    render(<CodeWorkspace events={[]} gitChanges={[change]} onGitChanged={onGitChanged} verificationRunning={false} onVerify={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /src/ }));
     fireEvent.click(await screen.findByRole("button", { name: /agent\.cpp/ }));

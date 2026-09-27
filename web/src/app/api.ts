@@ -68,7 +68,9 @@ export type HandoffContext = {
   diff: string;
   changed_files: string[];
   verification: VerificationRun | null;
+  findings: ReviewFinding[];
 };
+export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved"; created_at: number; updated_at: number };
 
 export type GraphNode = { id: string; type: string; label: string };
 export type GraphEdge = { from: string; to: string };

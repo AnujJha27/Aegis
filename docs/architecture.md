@@ -43,7 +43,7 @@ The manager stores shared adapter ownership, releases its map lock before adapte
 
 ## Persistence and migrations
 
-Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table while preserving existing task/run/event rows. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
+Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, and version 2 adds persisted review findings, while preserving existing task/run/event rows. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
 
 Verification records contain task ID, optional run ID, the command as a JSON argv array, exit code, output, and start/finish timestamps. Commands are executed as argument arrays, never converted to a shell string. Deleting a run removes its events; associated verification records retain task history and have their run association cleared by the SQLite foreign key.
 
@@ -65,7 +65,7 @@ Provider thread IDs are stored on the run and do not become display events. The 
 
 ## Handoff bounds
 
-`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events (each content field capped at 4,000 bytes), a diff capped at 24,000 bytes, changed paths, and the latest verification with output capped at 8,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection. No review-finding model currently exists, so none is fabricated.
+`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events (each content field capped at 4,000 bytes), a diff capped at 24,000 bytes, changed paths, the latest verification with output capped at 8,000 bytes, and up to 20 review findings with each message capped at 2,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection.
 
 ## HTTP and WebSocket API
 
@@ -92,6 +92,8 @@ The API uses structured errors:
 | GET | `/api/files?path=...&scope=changed|all` | Lazy repository tree; `recursive=1` returns a bounded quick-open list |
 | GET | `/api/files/content?path=...&source=head|index|worktree` | One file at a Git/worktree source |
 | GET | `/api/files/compare?path=...&base=head|index&target=index|worktree` | Structured old/new contents for a review diff |
+| GET/POST | `/api/tasks/:id/findings` | List or add task findings with an optional run and line range |
+| PATCH | `/api/findings/:id` | Set finding status to `open` or `resolved` |
 | GET | `/api/version` | Build version, Git revision when available, and SQLite schema version |
 
 `/ws/events` streams normalized semantic events. `/ws/pty/:run_id` is a separate interactive byte channel; resize frames are JSON control messages, while terminal text frames are written directly to the PTY.
@@ -99,6 +101,8 @@ The API uses structured errors:
 ## Read-only file review
 
 `Files` is the repository-layer boundary for lazy tree enumeration and source reads. It uses Git-aware path enumeration, excludes `.git`, `.aegis`, and `node_modules`, and limits each listing to 500 entries. `HEAD`, `INDEX`, and `WORKTREE` are explicit internal sources; the interface labels them All Changes, Staged, and Unstaged. Rename comparisons use the preserved old path. Missing sides (new/deleted files) are represented as empty content; binary content is identified without sending its bytes. Text is capped at 1 MiB by default and 8 MiB after an explicit user action.
+
+Review findings are local persisted records containing task, optional run, repository-relative file, optional positive line range, message, status, and timestamps. The API validates task/run ownership, file path shape, line bounds, and message size. Handoff context includes at most 20 findings with each message capped at 2 KiB. The current frontend does not create or resolve findings yet. Changed-file addition/deletion counts come from Git numstat records; binary files are marked separately, and untracked-file counts remain unavailable until Git tracks them.
 
 Worktree reads validate repository-relative paths, canonicalize the target, and open it beneath the repository using no-follow path traversal. Git-object reads use argv-based Git commands and literal pathspecs. The React viewer is strictly read-only: Monaco has editor mutation disabled and only renders file contents or diffs. Monaco and its workers are bundled locally and the renderer loads only after a file is opened; no CDN is used. Review offers changed/all files, a small tab set, quick-open, inline/split diff, contextual staging, verification, and activity-to-file navigation. Task attribution is shown only when an event identifies the file; repository dirt is otherwise unowned.
 
@@ -122,4 +126,6 @@ The server binds explicitly to `127.0.0.1`. The default CMake build does not fin
 
 ## Deliberately deferred
 
-Binary/Solidity analysis, LSP exploration, compiler AST/call graphs, risk heatmaps, investigation boards, time machine, proposal comparison, and review findings remain outside the current vertical slice.
+Binary/Solidity analysis, LSP exploration, compiler AST/call graphs, risk heatmaps, investigation boards, time machine, and proposal comparison remain outside the current vertical slice. Findings now have a persisted domain/API foundation and are included in bounded handoff context; creating/resolving notes from the Review UI is deferred.
+
+Browser-level Playwright E2E is deferred: it requires browser binaries and cross-process fixture orchestration in CI, while the current release job already runs focused frontend interaction tests, real-Git file fixtures, and API route tests. The full installed `aegis .` smoke test should still be run on Linux/WSL before release; this restricted workspace cannot bind loopback for that check.

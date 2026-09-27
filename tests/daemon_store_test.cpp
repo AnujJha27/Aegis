@@ -39,6 +39,12 @@ int main() {
         assert(history.front().command == verification.command);
         assert(history.front().runId == run.id);
 
+        const auto finding = store.createFinding(task.id, run.id, "src/main.cpp", 7, 9, "Check cleanup on early return.");
+        assert(finding.status == "open" && finding.startLine == 7 && finding.endLine == 9);
+        assert(store.findings(task.id).size() == 1);
+        assert(store.updateFindingStatus(finding.id, "resolved"));
+        assert(!store.updateFindingStatus(finding.id, "critical"));
+
         assert(store.updateRunStatus(run.id, "completed"));
         for (const auto *state : {"failed", "interrupted", "terminated"}) {
             const auto terminalRun = store.startRun(task.id, "codex");
@@ -67,6 +73,8 @@ int main() {
         assert(finished->finishedAt > 0);
         assert(!store.updateRunStatus(run.id, "running"));
         assert(store.run("run-absent") == std::nullopt);
+        const auto findings = store.findings(store.tasks().front().id);
+        assert(findings.size() == 1 && findings.front().status == "resolved");
         const auto abandoned = store.runs(store.tasks().front().id).back();
         assert(abandoned.status == "interrupted");
         assert(abandoned.finishedAt > 0);
@@ -81,6 +89,7 @@ int main() {
         "INSERT INTO tasks VALUES ('legacy-task','legacy','/tmp','open',1);"
         "INSERT INTO runs VALUES ('legacy-run','legacy-task','codex','starting',2,0);",
         nullptr, nullptr, nullptr) == SQLITE_OK);
+    assert(sqlite3_exec(legacy, "PRAGMA user_version = 1;", nullptr, nullptr, nullptr) == SQLITE_OK);
     sqlite3_close(legacy);
     {
         aegis::daemon::Store migrated(legacyPath);
@@ -88,7 +97,16 @@ int main() {
         assert(migratedRun && migratedRun->status == "interrupted");
         assert(migratedRun->finishedAt > 0);
         assert(migrated.verifications("legacy-task").empty());
+        assert(migrated.findings("legacy-task").empty());
+        const auto migratedFinding = migrated.createFinding("legacy-task", std::nullopt, "legacy.cpp", 1, std::nullopt, "Migration retained the task.");
+        assert(migratedFinding.status == "open");
     }
+    assert(sqlite3_open(legacyPath.string().c_str(), &legacy) == SQLITE_OK);
+    sqlite3_stmt *version = nullptr;
+    assert(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK);
+    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 2);
+    sqlite3_finalize(version);
+    sqlite3_close(legacy);
 
     std::filesystem::remove(path);
     std::filesystem::remove(legacyPath);
