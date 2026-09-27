@@ -77,12 +77,15 @@ void CodexAdapter::send(std::string_view message) {
     if (worker_.joinable()) worker_.join();
     const auto prompt = std::string(message);
     worker_ = std::thread([this, prompt] {
-        const auto result = process::run({"codex", "exec", "--json", "--color", "never", prompt}, context_.repository, std::chrono::seconds(120));
+        constexpr auto timeout = std::chrono::minutes(10);
+        const auto result = process::run({"codex", "exec", "--json", "--color", "never", prompt}, context_.repository, timeout);
         for (const auto &event : parseCodexJsonOutput(result.output, context_.taskId, context_.runId, "codex"))
             if (sink_) sink_(event);
         if (sink_) sink_({eventId(), context_.taskId, context_.runId,
                           result.exitCode == 0 ? "agent.finished" : "agent.failed", "codex",
-                          result.exitCode == 0 ? "" : "Codex exited with status " + std::to_string(result.exitCode), now()});
+                          result.exitCode == 0 ? "" : result.timedOut
+                              ? "Codex timed out after 10 minutes"
+                              : "Codex exited with status " + std::to_string(result.exitCode), now()});
     });
 }
 
