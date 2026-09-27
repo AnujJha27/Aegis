@@ -80,6 +80,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .agent-dock { display: flex; align-items: center; gap: 10px; }
 .agent-dock select { min-width: 120px; border: 0; outline: 0; color: #dce7f5; background: transparent; font-size: 12px; font-weight: 650; text-transform: capitalize; }
 .agent-dock select.run-picker { min-width: 115px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 10px; font-weight: 500; }
+.delete-run-button { width: 23px; height: 23px; padding: 0; border: 1px solid var(--line); border-radius: 2px; color: #ba8585; background: #151719; font: 15px/1 var(--mono); }
+.delete-run-button:hover:not(:disabled) { border-color: #70464b; color: #f0aaaa; background: #281619; }
+.delete-run-button:disabled { opacity: .35; cursor: not-allowed; }
 .agent-state { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .agent-state:not(.online) i { background: var(--faint); box-shadow: none; }
 .launch-button, .send-button { margin-left: auto; border: 1px solid #355044; border-radius: 6px; color: #cfeac3; background: #17271e; padding: 7px 11px; font-size: 11px; }
@@ -171,6 +174,7 @@ body { background: #0a0c0f; }
 .prompt-row::before { content: ">"; position: absolute; z-index: 1; top: 11px; left: 11px; color: var(--accent); font: 12px var(--mono); }
 .prompt-row textarea { padding-left: 27px; }
 .composer-hint { font-size: 9px; }
+.pty-hint { align-items: center; min-height: 30px; color: #b7c4ca; }
 .screen-toggle, .screen-toggle button, .review-tabs button, .git-panel, .diff, .verification-status { border-radius: 1px; }
 .screen-toggle button, .review-tabs button { font-family: var(--mono); }
 .git-panel, .diff, .verification-status { background: #0d1013; }

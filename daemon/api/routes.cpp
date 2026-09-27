@@ -150,6 +150,18 @@ Response handle(const Request &request, const Context &context) {
         }
     }
 
+    if (request.method() == boost::beast::http::verb::delete_ && target.starts_with("/api/runs/")) {
+        const auto runId = target.substr(std::string("/api/runs/").size());
+        if (runId.empty()) return error(boost::beast::http::status::bad_request, "missing_run_id", "run id is required");
+        if (context.agentManager && context.agentManager->isRunning(runId))
+            return error(boost::beast::http::status::conflict, "run_active", "stop the active run before deleting it");
+        if (context.agentManager) context.agentManager->terminate(runId);
+        if (!context.store->deleteRun(runId)) return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+        Response response{boost::beast::http::status::no_content, 11};
+        response.prepare_payload();
+        return response;
+    }
+
     if (request.method() == boost::beast::http::verb::get) {
         if (const auto taskId = pathId(target, "/handoff")) {
             const auto task = context.store->task(*taskId);

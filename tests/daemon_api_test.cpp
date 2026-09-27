@@ -87,6 +87,13 @@ int main() {
     const auto missing = request(server.port(), http::verb::get, "/api/tasks/missing/handoff");
     assert(missing.result() == http::status::not_found);
 
+    const auto run = store.startRun(taskId, "claude");
+    store.appendEvent({"event-1", taskId, run.id, "agent.failed", "claude", "failed", 1});
+    const auto deleted = request(server.port(), http::verb::delete_, "/api/runs/" + run.id);
+    assert(deleted.result() == http::status::no_content);
+    assert(store.runs(taskId).empty());
+    assert(store.events(taskId).empty());
+
     server.stop();
     std::filesystem::remove(database);
     std::filesystem::remove_all(webRoot);

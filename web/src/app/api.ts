@@ -113,6 +113,7 @@ export const api = {
   provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[] }>(`/api/tasks/${taskId}/provenance`),
   createTask: async (prompt: string) => task(await request<Record<string, unknown>>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })),
   launch: async (taskId: string, agent: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify({ agent }) })),
+  deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),
   send: (runId: string, message: string) => request<{ status: string }>(`/api/runs/${runId}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
   verify: async (command: string[]) => verification(await request<Record<string, unknown>>("/api/verify", { method: "POST", body: JSON.stringify({ command }) })),
 };

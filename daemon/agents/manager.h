@@ -29,6 +29,7 @@ public:
 
     std::vector<AgentInfo> available() const;
     bool hasRunningRuns() const;
+    bool isRunning(const std::string &runId) const;
     std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent);
     bool send(const std::string &runId, std::string_view message);
     bool sendPty(const std::string &runId, std::string_view input);

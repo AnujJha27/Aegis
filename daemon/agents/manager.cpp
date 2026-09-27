@@ -47,6 +47,11 @@ bool Manager::hasRunningRuns() const {
     return !running_.empty();
 }
 
+bool Manager::isRunning(const std::string &runId) const {
+    std::lock_guard lock(provenanceMutex_);
+    return running_.contains(runId);
+}
+
 std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent) {
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
     const auto run = store_.startRun(taskId, agent);

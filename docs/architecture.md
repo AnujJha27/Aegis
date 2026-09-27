@@ -68,6 +68,7 @@ The API is intentionally small:
 | POST | `/api/tasks/:id/runs` | launch an agent run |
 | POST | `/api/runs/:id/messages` | send a prompt/message |
 | POST | `/api/runs/:id/interrupt` | interrupt a run |
+| DELETE | `/api/runs/:id` | delete a finished run and its events |
 | POST | `/api/verify` | run an argument-array verification command |
 
 Errors use one shape:
@@ -103,7 +104,7 @@ The first slice uses lifecycle, message, command, file-change, and failure event
 
 The manager exposes capabilities and owns active runs. Structured agents use their machine-readable output when available. Interactive agents use a POSIX PTY and receive prompt input as PTY data. Both paths publish the same `AgentEvent` shape.
 
-An agent switch creates another run under the same task. The task history therefore survives switching instead of being hidden inside a terminal widget. Handoff context will be built from selected task prompt, recent events, current diff, verification failures, and review findings rather than an unbounded transcript dump.
+An agent switch creates another run under the same task. Interactive runs accept keystrokes directly in the xterm.js surface, including CLI setup prompts. Finished runs can be deleted with their run-scoped events; task and sibling-run history remain. Handoff context will be built from selected task prompt, recent events, current diff, verification failures, and review findings rather than an unbounded transcript dump.
 
 ## Persistence and lifecycle
 

@@ -91,6 +91,26 @@ AgentRun Store::startRun(const std::string &taskId, std::string agent) {
     return run;
 }
 
+bool Store::deleteRun(const std::string &runId) {
+    std::lock_guard lock(mutex_);
+    execute("BEGIN IMMEDIATE;");
+    try {
+        Statement events(database_, "DELETE FROM events WHERE run_id = ?");
+        check(sqlite3_bind_text(events.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run events");
+        check(sqlite3_step(events.get()), database_, "delete run events");
+
+        Statement run(database_, "DELETE FROM runs WHERE id = ?");
+        check(sqlite3_bind_text(run.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run id");
+        check(sqlite3_step(run.get()), database_, "delete run");
+        const bool deleted = sqlite3_changes(database_) != 0;
+        execute("COMMIT;");
+        return deleted;
+    } catch (...) {
+        execute("ROLLBACK;");
+        throw;
+    }
+}
+
 void Store::appendEvent(const AgentEvent &event) {
     std::lock_guard lock(mutex_);
     Statement statement(database_, "INSERT INTO events (id, task_id, run_id, type, agent, content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");

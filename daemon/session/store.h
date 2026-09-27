@@ -22,6 +22,7 @@ public:
 
     Task createTask(std::string prompt, std::string repository);
     AgentRun startRun(const std::string &taskId, std::string agent);
+    bool deleteRun(const std::string &runId);
     void appendEvent(const AgentEvent &event);
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;

@@ -122,6 +122,25 @@ export function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not send prompt"); }
   }
 
+  async function deleteRun(runId: string) {
+    const run = runs.find((item) => item.id === runId);
+    if (!run || !events.some((event) => event.runId === runId && (event.type === "agent.finished" || event.type === "agent.failed"))) return;
+    if (!window.confirm(`Delete this ${run.agent} run and its transcript?`)) return;
+    try {
+      await api.deleteRun(runId);
+      const remaining = runs.filter((item) => item.id !== runId);
+      setRuns(remaining);
+      setEvents((current) => current.filter((event) => event.runId !== runId));
+      if (selectedRunId === runId) setSelectedRunId(remaining.at(-1)?.id ?? "");
+      if (selectedTask) {
+        const [loadedHandoff, loadedGraph, loadedProvenance] = await Promise.all([api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]);
+        setHandoff(loadedHandoff);
+        setGraph(loadedGraph);
+        setProvenance(loadedProvenance.records);
+      }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete run"); }
+  }
+
   async function verify() {
     setBusy("Verifying…");
     try { setVerification(await api.verify(["ctest", "--test-dir", "build"])); setBusy("Ready"); }
@@ -132,6 +151,6 @@ export function App() {
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} onPtyResize={(cols, rows) => { ptySize.current = { cols, rows }; if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(JSON.stringify({ type: "resize", cols, rows })); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} onDeleteRun={deleteRun} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} onPtyResize={(cols, rows) => { ptySize.current = { cols, rows }; if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(JSON.stringify({ type: "resize", cols, rows })); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
     screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
 }
