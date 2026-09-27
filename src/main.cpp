@@ -84,10 +84,13 @@ QString daemonExecutable() {
 }
 
 QString frontendRoot(const QString &repository) {
-    const QStringList candidates = {
+    QStringList candidates = {
         QDir(QCoreApplication::applicationDirPath()).filePath("web/dist"),
         QDir::cleanPath(QDir::current().filePath("web/dist")),
         QDir(repository).filePath("web/dist")};
+#ifdef AEGIS_SOURCE_WEB_ROOT
+    candidates << QStringLiteral(AEGIS_SOURCE_WEB_ROOT);
+#endif
     for (const auto &candidate : candidates)
         if (QFileInfo(candidate).isDir()) return candidate;
     return {};
