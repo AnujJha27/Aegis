@@ -144,8 +144,15 @@ Response handle(const Request &request, const Context &context) {
 
     if (request.method() == boost::beast::http::verb::get) {
         if (const auto taskId = pathId(target, "/runs")) {
+            if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
             nlohmann::json result = nlohmann::json::array();
             for (const auto &run : context.store->runs(*taskId)) result.push_back(protocol::toJson(run));
+            return jsonResponse(boost::beast::http::status::ok, result);
+        }
+        if (const auto taskId = pathId(target, "/verifications")) {
+            if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            nlohmann::json result = nlohmann::json::array();
+            for (const auto &verification : context.store->verifications(*taskId)) result.push_back(protocol::toJson(verification));
             return jsonResponse(boost::beast::http::status::ok, result);
         }
     }
@@ -174,7 +181,15 @@ Response handle(const Request &request, const Context &context) {
                 if (event.content.size() > maxContent) event.content.resize(maxContent);
             }
             const auto diff = context.git ? context.git->diff() : std::string{};
-            HandoffContext handoff{task->id, task->prompt, std::move(events), diff, changedFiles(diff), std::nullopt};
+            constexpr std::size_t maxDiff = 24000;
+            auto boundedDiff = diff.substr(0, maxDiff);
+            auto verifications = context.store->verifications(*taskId, 1);
+            std::optional<VerificationRun> verification;
+            if (!verifications.empty()) {
+                verification = std::move(verifications.front());
+                if (verification->output.size() > 8000) verification->output.resize(8000);
+            }
+            HandoffContext handoff{task->id, task->prompt, std::move(events), boundedDiff, changedFiles(boundedDiff), std::move(verification)};
             return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
         }
         if (const auto taskId = pathId(target, "/graph")) {
@@ -276,7 +291,14 @@ Response handle(const Request &request, const Context &context) {
             if (!body.contains("command") || !body["command"].is_array()) return error(boost::beast::http::status::bad_request, "invalid_command", "command must be an argument array");
             std::vector<std::string> command;
             for (const auto &part : body["command"]) command.push_back(part.get<std::string>());
-            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(aegis::daemon::verification::run(command, context.repository)));
+            const auto taskId = body.value("task_id", std::string{});
+            if (taskId.empty()) return error(boost::beast::http::status::bad_request, "missing_task_id", "task_id is required");
+            if (!context.store->task(taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            std::optional<std::string> runId;
+            if (body.contains("run_id") && !body["run_id"].is_null()) runId = body["run_id"].get<std::string>();
+            auto result = aegis::daemon::verification::run(command, context.repository, taskId, runId);
+            context.store->saveVerification(result);
+            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(result));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
         }

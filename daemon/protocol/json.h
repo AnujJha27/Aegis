@@ -11,7 +11,7 @@ inline nlohmann::json toJson(const Task &task) {
 }
 
 inline nlohmann::json toJson(const AgentRun &run) {
-    return {{"id", run.id}, {"task_id", run.taskId}, {"agent", run.agent}, {"status", run.status}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
+    return {{"id", run.id}, {"task_id", run.taskId}, {"agent", run.agent}, {"status", run.status}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}, {"external_session_id", run.externalSessionId ? nlohmann::json(*run.externalSessionId) : nlohmann::json(nullptr)}};
 }
 
 inline nlohmann::json toJson(const AgentEvent &event) {
@@ -27,7 +27,7 @@ inline nlohmann::json toJson(const GitChange &change) {
 }
 
 inline nlohmann::json toJson(const VerificationRun &run) {
-    return {{"id", run.id}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
+    return {{"id", run.id}, {"task_id", run.taskId}, {"run_id", run.runId ? nlohmann::json(*run.runId) : nlohmann::json(nullptr)}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
 }
 
 inline nlohmann::json toJson(const HandoffContext &context) {

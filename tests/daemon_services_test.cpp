@@ -23,8 +23,9 @@ int main() {
     assert(!git.state().path.empty());
     assert(!git.state().branch.empty());
 
-    const auto verification = aegis::daemon::verification::run({"/usr/bin/true"}, repository);
+    const auto verification = aegis::daemon::verification::run({"/usr/bin/true"}, repository, "test-task");
     assert(verification.exitCode == 0);
+    assert(verification.taskId == "test-task");
 
     const auto event = aegis::daemon::agents::parseCodexJsonLine(
         R"({"type":"item.completed","item":{"type":"agent_message","text":"implemented"}})", "task", "run", "codex");

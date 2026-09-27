@@ -57,6 +57,14 @@ int main() {
     assert(created.body().find("inspect this") != std::string::npos);
     const auto taskId = nlohmann::json::parse(created.body()).at("id").get<std::string>();
 
+    const auto verification = request(server.port(), http::verb::post, "/api/verify",
+        nlohmann::json{{"task_id", taskId}, {"command", {"/usr/bin/printf", "verification-ok"}}}.dump());
+    assert(verification.result() == http::status::ok);
+    assert(nlohmann::json::parse(verification.body()).at("command").at(1) == "verification-ok");
+    const auto verificationHistory = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/verifications");
+    assert(verificationHistory.result() == http::status::ok);
+    assert(nlohmann::json::parse(verificationHistory.body()).size() == 1);
+
     const auto tasks = request(server.port(), http::verb::get, "/api/tasks");
     assert(tasks.result() == http::status::ok);
     assert(tasks.body().find("inspect this") != std::string::npos);
@@ -75,6 +83,7 @@ int main() {
     const auto handoff = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/handoff");
     assert(handoff.result() == http::status::ok);
     assert(handoff.body().find("inspect this") != std::string::npos);
+    assert(handoff.body().find("verification-ok") != std::string::npos);
 
     const auto graph = request(server.port(), http::verb::get, "/api/tasks/" + taskId + "/graph");
     assert(graph.result() == http::status::ok);

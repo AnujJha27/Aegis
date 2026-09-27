@@ -22,6 +22,7 @@ struct AgentRun {
     std::string status = "starting";
     std::int64_t startedAt = 0;
     std::int64_t finishedAt = 0;
+    std::optional<std::string> externalSessionId;
 };
 
 struct AgentEvent {
@@ -50,7 +51,9 @@ struct GitChange {
 
 struct VerificationRun {
     std::string id;
-    std::string command;
+    std::string taskId;
+    std::optional<std::string> runId;
+    std::vector<std::string> command;
     int exitCode = -1;
     std::string output;
     std::int64_t startedAt = 0;

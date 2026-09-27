@@ -22,12 +22,17 @@ public:
 
     Task createTask(std::string prompt, std::string repository);
     AgentRun startRun(const std::string &taskId, std::string agent);
+    bool updateRunStatus(const std::string &runId, const std::string &status);
+    bool setExternalSessionId(const std::string &runId, std::string sessionId);
+    std::optional<AgentRun> run(const std::string &runId) const;
     bool deleteRun(const std::string &runId);
     void appendEvent(const AgentEvent &event);
+    void saveVerification(const VerificationRun &verification);
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;
     std::vector<Task> tasks() const;
     std::vector<AgentEvent> events(const std::string &taskId) const;
+    std::vector<VerificationRun> verifications(const std::string &taskId, std::size_t limit = 20) const;
 
 private:
     void execute(const char *sql) const;
