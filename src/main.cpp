@@ -93,6 +93,18 @@ QString frontendRoot(const QString &repository) {
     return {};
 }
 
+bool openBrowser(const QString &url) {
+    if (qEnvironmentVariableIsSet("WSL_DISTRO_NAME")) {
+        const auto wslview = QStandardPaths::findExecutable("wslview");
+        if (!wslview.isEmpty() && QProcess::startDetached(wslview, {url})) return true;
+        const auto windowsCommand = QStandardPaths::findExecutable("cmd.exe");
+        if (!windowsCommand.isEmpty())
+            return QProcess::startDetached(windowsCommand, {"/c", "start", "", url});
+        return false;
+    }
+    return QDesktopServices::openUrl(QUrl(url));
+}
+
 int runDaemon(const QStringList &arguments) {
     const auto executable = daemonExecutable();
     if (executable.isEmpty()) {
@@ -142,7 +154,7 @@ int runWebApp(QApplication &app, const QString &repository) {
         daemon.waitForFinished(1000);
         return 1;
     }
-    if (!QDesktopServices::openUrl(QUrl(url)))
+    if (!openBrowser(url))
         QTextStream(stderr) << "aegis: browser could not be opened; use " << url << '\n';
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &daemon, [&] {
         if (daemon.state() == QProcess::NotRunning) return;
