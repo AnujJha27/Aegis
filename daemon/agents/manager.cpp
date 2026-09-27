@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <atomic>
+#include <iostream>
 #include <unistd.h>
 
 namespace aegis::daemon::agents {
@@ -76,6 +77,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     if (!store_.task(taskId)) return std::nullopt;
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
     auto run = store_.startRun(taskId, agent);
+    std::clog << "aegis_daemon: starting agent " << agent << " run " << run.id << '\n';
     EventSink sink = [this](AgentEvent event) { publish(std::move(event)); };
     SessionSink sessionSink = [this](const std::string &runId, std::string sessionId) {
         store_.setExternalSessionId(runId, std::move(sessionId));
@@ -101,6 +103,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     }
     const auto context = RunContext{taskId, run.id, agent, repository_, run.externalSessionId};
     if (!adapter->start(context)) {
+        std::cerr << "aegis_daemon: agent " << agent << " failed to start for run " << run.id << '\n';
         {
             std::lock_guard lock(mutex_);
             active_.erase(run.id);
@@ -180,6 +183,7 @@ bool Manager::terminate(const std::string &runId) {
         active_.erase(found);
     }
     adapter->terminate();
+    std::clog << "aegis_daemon: terminated agent run " << runId << '\n';
     {
         std::lock_guard lock(provenanceMutex_);
         running_.erase(runId);
@@ -201,6 +205,7 @@ void Manager::publish(AgentEvent event) {
             return;
         }
         if (event.type == "run.completed" || event.type == "run.failed" || event.type == "run.interrupted" || event.type == "run.terminated") {
+            std::clog << "aegis_daemon: run " << event.runId << " " << event.type.substr(4) << '\n';
             const auto status = event.type.substr(std::string("run.").size());
             store_.updateRunStatus(event.runId, status);
             std::lock_guard lock(provenanceMutex_);

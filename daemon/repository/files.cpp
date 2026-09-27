@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <fcntl.h>
 #include <map>
-#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <sys/stat.h>
@@ -81,21 +80,11 @@ bool internalPath(const std::string &path) {
     return false;
 }
 
-std::string objectIdFromOutput(const std::string &output, FileSource source, const std::string &path) {
-    if (output.empty()) return {};
-    const auto end = output.find('\0');
-    const auto record = std::string_view(output).substr(0, end);
-    const auto tab = record.find('\t');
-    if (tab == std::string_view::npos || record.substr(tab + 1) != path) return {};
-    std::istringstream header(std::string(record.substr(0, tab)));
-    std::string mode;
-    std::string kindOrObjectId;
-    std::string thirdField;
-    header >> mode >> kindOrObjectId >> thirdField;
-    if (source == FileSource::head) {
-        return kindOrObjectId == "blob" ? thirdField : std::string{};
-    }
-    return thirdField == "0" ? kindOrObjectId : std::string{};
+std::string objectIdFromOutput(std::string output) {
+    if (!output.empty() && output.back() == '\0') output.pop_back();
+    if (output.size() != 40 && output.size() != 64) return {};
+    if (!std::all_of(output.begin(), output.end(), [](unsigned char c) { return std::isxdigit(c); })) return {};
+    return output;
 }
 
 }
@@ -213,15 +202,15 @@ std::string Files::objectId(const std::string &path, FileSource source) const {
     if (source == FileSource::worktree || !git_.validRepository_) return {};
     std::vector<std::string> arguments;
     if (source == FileSource::head)
-        arguments = {"--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", path};
+        arguments = {"--literal-pathspecs", "ls-tree", "-z", "--format=%(objectname)", "HEAD", "--", path};
     else
-        arguments = {"--literal-pathspecs", "ls-files", "--stage", "-z", "--", path};
+        arguments = {"--literal-pathspecs", "ls-files", "--cached", "-z", "--format=%(objectname)", "--", path};
     const auto result = process::run(git_.command(std::move(arguments)), git_.path());
     if (result.exitCode != 0) {
         if (source == FileSource::head && process::run(git_.command({"rev-parse", "--verify", "HEAD"}), git_.path()).exitCode != 0) return {};
         throw std::runtime_error("could not inspect Git file object: " + result.output);
     }
-    return objectIdFromOutput(result.output, source, path);
+    return objectIdFromOutput(result.output);
 }
 
 FileContent Files::read(const std::string &path, FileSource source, bool loadLarge) const {
@@ -231,7 +220,8 @@ FileContent Files::read(const std::string &path, FileSource source, bool loadLar
 }
 
 FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
-    FileContent result{FileSource::worktree};
+    FileContent result;
+    result.source = FileSource::worktree;
     const auto root = std::filesystem::canonical(git_.path());
     std::error_code error;
     const auto resolved = std::filesystem::weakly_canonical(root / path, error);
@@ -291,7 +281,8 @@ FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
 }
 
 FileContent Files::readObject(const std::string &path, FileSource source, bool loadLarge) const {
-    FileContent result{source};
+    FileContent result;
+    result.source = source;
     const auto oid = objectId(path, source);
     if (oid.empty()) return result;
     const auto sizeResult = process::run(git_.command({"cat-file", "-s", oid}), git_.path());

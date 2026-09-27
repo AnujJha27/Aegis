@@ -13,6 +13,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cctype>
+#include <iostream>
 #include <sys/socket.h>
 
 namespace aegis::daemon::api {
@@ -28,15 +29,15 @@ bool Server::start(std::uint16_t port) {
     boost::system::error_code error;
     const auto endpoint = boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), port);
     acceptor_.open(endpoint.protocol(), error);
-    if (error) return false;
+    if (error) { std::cerr << "aegis_daemon: listener open failed: " << error.message() << '\n'; return false; }
     acceptor_.set_option(boost::asio::socket_base::reuse_address(true), error);
-    if (error) return false;
+    if (error) { std::cerr << "aegis_daemon: listener option failed: " << error.message() << '\n'; return false; }
     acceptor_.bind(endpoint, error);
-    if (error) return false;
+    if (error) { std::cerr << "aegis_daemon: loopback bind failed: " << error.message() << '\n'; return false; }
     acceptor_.listen(boost::asio::socket_base::max_listen_connections, error);
-    if (error) return false;
+    if (error) { std::cerr << "aegis_daemon: listener setup failed: " << error.message() << '\n'; return false; }
     acceptor_.non_blocking(true, error);
-    if (error) return false;
+    if (error) { std::cerr << "aegis_daemon: listener configuration failed: " << error.message() << '\n'; return false; }
     running_ = true;
     acceptThread_ = std::thread([this] { acceptLoop(); });
     return true;
@@ -77,13 +78,15 @@ void Server::acceptLoop() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
+            std::cerr << "aegis_daemon: accept failed: " << error.message() << '\n';
             return;
         }
         auto connection = std::make_shared<Connection>();
         connection->socket = std::move(socket);
         connection->worker = std::thread([this, connection] {
             try { serve(connection->socket); }
-            catch (...) { }
+            catch (const std::exception &error) { std::cerr << "aegis_daemon: connection failed: " << error.what() << '\n'; }
+            catch (...) { std::cerr << "aegis_daemon: connection failed with an unknown error\n"; }
             boost::system::error_code ignored;
             connection->socket->close(ignored);
             connection->finished = true;
@@ -107,10 +110,23 @@ void Server::acceptLoop() {
 
 void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) {
     boost::beast::flat_buffer buffer;
-    Request request;
+    boost::beast::http::request_parser<boost::beast::http::string_body> parser;
+    parser.body_limit(1024 * 1024);
     boost::system::error_code error;
-    boost::beast::http::read(*socket, buffer, request, error);
-    if (error) return;
+    boost::beast::http::read(*socket, buffer, parser, error);
+    if (error) {
+        if (error == boost::beast::http::error::body_limit) {
+            Response response{boost::beast::http::status::payload_too_large, 11};
+            response.set(boost::beast::http::field::content_type, "application/json");
+            response.body() = R"({"error":{"code":"request_too_large","message":"request body exceeds 1 MiB"}})";
+            response.prepare_payload();
+            boost::beast::http::write(*socket, response, error);
+        } else if (error != boost::beast::http::error::end_of_stream) {
+            std::cerr << "aegis_daemon: request read failed: " << error.message() << '\n';
+        }
+        return;
+    }
+    const auto request = parser.release();
     if (boost::beast::websocket::is_upgrade(request)) {
         if (request.target() == "/ws/events") {
             serveWebSocket(socket, request);
@@ -139,6 +155,9 @@ Response Server::serveStatic(const Request &request) const {
     const auto relativeCandidate = std::filesystem::relative(candidate, root);
     if (relativeCandidate.empty() || relativeCandidate.string().starts_with(".."))
         return Response{boost::beast::http::status::bad_request, 11};
+    std::error_code sizeError;
+    const auto size = std::filesystem::file_size(candidate, sizeError);
+    if (!sizeError && size > 16 * 1024 * 1024) return Response{boost::beast::http::status::payload_too_large, 11};
     std::ifstream input(candidate, std::ios::binary);
     if (!input) return Response{boost::beast::http::status::not_found, 11};
     std::string body((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
@@ -155,7 +174,7 @@ void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> 
     boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
     boost::system::error_code error;
     websocket.accept(request, error);
-    if (error) return;
+    if (error) { std::cerr << "aegis_daemon: event WebSocket handshake failed: " << error.message() << '\n'; return; }
     eventClients_.fetch_add(1);
     struct ClientCount final {
         std::atomic_size_t &count;
@@ -183,7 +202,7 @@ void Server::servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socke
     boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
     boost::system::error_code error;
     websocket.accept(request, error);
-    if (error) return;
+    if (error) { std::cerr << "aegis_daemon: PTY WebSocket handshake failed: " << error.message() << '\n'; return; }
     const std::string target(request.target());
     const auto runId = target.substr(std::string("/ws/pty/").size());
     websocket.read_message_max(16 * 1024);

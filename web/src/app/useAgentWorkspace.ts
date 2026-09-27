@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type AgentEvent, type AgentRun } from "./api";
-import { connectEvents } from "./events";
+import { connectEvents, type EventConnection } from "./events";
 
-export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent) => void) {
+export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent) => void, onReconnect?: () => void) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [connection, setConnection] = useState<EventConnection>("connecting");
   const onEventRef = useRef(onEvent);
+  const onReconnectRef = useRef(onReconnect);
   onEventRef.current = onEvent;
+  onReconnectRef.current = onReconnect;
 
   useEffect(() => {
     setRuns([]);
@@ -17,6 +20,18 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
     let active = true;
     let snapshotLoaded = false;
     const pending: AgentEvent[] = [];
+    const refreshSnapshot = async () => {
+      try {
+        const [loadedEvents, loadedRuns] = await Promise.all([api.events(taskId), api.runs(taskId)]);
+        if (!active) return;
+        const unique = new Map([...loadedEvents, ...pending].map((event) => [event.id, event]));
+        pending.length = 0;
+        snapshotLoaded = true;
+        setEvents([...unique.values()].slice(-500));
+        setRuns(loadedRuns);
+        setSelectedRunId((current) => loadedRuns.some((run) => run.id === current) ? current : loadedRuns.at(-1)?.id ?? "");
+      } catch { /* The connection indicator reports the failure; the next reconnect retries the snapshot. */ }
+    };
     const disconnect = connectEvents((event) => {
       onEventRef.current?.(event);
       if (event.taskId !== taskId) return;
@@ -26,14 +41,11 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
       }
       if (snapshotLoaded) setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
       else pending.push(event);
+    }, (state, reconnected) => {
+      setConnection(state);
+      if (reconnected) { void refreshSnapshot().then(() => onReconnectRef.current?.()); }
     });
-    Promise.all([api.events(taskId), api.runs(taskId)]).then(([loadedEvents, loadedRuns]) => {
-      if (!active) return;
-      snapshotLoaded = true;
-      setEvents([...loadedEvents, ...pending.filter((item) => !loadedEvents.some((event) => event.id === item.id))].slice(-500));
-      setRuns(loadedRuns);
-      setSelectedRunId(loadedRuns.at(-1)?.id ?? "");
-    });
+    void refreshSnapshot();
     return () => { active = false; disconnect(); };
   }, [taskId]);
 
@@ -42,5 +54,5 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
   const currentRunEvents = useMemo(() => currentRun ? currentEvents.filter((event) => event.runId === currentRun.id) : [], [currentEvents, currentRun]);
   const runFinished = currentRun ? ["completed", "failed", "interrupted", "terminated"].includes(currentRun.status) : false;
 
-  return { runs, setRuns, selectedRunId, setSelectedRunId, events, setEvents, currentRun, currentEvents, currentRunEvents, runFinished };
+  return { runs, setRuns, selectedRunId, setSelectedRunId, events, setEvents, currentRun, currentEvents, currentRunEvents, runFinished, connection };
 }

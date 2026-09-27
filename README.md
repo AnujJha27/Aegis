@@ -12,7 +12,9 @@ Build the frontend and native targets:
 
 ```bash
 cd web
-npm install
+npm ci
+npm run typecheck
+npm test
 npm run build
 cd ..
 cmake -S . -B build
@@ -25,7 +27,7 @@ Open a repository with the browser UI:
 ./build/aegis .
 ```
 
-The launcher starts the local daemon, serves the built frontend, chooses an available loopback port, and opens the browser. It owns the daemon process and shuts it down when the launcher exits. In managed launch mode, closing the browser session also ends the daemon after a short reconnect grace period. WSL uses `wslview` or `cmd.exe` when available.
+The launcher starts the local daemon, serves the built frontend, chooses an available loopback port, and opens the browser. It owns the daemon process and shuts it down when the launcher exits. In managed launch mode, closing the browser session also ends the daemon after a short reconnect grace period. WSL uses `wslview` or `cmd.exe` when available. `aegis --version` prints the build version and commit when known.
 
 For development, run the daemon directly and use the Vite proxy:
 
@@ -51,6 +53,8 @@ React + TypeScript + xterm.js
 
 The frontend owns presentation; the daemon owns domain state, process behavior, and persistence. An Aegis `Task` can contain multiple `AgentRun`s. Structured prompts and normalized output become semantic history; direct terminal keystrokes remain PTY transport and are not stored as individual input events. Codex runs retain the provider thread ID so later prompts resume the same conversation.
 
+Review is a read-only code inspection workspace. It uses Monaco to render working-tree files and Git comparisons; it does not save or edit source. The agent writes, the human inspects, and requested revisions go back through the agent. File comparisons can show all changes (`HEAD ↔ WORKTREE`), staged changes (`HEAD ↔ INDEX`), or unstaged changes (`INDEX ↔ WORKTREE`).
+
 See [docs/architecture.md](docs/architecture.md) for lifecycle states, interruption behavior, schema migration, API/event contracts, ownership, and security assumptions.
 
 ## Requirements and build options
@@ -72,8 +76,22 @@ Its historical CLI utilities (`status`, `review`, `verify`, `analyze`, and other
 - Create tasks and launch Codex, Claude Code, OpenCode, or a shell session.
 - Continue Codex prompts in the same provider conversation; interrupt a turn without discarding a resumable run.
 - Use xterm.js for interactive PTY sessions and CLI setup prompts.
-- Review current Git changes, run an argv-based verification command, and restore recent verification evidence after reload.
+- Inspect changed or repository files, compare staged/unstaged changes, stage or unstage in context, and restore verification evidence after reload.
+- Jump from a task's file-change activity directly to the read-only diff; use `Ctrl/Cmd+P` to quick-open a repository file.
 - Inspect bounded handoff context before switching agents.
 - Stage, unstage, commit, push, pull, and switch local branches through the Git view.
 
-The daemon serves only on `127.0.0.1`. Task data is stored in `<repository>/.aegis/aegis.sqlite`; data is sent to an external service only when the selected coding agent itself requires it.
+The daemon serves only on `127.0.0.1`. HTTP request bodies are capped at 1 MiB, PTY WebSocket frames at 16 KiB, static assets at 16 MiB, and source file responses at 1 MiB by default (explicit load is capped at 8 MiB). File reads reject traversal and symlink escapes. Task data is stored in `<repository>/.aegis/aegis.sqlite`; data is sent to an external service only when the selected coding agent itself requires it.
+
+## Build and install
+
+For a self-contained Linux/WSL install directory:
+
+```bash
+./scripts/build-release.sh                 # writes ./dist/bin
+./dist/bin/aegis /path/to/repository
+```
+
+Pass a different destination as the script's first argument. The release directory contains `aegis`, `aegis_daemon`, and the frontend bundle. CI runs the Linux build and tests on pushes and pull requests, plus a separate ASan/UBSan daemon test build. Native Windows is not supported; Linux and WSL are the supported environments.
+
+Run `aegis --version` when reporting issues. The daemon also exposes `GET /api/version` with the schema version.

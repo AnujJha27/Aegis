@@ -1,5 +1,7 @@
 /build/
 /build-core/
+/build-sanitize/
+/dist/
 /.aegis/
 /.frontend.md
 /.aegis-git/

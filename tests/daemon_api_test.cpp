@@ -38,6 +38,9 @@ int main() {
     const auto health = request(context, http::verb::get, "/api/health");
     assert(health.result() == http::status::ok);
     assert(health.body().find("healthy") != std::string::npos);
+    const auto version = request(context, http::verb::get, "/api/version");
+    assert(version.result() == http::status::ok);
+    assert(nlohmann::json::parse(version.body()).at("schema_version") == 1);
 
     const auto file = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&source=worktree");
     assert(file.result() == http::status::ok);

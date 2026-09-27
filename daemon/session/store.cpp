@@ -33,7 +33,7 @@ bool terminal(const std::string &status) {
 std::optional<AgentRun> readRun(sqlite3_stmt *statement) {
     if (sqlite3_column_type(statement, 0) == SQLITE_NULL) return std::nullopt;
     AgentRun result{columnText(statement, 0), columnText(statement, 1), columnText(statement, 2),
-                    columnText(statement, 3), sqlite3_column_int64(statement, 4), sqlite3_column_int64(statement, 5)};
+                    columnText(statement, 3), sqlite3_column_int64(statement, 4), sqlite3_column_int64(statement, 5), std::nullopt};
     if (sqlite3_column_type(statement, 6) != SQLITE_NULL) result.externalSessionId = columnText(statement, 6);
     return result;
 }
@@ -71,22 +71,28 @@ Store::Store(const std::filesystem::path &path) {
         const auto message = database_ ? sqlite3_errmsg(database_) : "could not open database";
         if (database_) sqlite3_close(database_);
         database_ = nullptr;
-        throw std::runtime_error(message);
+        throw std::runtime_error("database " + path.string() + ": " + message);
     }
-    Statement schemaVersion(database_, "PRAGMA user_version");
-    check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
-    const auto previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
-    if (previousVersion > 1) throw std::runtime_error("database schema is newer than this Aegis build");
-    execute("PRAGMA foreign_keys = ON;");
-    execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
-    execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);");
-    execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);");
-    if (!hasColumn(database_, "runs", "external_session_id"))
-        execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
-    execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
-    execute("CREATE INDEX IF NOT EXISTS verifications_task_finished ON verifications(task_id, finished_at DESC);");
-    execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
-    execute("PRAGMA user_version = 1;");
+    try {
+        Statement schemaVersion(database_, "PRAGMA user_version");
+        check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
+        const auto previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
+        if (previousVersion > 1) throw std::runtime_error("database schema is newer than this Aegis build");
+        execute("PRAGMA foreign_keys = ON;");
+        execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
+        execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);");
+        execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);");
+        if (!hasColumn(database_, "runs", "external_session_id"))
+            execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
+        execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
+        execute("CREATE INDEX IF NOT EXISTS verifications_task_finished ON verifications(task_id, finished_at DESC);");
+        execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
+        execute("PRAGMA user_version = 1;");
+    } catch (const std::exception &error) {
+        sqlite3_close(database_);
+        database_ = nullptr;
+        throw std::runtime_error("database " + path.string() + ": " + error.what());
+    }
 }
 
 Store::~Store() {
@@ -117,7 +123,7 @@ Task Store::createTask(std::string prompt, std::string repository) {
 
 AgentRun Store::startRun(const std::string &taskId, std::string agent) {
     std::lock_guard lock(mutex_);
-    AgentRun run{id("run"), taskId, std::move(agent), "starting", now(), 0};
+    AgentRun run{id("run"), taskId, std::move(agent), "starting", now(), 0, std::nullopt};
     Statement statement(database_, "INSERT INTO runs (id, task_id, agent, status, started_at) VALUES (?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, run.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run id");
     check(sqlite3_bind_text(statement.get(), 2, run.taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run task");

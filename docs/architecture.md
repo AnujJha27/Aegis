@@ -89,8 +89,20 @@ The API uses structured errors:
 | DELETE | `/api/runs/:id` | Delete a terminal run and its events |
 | POST | `/api/verify` | Execute and persist an argv-array verification for a task and optional run |
 | POST | `/api/git/stage`, `/unstage`, `/commit`, `/branch`, `/pull`, `/push` | Local Git actions |
+| GET | `/api/files?path=...&scope=changed|all` | Lazy repository tree; `recursive=1` returns a bounded quick-open list |
+| GET | `/api/files/content?path=...&source=head|index|worktree` | One file at a Git/worktree source |
+| GET | `/api/files/compare?path=...&base=head|index&target=index|worktree` | Structured old/new contents for a review diff |
+| GET | `/api/version` | Build version, Git revision when available, and SQLite schema version |
 
 `/ws/events` streams normalized semantic events. `/ws/pty/:run_id` is a separate interactive byte channel; resize frames are JSON control messages, while terminal text frames are written directly to the PTY.
+
+## Read-only file review
+
+`Files` is the repository-layer boundary for lazy tree enumeration and source reads. It uses Git-aware path enumeration, excludes `.git`, `.aegis`, and `node_modules`, and limits each listing to 500 entries. `HEAD`, `INDEX`, and `WORKTREE` are explicit internal sources; the interface labels them All Changes, Staged, and Unstaged. Rename comparisons use the preserved old path. Missing sides (new/deleted files) are represented as empty content; binary content is identified without sending its bytes. Text is capped at 1 MiB by default and 8 MiB after an explicit user action.
+
+Worktree reads validate repository-relative paths, canonicalize the target, and open it beneath the repository using no-follow path traversal. Git-object reads use argv-based Git commands and literal pathspecs. The React viewer is strictly read-only: Monaco has editor mutation disabled and only renders file contents or diffs. Monaco and its workers are bundled locally and the renderer loads only after a file is opened; no CDN is used. Review offers changed/all files, a small tab set, quick-open, inline/split diff, contextual staging, verification, and activity-to-file navigation. Task attribution is shown only when an event identifies the file; repository dirt is otherwise unowned.
+
+HTTP request bodies are capped at 1 MiB, PTY WebSocket messages at 16 KiB, and static assets at 16 MiB. File responses obey the source-size caps above. Diagnostics go to stderr and exclude prompts, PTY input, and environment credentials. SQLite initialization errors include the database path and do not overwrite failed databases.
 
 ## Launch and shutdown
 
@@ -105,6 +117,8 @@ The server binds explicitly to `127.0.0.1`. The default CMake build does not fin
 - Process commands use argv boundaries, not shell interpolation.
 - Static serving is limited to the configured frontend root and rejects traversal attempts.
 - Verification requires a nonempty string-array command and an existing task; an optional run must belong to that task.
+- File APIs reject absolute paths, `..`, NUL bytes, and resolved symlink escapes; Git paths are passed as argument-array values with literal pathspec handling.
+- The launcher supports Linux/WSL only; the default build remains Qt-free, and release install places the daemon and static web bundle together under `bin/`.
 
 ## Deliberately deferred
 

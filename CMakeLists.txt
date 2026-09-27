@@ -1,9 +1,37 @@
 cmake_minimum_required(VERSION 3.24)
-project(aegis LANGUAGES CXX)
+project(aegis VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(AEGIS_BUILD_LEGACY "Build the optional Qt prototype and its tests" OFF)
+option(AEGIS_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+set(AEGIS_GIT_COMMIT "unknown")
+find_package(Git QUIET)
+if(Git_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE AEGIS_GIT_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(AEGIS_GIT_ROOT STREQUAL CMAKE_SOURCE_DIR)
+        execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE AEGIS_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/.aegis-git")
+        execute_process(COMMAND ${GIT_EXECUTABLE} "--git-dir=${CMAKE_SOURCE_DIR}/.aegis-git" "--work-tree=${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+            OUTPUT_VARIABLE AEGIS_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+endif()
+
+function(aegis_quality target)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        if(target MATCHES "_test$")
+            target_compile_options(${target} PRIVATE -UNDEBUG)
+        endif()
+        if(AEGIS_ENABLE_SANITIZERS)
+            target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+        endif()
+    endif()
+endfunction()
 
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
@@ -36,6 +64,7 @@ add_library(aegis_daemon_api
 target_include_directories(aegis_daemon_api PUBLIC .)
 target_compile_definitions(aegis_daemon_api PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
 target_link_libraries(aegis_daemon_api PUBLIC aegis_daemon_session aegis_daemon_services Threads::Threads)
+target_compile_definitions(aegis_daemon_api PRIVATE AEGIS_VERSION="${PROJECT_VERSION}" AEGIS_GIT_COMMIT="${AEGIS_GIT_COMMIT}")
 
 add_executable(aegis_daemon daemon/main.cpp daemon/app.cpp)
 target_include_directories(aegis_daemon PRIVATE .)
@@ -43,6 +72,7 @@ target_link_libraries(aegis_daemon PRIVATE aegis_daemon_api aegis_daemon_service
 
 add_executable(aegis src/launcher.cpp)
 target_compile_definitions(aegis PRIVATE "AEGIS_SOURCE_WEB_ROOT=\"${CMAKE_SOURCE_DIR}/web/dist\"")
+target_compile_definitions(aegis PRIVATE AEGIS_VERSION="${PROJECT_VERSION}" AEGIS_GIT_COMMIT="${AEGIS_GIT_COMMIT}")
 target_link_libraries(aegis PRIVATE Threads::Threads)
 
 enable_testing()
@@ -65,6 +95,7 @@ target_link_libraries(daemon_repository_test PRIVATE aegis_daemon_services)
 add_test(NAME daemon_repository_test COMMAND daemon_repository_test)
 
 add_test(NAME aegis_launcher_help COMMAND aegis --help)
+add_test(NAME aegis_launcher_version COMMAND aegis --version)
 
 if(AEGIS_BUILD_LEGACY)
     find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
@@ -122,6 +153,14 @@ if(AEGIS_BUILD_LEGACY)
     add_test(NAME aegis_cli_help COMMAND aegis_legacy --help)
     install(TARGETS aegis_legacy RUNTIME DESTINATION bin)
 endif()
+
+set(AEGIS_QUALITY_TARGETS aegis_daemon_session aegis_daemon_services aegis_daemon_api aegis_daemon aegis daemon_store_test daemon_api_test daemon_services_test daemon_repository_test)
+if(AEGIS_BUILD_LEGACY)
+    list(APPEND AEGIS_QUALITY_TARGETS aegis_core aegis_analysis aegis_session aegis_terminal aegis_ui aegis_transcript aegis_legacy aegis_core_test aegis_analysis_test aegis_session_test aegis_terminal_test aegis_ui_test aegis_transcript_test)
+endif()
+foreach(target IN LISTS AEGIS_QUALITY_TARGETS)
+    aegis_quality(${target})
+endforeach()
 
 install(TARGETS aegis aegis_daemon RUNTIME DESTINATION bin)
 install(DIRECTORY web/dist/ DESTINATION bin/web)

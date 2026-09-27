@@ -55,7 +55,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
         nlohmann::json records = nlohmann::json::array();
         for (const auto &event : context.store->events(*taskId)) {
-            ProvenanceRecord record{event.id, event.taskId, event.runId, event.agent, event.type, event.timestamp};
+            ProvenanceRecord record{event.id, event.taskId, event.runId, event.agent, event.type, event.timestamp, "unknown", {}};
             if (event.type == "file.changed" && !event.content.empty()) record.changedFiles.push_back(event.content);
             records.push_back(protocol::toJson(record));
         }

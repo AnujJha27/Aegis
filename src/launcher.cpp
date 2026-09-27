@@ -57,6 +57,7 @@ std::string companion(const std::string &name, const std::string &executable) {
 std::string frontendRoot(const std::string &repository, const std::string &executable) {
     std::vector<std::filesystem::path> candidates{
         std::filesystem::path(executable).parent_path() / "web" / "dist",
+        std::filesystem::path(executable).parent_path() / "web",
         std::filesystem::current_path() / "web" / "dist",
         std::filesystem::path(repository) / "web" / "dist"};
 #ifdef AEGIS_SOURCE_WEB_ROOT
@@ -173,13 +174,23 @@ int directDaemon(const std::string &daemon, int argc, char **argv) {
 
 int main(int argc, char **argv) {
     const auto executable = selfPath(argv[0]);
+    if (argc > 1 && std::string_view(argv[1]) == "--version") {
+#ifndef AEGIS_VERSION
+#define AEGIS_VERSION "dev"
+#endif
+#ifndef AEGIS_GIT_COMMIT
+#define AEGIS_GIT_COMMIT "unknown"
+#endif
+        std::cout << "Aegis " << AEGIS_VERSION << " (" << AEGIS_GIT_COMMIT << ")\n";
+        return 0;
+    }
     const auto daemon = companion("aegis_daemon", executable);
     if (argc > 1 && std::string_view(argv[1]) == "--daemon") {
         if (daemon.empty()) { std::cerr << "aegis: aegis_daemon was not found beside the executable or on PATH\n"; return 1; }
         return directDaemon(daemon, argc, argv);
     }
     if (argc > 1 && (std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h")) {
-        std::cout << "Usage: aegis [repository]\n       aegis --daemon --repo <path> --port <port> --web-root <path>\n       aegis --legacy-ui [repository] (with AEGIS_BUILD_LEGACY=ON)\n";
+        std::cout << "Usage: aegis [repository]\n       aegis --daemon --repo <path> --port <port> --web-root <path>\n       aegis --version\n       aegis --legacy-ui [repository] (with AEGIS_BUILD_LEGACY=ON)\n";
         return 0;
     }
 

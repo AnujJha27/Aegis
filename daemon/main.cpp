@@ -46,6 +46,7 @@ int main(int argc, char **argv) {
             std::cerr << "aegis_daemon: failed to bind 127.0.0.1\n";
             return 1;
         }
+        std::clog << "aegis_daemon: listening at 127.0.0.1:" << app.port() << " for " << std::filesystem::absolute(repository).lexically_normal().string() << '\n';
         std::cout << "http://127.0.0.1:" << app.port() << "/\n" << std::flush;
         bool browserConnected = false;
         auto disconnectedAt = std::chrono::steady_clock::time_point{};
@@ -61,6 +62,7 @@ int main(int argc, char **argv) {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        std::clog << "aegis_daemon: shutting down\n";
     } catch (const std::exception &error) {
         std::cerr << "aegis_daemon: " << error.what() << '\n';
         return 1;

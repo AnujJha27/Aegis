@@ -92,7 +92,7 @@ int main() {
     auto waitForEvents = [&](const std::string &type, std::size_t count) {
         std::unique_lock lock(codexMutex);
         return codexChanged.wait_for(lock, std::chrono::seconds(3), [&] {
-            return std::count_if(codexOutput.begin(), codexOutput.end(), [&](const auto &event) { return event.type == type; }) >= count;
+            return static_cast<std::size_t>(std::count_if(codexOutput.begin(), codexOutput.end(), [&](const auto &event) { return event.type == type; })) >= count;
         });
     };
     assert(waitForEvents("turn.completed", 1));
@@ -170,7 +170,7 @@ int main() {
             ptyOutput += event.content;
             ptyOutputChanged.notify_all();
         });
-    assert(pty.start({"task", "pty-run", "shell", repository}));
+    assert(pty.start({"task", "pty-run", "shell", repository, std::nullopt}));
     {
         std::unique_lock lock(ptyMutex);
         assert(ptyOutputChanged.wait_for(lock, std::chrono::seconds(2), [&] { return ptyOutput.find("30 100") != std::string::npos; }));
@@ -193,7 +193,7 @@ int main() {
             ptyFailure = event.type;
             ptyFailureChanged.notify_all();
         });
-    assert(failingPty.start({"task", "pty-failure", "shell", repository}));
+    assert(failingPty.start({"task", "pty-failure", "shell", repository, std::nullopt}));
     {
         std::unique_lock lock(ptyFailureMutex);
         assert(ptyFailureChanged.wait_for(lock, std::chrono::seconds(2), [&] { return !ptyFailure.empty(); }));

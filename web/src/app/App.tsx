@@ -9,7 +9,7 @@ import { useTasks } from "./useTasks";
 export function App() {
   const taskState = useTasks();
   const { tasks, selectedTask, setSelectedTask } = taskState;
-  const workspace = useAgentWorkspace(selectedTask?.id, onEvent);
+  const workspace = useAgentWorkspace(selectedTask?.id, onEvent, reconnectRefresh);
   const review = useReviewData(selectedTask?.id);
   const [repository, setRepository] = useState<Repository>();
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -22,6 +22,7 @@ export function App() {
   const [openFilePath, setOpenFilePath] = useState("");
   const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
+  const [daemonConnection, setDaemonConnection] = useState("connecting");
   const [error, setError] = useState("");
   const currentRun = workspace.currentRun;
   const runFinished = workspace.runFinished;
@@ -37,8 +38,9 @@ export function App() {
         setGitChanges(git.files);
         setGitStatus(git);
         setBusy("Ready");
+        setDaemonConnection("connected");
       })
-      .catch((reason: Error) => { setError(reason.message); setBusy("Daemon unavailable"); });
+      .catch((reason: Error) => { setError(reason.message); setBusy("Daemon unavailable"); setDaemonConnection("unavailable"); });
   }, []);
 
   function onEvent(event: import("./api").AgentEvent) {
@@ -53,6 +55,11 @@ export function App() {
     setGitChanges(git.files);
     setGitStatus(git);
     await review.refresh();
+  }
+
+  async function reconnectRefresh() {
+    try { await refreshGit(); setDaemonConnection("connected"); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not refresh repository state"); setDaemonConnection("unavailable"); }
   }
 
   async function createTask() {
@@ -118,7 +125,7 @@ export function App() {
     run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} runFinished={runFinished}
     onPtyInput={pty.send} onPtyResize={pty.resize} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
     prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
-    screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer}
+    screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
     onVerify={verify} error={error} openFilePath={openFilePath} onOpenFile={openReviewFile} />;
