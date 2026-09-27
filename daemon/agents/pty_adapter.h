@@ -14,16 +14,16 @@ public:
     PtyAdapter(std::string name, std::vector<std::string> command, EventSink sink);
     ~PtyAdapter() override;
 
-    Capabilities capabilities() const override { return {false, true}; }
+    Capabilities capabilities() const override { return {false, true, true, true}; }
     bool start(const RunContext &context) override;
-    void send(std::string_view message) override;
+    SendResult send(std::string_view message) override;
     bool sendPty(std::string_view input) override;
     bool resizePty(unsigned short cols, unsigned short rows) override;
     void interrupt() override;
     void terminate() override;
 
 private:
-    void readLoop();
+    void readLoop(int master, int child);
     void publish(std::string type, std::string content);
 
     std::string name_;

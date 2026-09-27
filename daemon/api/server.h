@@ -6,7 +6,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 namespace aegis::daemon::api {
 
@@ -21,12 +24,19 @@ public:
     bool start(std::uint16_t port = 0);
     void stop();
     std::uint16_t port() const;
+    std::size_t activeEventClients() const { return eventClients_.load(); }
 
 private:
+    struct Connection {
+        std::shared_ptr<boost::asio::ip::tcp::socket> socket;
+        std::thread worker;
+        std::atomic_bool finished = false;
+    };
+
     void acceptLoop();
-    void serve(boost::asio::ip::tcp::socket socket);
-    void serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &request);
-    void servePtyWebSocket(boost::asio::ip::tcp::socket socket, const Request &request);
+    void serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket);
+    void serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request);
+    void servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request);
     Response serveStatic(const Request &request) const;
 
     Context context_;
@@ -34,6 +44,9 @@ private:
     boost::asio::ip::tcp::acceptor acceptor_;
     std::atomic_bool running_ = false;
     std::thread acceptThread_;
+    std::mutex connectionsMutex_;
+    std::vector<std::shared_ptr<Connection>> connections_;
+    std::atomic_size_t eventClients_ = 0;
 };
 
 }

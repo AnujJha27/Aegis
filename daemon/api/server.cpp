@@ -13,6 +13,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cctype>
+#include <sys/socket.h>
 
 namespace aegis::daemon::api {
 
@@ -46,6 +47,17 @@ void Server::stop() {
     boost::system::error_code ignored;
     acceptor_.close(ignored);
     if (acceptThread_.joinable()) acceptThread_.join();
+    std::vector<std::shared_ptr<Connection>> connections;
+    {
+        std::lock_guard lock(connectionsMutex_);
+        for (const auto &connection : connections_) {
+            const auto descriptor = connection->socket->native_handle();
+            if (descriptor >= 0) ::shutdown(descriptor, SHUT_RDWR);
+        }
+        connections.swap(connections_);
+    }
+    for (const auto &connection : connections)
+        if (connection->worker.joinable()) connection->worker.join();
 }
 
 std::uint16_t Server::port() const {
@@ -57,8 +69,8 @@ std::uint16_t Server::port() const {
 void Server::acceptLoop() {
     while (running_) {
         boost::system::error_code error;
-        boost::asio::ip::tcp::socket socket(io_);
-        acceptor_.accept(socket, error);
+        auto socket = std::make_shared<boost::asio::ip::tcp::socket>(io_);
+        acceptor_.accept(*socket, error);
         if (error) {
             if (!running_) return;
             if (error == boost::asio::error::would_block || error == boost::asio::error::try_again) {
@@ -67,29 +79,51 @@ void Server::acceptLoop() {
             }
             return;
         }
-        std::thread(&Server::serve, this, std::move(socket)).detach();
+        auto connection = std::make_shared<Connection>();
+        connection->socket = std::move(socket);
+        connection->worker = std::thread([this, connection] {
+            try { serve(connection->socket); }
+            catch (...) { }
+            boost::system::error_code ignored;
+            connection->socket->close(ignored);
+            connection->finished = true;
+        });
+        std::vector<std::shared_ptr<Connection>> completed;
+        {
+            std::lock_guard lock(connectionsMutex_);
+            auto it = connections_.begin();
+            while (it != connections_.end()) {
+                if ((*it)->finished) {
+                    completed.push_back(std::move(*it));
+                    it = connections_.erase(it);
+                } else ++it;
+            }
+            connections_.push_back(std::move(connection));
+        }
+        for (const auto &finished : completed)
+            if (finished->worker.joinable()) finished->worker.join();
     }
 }
 
-void Server::serve(boost::asio::ip::tcp::socket socket) {
+void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) {
     boost::beast::flat_buffer buffer;
     Request request;
     boost::system::error_code error;
-    boost::beast::http::read(socket, buffer, request, error);
+    boost::beast::http::read(*socket, buffer, request, error);
     if (error) return;
     if (boost::beast::websocket::is_upgrade(request)) {
         if (request.target() == "/ws/events") {
-            serveWebSocket(std::move(socket), request);
+            serveWebSocket(socket, request);
             return;
         }
         if (request.target().starts_with("/ws/pty/")) {
-            servePtyWebSocket(std::move(socket), request);
+            servePtyWebSocket(socket, request);
             return;
         }
     }
     const auto response = request.target().starts_with("/api/") ? handle(request, context_) : serveStatic(request);
-    boost::beast::http::write(socket, response, error);
-    socket.shutdown(boost::asio::ip::tcp::socket::shutdown_send, error);
+    boost::beast::http::write(*socket, response, error);
+    socket->shutdown(boost::asio::ip::tcp::socket::shutdown_send, error);
 }
 
 Response Server::serveStatic(const Request &request) const {
@@ -117,24 +151,36 @@ Response Server::serveStatic(const Request &request) const {
     return response;
 }
 
-void Server::serveWebSocket(boost::asio::ip::tcp::socket socket, const Request &request) {
-    boost::beast::websocket::stream<boost::asio::ip::tcp::socket> websocket(std::move(socket));
+void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request) {
+    boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
     boost::system::error_code error;
     websocket.accept(request, error);
     if (error) return;
+    eventClients_.fetch_add(1);
+    struct ClientCount final {
+        std::atomic_size_t &count;
+        ~ClientCount() { count.fetch_sub(1); }
+    } clientCount{eventClients_};
     const auto subscription = context_.events->subscribe();
+    auto nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (running_) {
         AgentEvent event;
-        if (!context_.events->wait(subscription, event, std::chrono::milliseconds(250))) continue;
-        websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
-        if (error) break;
+        if (context_.events->wait(subscription, event, std::chrono::milliseconds(250))) {
+            websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
+            if (error) break;
+        }
+        if (std::chrono::steady_clock::now() >= nextPing) {
+            websocket.ping({}, error);
+            if (error) break;
+            nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        }
     }
     context_.events->unsubscribe(subscription);
     websocket.close(boost::beast::websocket::close_code::normal, error);
 }
 
-void Server::servePtyWebSocket(boost::asio::ip::tcp::socket socket, const Request &request) {
-    boost::beast::websocket::stream<boost::asio::ip::tcp::socket> websocket(std::move(socket));
+void Server::servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request) {
+    boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
     boost::system::error_code error;
     websocket.accept(request, error);
     if (error) return;

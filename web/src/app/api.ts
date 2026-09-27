@@ -23,6 +23,8 @@ export type Agent = {
   available: boolean;
   structured: boolean;
   interactive: boolean;
+  resumable: boolean;
+  interruptible: boolean;
 };
 
 export type AgentRun = {
@@ -32,6 +34,7 @@ export type AgentRun = {
   status: string;
   startedAt: number;
   finishedAt: number;
+  externalSessionId?: string;
 };
 
 export type AgentEvent = {
@@ -46,7 +49,9 @@ export type AgentEvent = {
 
 export type VerificationRun = {
   id: string;
-  command: string;
+  taskId: string;
+  runId: string | null;
+  command: string[];
   exitCode: number;
   output: string;
   startedAt: number;
@@ -87,9 +92,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0) });
-const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0) });
+const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0), externalSessionId: typeof value.external_session_id === "string" ? value.external_session_id : undefined });
 export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0) });
-const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), command: String(value.command), exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt) });
+const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt) });
 
 export const api = {
   repository: () => request<Repository>("/api/repository"),
@@ -105,6 +110,7 @@ export const api = {
   pull: () => request<GitStatus>("/api/git/pull", { method: "POST", body: "{}" }),
   push: () => request<GitStatus>("/api/git/push", { method: "POST", body: "{}" }),
   runs: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/runs`)).map(run),
+  verifications: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/verifications`)).map(verification),
   handoff: async (taskId: string) => {
     const context = await request<Omit<HandoffContext, "recent_events"> & { recent_events: Record<string, unknown>[] }>(`/api/tasks/${taskId}/handoff`);
     return { ...context, recent_events: context.recent_events.map(agentEvent) };
@@ -115,5 +121,5 @@ export const api = {
   launch: async (taskId: string, agent: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify({ agent }) })),
   deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),
   send: (runId: string, message: string) => request<{ status: string }>(`/api/runs/${runId}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
-  verify: async (command: string[]) => verification(await request<Record<string, unknown>>("/api/verify", { method: "POST", body: JSON.stringify({ command }) })),
+  verify: async (taskId: string, command: string[], runId?: string) => verification(await request<Record<string, unknown>>("/api/verify", { method: "POST", body: JSON.stringify({ task_id: taskId, run_id: runId ?? null, command }) })),
 };

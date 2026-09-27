@@ -27,7 +27,11 @@ public:
     bool push(std::string &output) const;
 
 private:
+    std::vector<std::string> command(std::vector<std::string> arguments) const;
+
     std::filesystem::path path_;
+    std::filesystem::path gitDirectory_;
+    bool validRepository_ = false;
 };
 
 }

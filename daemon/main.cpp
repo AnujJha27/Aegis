@@ -21,6 +21,11 @@ std::string argument(int argc, char **argv, const std::string &name, std::string
     return fallback;
 }
 
+bool hasArgument(int argc, char **argv, const std::string &name) {
+    for (int index = 1; index < argc; ++index) if (argv[index] == name) return true;
+    return false;
+}
+
 }
 
 int main(int argc, char **argv) {
@@ -28,6 +33,7 @@ int main(int argc, char **argv) {
     const auto webRoot = argument(argc, argv, "--web-root");
     const auto portText = argument(argc, argv, "--port", "0");
     const auto port = static_cast<std::uint16_t>(std::strtoul(portText.c_str(), nullptr, 10));
+    const bool managed = hasArgument(argc, argv, "--managed");
     if (!std::filesystem::is_directory(repository)) {
         std::cerr << "aegis_daemon: repository is not a directory\n";
         return 2;
@@ -41,7 +47,20 @@ int main(int argc, char **argv) {
             return 1;
         }
         std::cout << "http://127.0.0.1:" << app.port() << "/\n" << std::flush;
-        while (!stopping) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        bool browserConnected = false;
+        auto disconnectedAt = std::chrono::steady_clock::time_point{};
+        while (!stopping) {
+            if (managed) {
+                if (app.activeEventClients() > 0) {
+                    browserConnected = true;
+                    disconnectedAt = {};
+                } else if (browserConnected) {
+                    if (disconnectedAt == std::chrono::steady_clock::time_point{}) disconnectedAt = std::chrono::steady_clock::now();
+                    if (std::chrono::steady_clock::now() - disconnectedAt > std::chrono::seconds(3)) break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     } catch (const std::exception &error) {
         std::cerr << "aegis_daemon: " << error.what() << '\n';
         return 1;

@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace aegis::daemon::repository {
@@ -24,9 +26,54 @@ bool validPath(const std::string &value, std::string &error) {
     return true;
 }
 
+bool gitDirectory(const std::filesystem::path &path) {
+    return std::filesystem::is_regular_file(path / "HEAD");
 }
 
-GitRepository::GitRepository(std::filesystem::path path) : path_(std::move(path)) {}
+bool validGitEntry(const std::filesystem::path &root) {
+    const auto entry = root / ".git";
+    if (std::filesystem::is_directory(entry)) return gitDirectory(entry);
+    if (!std::filesystem::is_regular_file(entry)) return false;
+    std::ifstream input(entry);
+    std::string line;
+    std::getline(input, line);
+    constexpr std::string_view prefix = "gitdir:";
+    if (!line.starts_with(prefix)) return false;
+    auto target = std::filesystem::path(line.substr(prefix.size()));
+    if (target.is_relative()) target = root / target;
+    return gitDirectory(target.lexically_normal());
+}
+
+}
+
+GitRepository::GitRepository(std::filesystem::path path)
+    : path_(std::filesystem::absolute(std::move(path)).lexically_normal()) {
+    for (auto candidate = path_; !candidate.empty(); candidate = candidate.parent_path()) {
+        if (validGitEntry(candidate)) {
+            path_ = candidate;
+            validRepository_ = true;
+            return;
+        }
+        const auto aegisDirectory = candidate / ".aegis-git";
+        if (gitDirectory(aegisDirectory)) {
+            path_ = candidate;
+            gitDirectory_ = aegisDirectory;
+            validRepository_ = true;
+            return;
+        }
+        if (candidate == candidate.root_path()) break;
+    }
+}
+
+std::vector<std::string> GitRepository::command(std::vector<std::string> arguments) const {
+    std::vector<std::string> result{"git"};
+    if (!gitDirectory_.empty()) {
+        result.push_back("--git-dir=" + gitDirectory_.string());
+        result.push_back("--work-tree=" + path_.string());
+    }
+    result.insert(result.end(), std::make_move_iterator(arguments.begin()), std::make_move_iterator(arguments.end()));
+    return result;
+}
 
 const std::filesystem::path &GitRepository::path() const {
     return path_;
@@ -35,8 +82,9 @@ const std::filesystem::path &GitRepository::path() const {
 RepositoryState GitRepository::state() const {
     RepositoryState result;
     result.path = path_.string();
-    const auto status = process::run({"git", "status", "--short", "--branch"}, path_).output;
-    const auto numstat = process::run({"git", "diff", "HEAD", "--numstat"}, path_).output;
+    if (!validRepository_) return result;
+    const auto status = process::run(command({"status", "--short", "--branch"}), path_).output;
+    const auto numstat = process::run(command({"diff", "HEAD", "--numstat"}), path_).output;
     std::istringstream statusLines(status);
     std::string line;
     while (std::getline(statusLines, line)) {
@@ -62,7 +110,8 @@ RepositoryState GitRepository::state() const {
 }
 
 std::vector<GitChange> GitRepository::changes() const {
-    const auto output = process::run({"git", "status", "--porcelain=v1", "-z", "--untracked-files=all"}, path_).output;
+    if (!validRepository_) return {};
+    const auto output = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_).output;
     std::vector<GitChange> result;
     for (std::size_t offset = 0; offset + 3 <= output.size();) {
         const auto index = output[offset];
@@ -82,7 +131,8 @@ std::vector<GitChange> GitRepository::changes() const {
 }
 
 std::vector<std::string> GitRepository::branches() const {
-    const auto output = process::run({"git", "branch", "--format=%(refname:short)"}, path_).output;
+    if (!validRepository_) return {};
+    const auto output = process::run(command({"branch", "--format=%(refname:short)"}), path_).output;
     std::vector<std::string> result;
     std::istringstream lines(output);
     std::string line;
@@ -91,45 +141,51 @@ std::vector<std::string> GitRepository::branches() const {
 }
 
 std::string GitRepository::currentBranch() const {
-    auto branch = process::run({"git", "branch", "--show-current"}, path_).output;
+    if (!validRepository_) return {};
+    auto branch = process::run(command({"branch", "--show-current"}), path_).output;
     if (!branch.empty() && branch.back() == '\n') branch.pop_back();
     return branch;
 }
 
 bool GitRepository::clean() const {
-    const auto result = process::run({"git", "status", "--porcelain=v1", "-z", "--untracked-files=all"}, path_);
+    if (!validRepository_) return false;
+    const auto result = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
     return result.exitCode == 0 && result.output.empty();
 }
 
 std::string GitRepository::diff() const {
-    return process::run({"git", "diff", "HEAD", "--no-ext-diff", "--no-color"}, path_).output;
+    return validRepository_ ? process::run(command({"diff", "HEAD", "--no-ext-diff", "--no-color"}), path_).output : std::string{};
 }
 
 bool GitRepository::stage(const std::string &path, std::string &error) const {
+    if (!validRepository_) { error = "repository is not a Git work tree"; return false; }
     if (!validPath(path, error)) return false;
-    const auto result = process::run({"git", "add", "--", ":(literal)" + path}, path_);
+    const auto result = process::run(command({"add", "--", ":(literal)" + path}), path_);
     error = result.output;
     return result.exitCode == 0;
 }
 
 bool GitRepository::unstage(const std::string &path, std::string &error) const {
+    if (!validRepository_) { error = "repository is not a Git work tree"; return false; }
     if (!validPath(path, error)) return false;
-    const auto result = process::run({"git", "restore", "--staged", "--", ":(literal)" + path}, path_);
+    const auto result = process::run(command({"restore", "--staged", "--", ":(literal)" + path}), path_);
     error = result.output;
     return result.exitCode == 0;
 }
 
 bool GitRepository::commit(const std::string &message, std::string &error) const {
+    if (!validRepository_) { error = "repository is not a Git work tree"; return false; }
     if (message.empty() || message.find('\0') != std::string::npos) {
         error = "commit message is required";
         return false;
     }
-    const auto result = process::run({"git", "commit", "-m", message}, path_);
+    const auto result = process::run(command({"commit", "-m", message}), path_);
     error = result.output;
     return result.exitCode == 0;
 }
 
 bool GitRepository::switchBranch(const std::string &branch, std::string &error) const {
+    if (!validRepository_) { error = "repository is not a Git work tree"; return false; }
     const auto available = branches();
     if (std::find(available.begin(), available.end(), branch) == available.end()) {
         error = "branch does not exist locally";
@@ -139,23 +195,25 @@ bool GitRepository::switchBranch(const std::string &branch, std::string &error) 
         error = "commit or discard working tree changes before switching branches";
         return false;
     }
-    const auto result = process::run({"git", "switch", "--", branch}, path_);
+    const auto result = process::run(command({"switch", "--", branch}), path_);
     error = result.output;
     return result.exitCode == 0;
 }
 
 bool GitRepository::pull(std::string &output) const {
+    if (!validRepository_) { output = "repository is not a Git work tree"; return false; }
     if (!clean()) {
         output = "commit or discard working tree changes before pulling";
         return false;
     }
-    const auto result = process::run({"git", "-c", "pull.ff=true", "pull", "--no-rebase"}, path_, std::chrono::seconds(120));
+    const auto result = process::run(command({"-c", "pull.ff=true", "pull", "--no-rebase"}), path_, std::chrono::seconds(120));
     output = result.output;
     return result.exitCode == 0;
 }
 
 bool GitRepository::push(std::string &output) const {
-    const auto result = process::run({"git", "push"}, path_, std::chrono::seconds(120));
+    if (!validRepository_) { output = "repository is not a Git work tree"; return false; }
+    const auto result = process::run(command({"push"}), path_, std::chrono::seconds(120));
     output = result.output;
     return result.exitCode == 0;
 }

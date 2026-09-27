@@ -76,6 +76,7 @@ Store::Store(const std::filesystem::path &path) {
     Statement schemaVersion(database_, "PRAGMA user_version");
     check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
     const auto previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
+    if (previousVersion > 1) throw std::runtime_error("database schema is newer than this Aegis build");
     execute("PRAGMA foreign_keys = ON;");
     execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
     execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);");
@@ -84,8 +85,7 @@ Store::Store(const std::filesystem::path &path) {
         execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
     execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
     execute("CREATE INDEX IF NOT EXISTS verifications_task_finished ON verifications(task_id, finished_at DESC);");
-    if (previousVersion < 1)
-        execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
+    execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
     execute("PRAGMA user_version = 1;");
 }
 

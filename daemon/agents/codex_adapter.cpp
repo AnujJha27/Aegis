@@ -6,7 +6,6 @@
 
 #include <chrono>
 #include <sstream>
-#include <vector>
 
 namespace aegis::daemon::agents {
 namespace {
@@ -31,15 +30,22 @@ std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
     try {
         const auto object = nlohmann::json::parse(line);
         const auto type = object.value("type", std::string{});
-        if (type == "thread.started") return AgentEvent{eventId(), taskId, runId, "agent.started", agent, object.value("thread_id", std::string{}), now()};
-        if (type == "error") return AgentEvent{eventId(), taskId, runId, "agent.failed", agent, object.value("message", std::string{"Codex error"}), now()};
-        if (type != "item.completed") return std::nullopt;
+        if (type == "thread.started") {
+            const auto threadId = object.value("thread_id", std::string{});
+            if (!threadId.empty()) return AgentEvent{eventId(), taskId, runId, "run.session", agent, threadId, now()};
+            return std::nullopt;
+        }
+        if (type == "error")
+            return AgentEvent{eventId(), taskId, runId, "run.failed", agent, object.value("message", std::string{"Codex error"}), now()};
+        if (type != "item.started" && type != "item.completed") return std::nullopt;
         const auto item = object.value("item", nlohmann::json::object());
         const auto itemType = item.value("type", std::string{});
-        if (itemType == "agent_message")
+        if (type == "item.completed" && itemType == "agent_message")
             return AgentEvent{eventId(), taskId, runId, "agent.message.completed", agent, item.value("text", std::string{}), now()};
         if (itemType == "command_execution")
-            return AgentEvent{eventId(), taskId, runId, "command.completed", agent, item.value("command", std::string{}), now()};
+            return AgentEvent{eventId(), taskId, runId,
+                              type == "item.started" ? "command.started" : "command.completed",
+                              agent, item.value("command", std::string{}), now()};
     } catch (const nlohmann::json::exception &) {
         return std::nullopt;
     }
@@ -58,7 +64,8 @@ std::vector<AgentEvent> parseCodexJsonOutput(std::string_view output,
     return events;
 }
 
-CodexAdapter::CodexAdapter(EventSink sink) : sink_(std::move(sink)) {}
+CodexAdapter::CodexAdapter(EventSink sink, SessionSink sessionSink)
+    : sink_(std::move(sink)), sessionSink_(std::move(sessionSink)) {}
 
 CodexAdapter::~CodexAdapter() {
     terminate();
@@ -66,34 +73,170 @@ CodexAdapter::~CodexAdapter() {
 
 bool CodexAdapter::start(const RunContext &context) {
     terminate();
-    context_ = context;
-    running_ = true;
-    if (sink_) sink_({eventId(), context_.taskId, context_.runId, "agent.started", "codex", "", now()});
+    {
+        std::lock_guard lock(mutex_);
+        context_ = context;
+        pendingPrompt_.clear();
+        hasPendingPrompt_ = false;
+        stopping_ = false;
+        interrupted_ = false;
+        child_.reset();
+        busy_ = false;
+        running_ = true;
+    }
+    worker_ = std::thread([this] { workerLoop(); });
     return true;
 }
 
-void CodexAdapter::send(std::string_view message) {
-    if (!running_) return;
-    if (worker_.joinable()) worker_.join();
-    const auto prompt = std::string(message);
-    worker_ = std::thread([this, prompt] {
-        constexpr auto timeout = std::chrono::minutes(10);
-        const auto result = process::run({"codex", "exec", "--json", "--color", "never", prompt}, context_.repository, timeout);
-        for (const auto &event : parseCodexJsonOutput(result.output, context_.taskId, context_.runId, "codex"))
-            if (sink_) sink_(event);
-        if (sink_) sink_({eventId(), context_.taskId, context_.runId,
-                          result.exitCode == 0 ? "agent.finished" : "agent.failed", "codex",
-                          result.exitCode == 0 ? "" : result.timedOut
-                              ? "Codex timed out after 10 minutes"
-                              : "Codex exited with status " + std::to_string(result.exitCode), now()});
-    });
+SendResult CodexAdapter::send(std::string_view message) {
+    std::lock_guard lock(mutex_);
+    if (!running_ || stopping_) return SendResult::unavailable;
+    if (busy_) return SendResult::busy;
+    pendingPrompt_ = std::string(message);
+    hasPendingPrompt_ = true;
+    busy_ = true;
+    condition_.notify_one();
+    return SendResult::accepted;
 }
 
-void CodexAdapter::interrupt() {}
+void CodexAdapter::interrupt() {
+    std::shared_ptr<process::ChildProcess> child;
+    {
+        std::lock_guard lock(mutex_);
+        if (!busy_) return;
+        interrupted_ = true;
+        child = child_;
+    }
+    if (child) child->interrupt();
+}
 
 void CodexAdapter::terminate() {
-    running_ = false;
+    std::shared_ptr<process::ChildProcess> child;
+    {
+        std::lock_guard lock(mutex_);
+        if (!worker_.joinable()) { running_ = false; return; }
+        stopping_ = true;
+        running_ = false;
+        child = child_;
+    }
+    if (child) child->terminate();
+    condition_.notify_all();
     if (worker_.joinable()) worker_.join();
+    std::lock_guard lock(mutex_);
+    child_.reset();
+    hasPendingPrompt_ = false;
+    busy_ = false;
+}
+
+void CodexAdapter::workerLoop() {
+    for (;;) {
+        std::string prompt;
+        RunContext context;
+        {
+            std::unique_lock lock(mutex_);
+            condition_.wait(lock, [&] { return stopping_ || hasPendingPrompt_; });
+            if (stopping_) return;
+            prompt = std::move(pendingPrompt_);
+            pendingPrompt_.clear();
+            hasPendingPrompt_ = false;
+            context = context_;
+            interrupted_ = false;
+        }
+
+        publish({eventId(), context.taskId, context.runId, "turn.started", context.agent, "", now()});
+        std::vector<std::string> command{"codex", "exec"};
+        if (context.externalSessionId) {
+            command.push_back("resume");
+            command.push_back("--json");
+            command.push_back(*context.externalSessionId);
+            command.push_back(prompt);
+        } else {
+            command.insert(command.end(), {"--json", "--color", "never", prompt});
+        }
+
+        auto child = std::make_shared<process::ChildProcess>();
+        {
+            std::lock_guard lock(mutex_);
+            child_ = child;
+        }
+
+        std::string pendingLine;
+        std::string failure;
+        bool started = child->start(command, context.repository);
+        process::Result result;
+        if (started) {
+            bool interruptedBeforeStart;
+            bool stoppingBeforeStart;
+            {
+                std::lock_guard lock(mutex_);
+                interruptedBeforeStart = interrupted_;
+                stoppingBeforeStart = stopping_;
+            }
+            if (stoppingBeforeStart) child->terminate();
+            else if (interruptedBeforeStart) child->interrupt();
+            result = child->wait(std::chrono::minutes(10), [&](std::string_view chunk) {
+                pendingLine.append(chunk);
+                std::size_t newline;
+                while ((newline = pendingLine.find('\n')) != std::string::npos) {
+                    auto line = pendingLine.substr(0, newline);
+                    pendingLine.erase(0, newline + 1);
+                    if (auto event = parseCodexJsonLine(line, context.taskId, context.runId, context.agent)) {
+                        if (event->type == "run.session") {
+                            {
+                                std::lock_guard lock(mutex_);
+                                context_.externalSessionId = event->content;
+                            }
+                            if (sessionSink_) sessionSink_(context.runId, event->content);
+                        } else if (event->type == "run.failed") failure = event->content;
+                        else publish(std::move(*event));
+                    }
+                }
+                if (pendingLine.size() > 1024 * 1024) pendingLine.clear();
+            }, false);
+            if (!pendingLine.empty()) {
+                if (auto event = parseCodexJsonLine(pendingLine, context.taskId, context.runId, context.agent)) {
+                    if (event->type == "run.session") {
+                        {
+                            std::lock_guard lock(mutex_);
+                            context_.externalSessionId = event->content;
+                        }
+                        if (sessionSink_) sessionSink_(context.runId, event->content);
+                    } else if (event->type == "run.failed") failure = event->content;
+                    else publish(std::move(*event));
+                }
+            }
+        }
+
+        bool stopping;
+        bool interrupted;
+        bool resumable;
+        {
+            std::lock_guard lock(mutex_);
+            child_.reset();
+            stopping = stopping_;
+            interrupted = interrupted_;
+            resumable = context_.externalSessionId.has_value();
+            busy_ = false;
+        }
+        if (stopping) return;
+        if (interrupted && resumable) publish({eventId(), context.taskId, context.runId, "turn.interrupted", context.agent, "", now()});
+        else if (interrupted) {
+            running_ = false;
+            publish({eventId(), context.taskId, context.runId, "run.interrupted", context.agent, "Codex interrupted before a resumable session was available", now()});
+            return;
+        }
+        else if (!started || result.exitCode != 0 || !failure.empty()) {
+            running_ = false;
+            const auto message = !started ? "Could not start Codex" : !failure.empty() ? failure :
+                result.timedOut ? "Codex timed out after 10 minutes" : "Codex exited with status " + std::to_string(result.exitCode);
+            publish({eventId(), context.taskId, context.runId, "run.failed", context.agent, message, now()});
+            return;
+        } else publish({eventId(), context.taskId, context.runId, "turn.completed", context.agent, "", now()});
+    }
+}
+
+void CodexAdapter::publish(AgentEvent event) {
+    if (sink_) sink_(std::move(event));
 }
 
 }

@@ -1,5 +1,7 @@
 #include "daemon/api/server.h"
+#include "daemon/agents/manager.h"
 #include "daemon/protocol/event_hub.h"
+#include "daemon/repository/git.h"
 #include "daemon/session/store.h"
 
 #include <boost/asio/connect.hpp>
@@ -44,7 +46,9 @@ int main() {
     std::ofstream(webRoot / "index.html") << "Aegis UI";
     aegis::daemon::Store store(database);
     aegis::daemon::EventHub events;
-    aegis::daemon::api::Server server({&store, &events, nullptr, nullptr, std::filesystem::current_path(), webRoot});
+    aegis::daemon::repository::GitRepository git(std::filesystem::current_path());
+    aegis::daemon::agents::Manager manager(std::filesystem::current_path(), store, events);
+    aegis::daemon::api::Server server({&store, &events, &manager, &git, std::filesystem::current_path(), webRoot});
     assert(server.start(0));
     assert(server.port() != 0);
 
@@ -56,6 +60,15 @@ int main() {
     assert(created.result() == http::status::created);
     assert(created.body().find("inspect this") != std::string::npos);
     const auto taskId = nlohmann::json::parse(created.body()).at("id").get<std::string>();
+
+    const auto missingTaskRun = request(server.port(), http::verb::post, "/api/tasks/missing/runs", R"({"agent":"codex"})");
+    assert(missingTaskRun.result() == http::status::not_found);
+    assert(missingTaskRun.body().find("task_not_found") != std::string::npos);
+    const auto missingRunMessage = request(server.port(), http::verb::post, "/api/runs/missing/messages", R"({"message":"hello"})");
+    assert(missingRunMessage.result() == http::status::not_found);
+
+    const auto noTaskVerification = request(server.port(), http::verb::post, "/api/verify", R"({"command":["true"]})");
+    assert(noTaskVerification.result() == http::status::bad_request);
 
     const auto verification = request(server.port(), http::verb::post, "/api/verify",
         nlohmann::json{{"task_id", taskId}, {"command", {"/usr/bin/printf", "verification-ok"}}}.dump());

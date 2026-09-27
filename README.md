@@ -1,28 +1,14 @@
 # Aegis
 
-## Local control for coding agents
-
-Aegis is a local control plane for coding agents. It keeps the task, agent output, tool activity, repository changes, verification, and review context together while leaving the repository and subprocesses on your machine.
-
-Aegis is not an IDE. Its core workflow is:
+**A local control plane for coding agents.** Aegis keeps prompts, agent sessions, repository changes, verification, and handoff context together without replacing your editor or sending project data to an Aegis cloud service.
 
 ```text
 Prompt → Agent → Observe → Changes → Verify → Review → Revise / Handoff
 ```
 
-The first migration slice supports Codex, Claude Code, OpenCode, and a shell session behind one task-oriented web UI. The backend normalizes agent events so the frontend does not need agent-specific parsing.
+## Run Aegis
 
-## Quick start
-
-Requirements:
-
-- CMake 3.24+
-- C++23 compiler
-- Qt 6 Core and Widgets (kept for the legacy UI and CLI)
-- Boost.Asio/Beast headers, SQLite3, and `libutil`
-- Node.js 20+ and npm for the web bundle
-
-Build the web bundle and C++ targets:
+Build the frontend and native targets:
 
 ```bash
 cd web
@@ -33,101 +19,61 @@ cmake -S . -B build
 cmake --build build -j2
 ```
 
-Launch the local control plane:
+Open a repository with the browser UI:
 
 ```bash
 ./build/aegis .
 ```
 
-That starts `aegis_daemon` on `127.0.0.1`, serves `web/dist`, and opens the local UI in the default browser. The daemon chooses an available port automatically.
+The launcher starts the local daemon, serves the built frontend, chooses an available loopback port, and opens the browser. It owns the daemon process and shuts it down when the launcher exits. In managed launch mode, closing the browser session also ends the daemon after a short reconnect grace period. WSL uses `wslview` or `cmd.exe` when available.
 
-For frontend development, run the daemon separately and use Vite's proxy:
+For development, run the daemon directly and use the Vite proxy:
 
 ```bash
 ./build/aegis_daemon --repo . --port 8080 --web-root web/dist
 cd web && npm run dev
 ```
 
-The old Qt prototype remains available during migration:
-
-```bash
-./build/aegis --legacy-ui .
-```
+Direct daemon mode is not tied to a browser window. `aegis --daemon --repo . --port 8080 --web-root web/dist` is a launcher shorthand for the same mode.
 
 ## Architecture
 
 ```text
-Browser / React + TypeScript
-        │  HTTP + WebSocket
-        ▼
-C++23 local daemon
-  ├── task/session persistence (SQLite)
-  ├── agent adapters and PTY lifecycle
-  ├── Git and verification services
-  └── normalized event stream
+React + TypeScript + xterm.js
+             │ HTTP / WebSocket
+             ▼
+        C++23 daemon
+   ├── agent adapters and PTYs
+   ├── task/run/event persistence
+   ├── Git and verification
+   └── loopback API server
 ```
 
-The frontend owns presentation. The daemon owns repository truth, process behavior, persistence, and event normalization. New daemon code uses standard C++ types; Qt remains isolated to the legacy application shell and existing prototype modules.
+The frontend owns presentation; the daemon owns domain state, process behavior, and persistence. An Aegis `Task` can contain multiple `AgentRun`s. Structured prompts and normalized output become semantic history; direct terminal keystrokes remain PTY transport and are not stored as individual input events. Codex runs retain the provider thread ID so later prompts resume the same conversation.
 
-See [docs/architecture.md](docs/architecture.md) for the domain model, API, event protocol, persistence, launch flow, and local-only security assumptions.
+See [docs/architecture.md](docs/architecture.md) for lifecycle states, interruption behavior, schema migration, API/event contracts, ownership, and security assumptions.
 
-## Current web workflow
+## Requirements and build options
 
-- task list and task creation;
-- agent availability and explicit agent launch;
-- interactive PTY input and output, plus per-task run history;
-- persistent task/run/event records;
-- terminal/session output in the primary surface;
-- one bottom composer for agent selection, status, prompt, send, and loading state;
-- Review, Graphs, and Activity as a full-width secondary drawer;
-- native SVG task/run/change graphs, provenance evidence rows, and bounded handoff context;
-- full-screen Session/Review toggle; Review includes changed-file staging, unstaging, and local commits;
-- current Git diff and configurable verification command;
-- Codex JSON events and PTY output normalized at the daemon boundary.
+The default build does **not** require Qt. It uses a C++23 compiler, CMake, SQLite, Boost headers, POSIX PTY support, and Threads. Node.js/npm are required to build the web bundle.
 
-Compiler-level analysis, Solidity/binary lenses, LSP exploration, architecture/call graphs, risk heatmaps, and proposal comparison remain deferred until the vertical slice is solid.
-
-## CLI
-
-Existing repository commands remain available:
-
-```text
-aegis status [path]
-aegis review [path]
-aegis verify [path] -- <command>
-aegis analyze [path]
-aegis lens [path]
-aegis history [path]
-aegis board [path]
-aegis worktree [path]
-aegis snapshot [path]
-```
-
-Useful daemon options:
-
-```text
-aegis_daemon --repo <path> --port <port> --web-root <path>
-aegis --daemon --repo <path> --port <port> --web-root <path>
-```
-
-## Verification
-
-Backend checks:
+The old Qt prototype remains optional:
 
 ```bash
-cmake --build build -j2
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-legacy -DAEGIS_BUILD_LEGACY=ON
+cmake --build build-legacy -j2
+./build-legacy/aegis_legacy --legacy-ui .
 ```
 
-Frontend checks:
+Its historical CLI utilities (`status`, `review`, `verify`, `analyze`, and others) are also available from `aegis_legacy` when built.
 
-```bash
-cd web
-npm run build
-```
+## Current workflow
 
-The migration keeps checks focused: one integration test covers each daemon boundary, while the frontend uses strict TypeScript and a production build rather than a second test framework.
+- Create tasks and launch Codex, Claude Code, OpenCode, or a shell session.
+- Continue Codex prompts in the same provider conversation; interrupt a turn without discarding a resumable run.
+- Use xterm.js for interactive PTY sessions and CLI setup prompts.
+- Review current Git changes, run an argv-based verification command, and restore recent verification evidence after reload.
+- Inspect bounded handoff context before switching agents.
+- Stage, unstage, commit, push, pull, and switch local branches through the Git view.
 
-## Local-only security
-
-The daemon binds to loopback only and does not provide accounts, cloud storage, or LAN access. User-controlled commands cross process boundaries as argument vectors; they are not interpolated into shell strings. Task and event data are stored under the repository's `.aegis/aegis.sqlite` directory.
+The daemon serves only on `127.0.0.1`. Task data is stored in `<repository>/.aegis/aegis.sqlite`; data is sent to an external service only when the selected coding agent itself requires it.

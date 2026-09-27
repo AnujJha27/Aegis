@@ -39,6 +39,16 @@ int main() {
         assert(history.front().command == verification.command);
         assert(history.front().runId == run.id);
 
+        assert(store.updateRunStatus(run.id, "completed"));
+        for (const auto *state : {"failed", "interrupted", "terminated"}) {
+            const auto terminalRun = store.startRun(task.id, "codex");
+            assert(store.updateRunStatus(terminalRun.id, "running"));
+            assert(store.updateRunStatus(terminalRun.id, state));
+            assert(store.run(terminalRun.id)->finishedAt > 0);
+        }
+        const auto abandoned = store.startRun(task.id, "claude");
+        assert(store.updateRunStatus(abandoned.id, "running"));
+
         store.appendEvent({"event-1", task.id, run.id, "agent.started", "codex", "", 1});
         store.appendEvent({"event-2", task.id, run.id, "agent.message.completed", "codex", "done", 2});
 
@@ -51,12 +61,15 @@ int main() {
         assert(store.tasks().size() == 1);
         assert(store.events(store.tasks().front().id).front().content == "");
         const auto run = store.runs(store.tasks().front().id).front();
-        assert(run.status == "running");
-        assert(store.updateRunStatus(run.id, "completed"));
+        assert(run.status == "completed");
         const auto finished = store.run(run.id);
         assert(finished && finished->status == "completed");
         assert(finished->finishedAt > 0);
         assert(!store.updateRunStatus(run.id, "running"));
+        assert(store.run("run-absent") == std::nullopt);
+        const auto abandoned = store.runs(store.tasks().front().id).back();
+        assert(abandoned.status == "interrupted");
+        assert(abandoned.finishedAt > 0);
     }
 
     sqlite3 *legacy = nullptr;

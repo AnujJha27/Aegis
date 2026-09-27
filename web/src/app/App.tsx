@@ -1,104 +1,63 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Agent, type AgentEvent, type AgentRun, type GitChange, type GitStatus, type HandoffContext, type ProvenanceRecord, type Repository, type Task, type TaskGraph, type VerificationRun } from "./api";
-import { connectEvents, connectPty } from "./events";
+import { useEffect, useState } from "react";
+import { api, type Agent, type GitChange, type GitStatus, type Repository, type Task } from "./api";
 import { Layout } from "../components/Layout";
+import { useAgentWorkspace } from "./useAgentWorkspace";
+import { usePtySession } from "./usePtySession";
+import { useReviewData } from "./useReviewData";
+import { useTasks } from "./useTasks";
 
 export function App() {
+  const taskState = useTasks();
+  const { tasks, selectedTask, setSelectedTask } = taskState;
+  const workspace = useAgentWorkspace(selectedTask?.id, onEvent);
+  const review = useReviewData(selectedTask?.id);
   const [repository, setRepository] = useState<Repository>();
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedTask, setSelectedTask] = useState<Task>();
-  const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [diff, setDiff] = useState("");
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [gitStatus, setGitStatus] = useState<GitStatus>();
-  const [verification, setVerification] = useState<VerificationRun>();
-  const [handoff, setHandoff] = useState<HandoffContext>();
-  const [graph, setGraph] = useState<TaskGraph>();
-  const [provenance, setProvenance] = useState<ProvenanceRecord[]>([]);
   const [selectedAgent, setSelectedAgent] = useState("shell");
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity" | "handoff">();
+  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity" | "handoff">("review");
   const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [error, setError] = useState("");
-  const ptySocket = useRef<WebSocket | null>(null);
-  const ptyPending = useRef<string[]>([]);
-  const ptySize = useRef({ cols: 100, rows: 30 });
-
-  const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
-  const currentEvents = useMemo(() => selectedTask ? events.filter((event) => event.taskId === selectedTask.id) : [], [events, selectedTask]);
-  const currentRunEvents = useMemo(() => currentRun ? currentEvents.filter((event) => event.runId === currentRun.id) : [], [currentEvents, currentRun]);
-  const runFinished = currentRun ? events.some((event) => event.runId === currentRun.id && (event.type === "agent.finished" || event.type === "agent.failed")) : false;
+  const currentRun = workspace.currentRun;
+  const runFinished = workspace.runFinished;
+  const interactive = Boolean(agents.find((agent) => agent.name === currentRun?.agent)?.interactive);
+  const pty = usePtySession(currentRun, interactive, runFinished);
 
   useEffect(() => {
-    Promise.all([api.repository(), api.tasks(), api.agents(), api.changes(), api.gitStatus()])
-      .then(([repo, loadedTasks, loadedAgents, changes, git]) => {
+    Promise.all([api.repository(), api.agents(), api.gitStatus()])
+      .then(([repo, loadedAgents, git]) => {
         setRepository(repo);
-        setTasks(loadedTasks);
-        setSelectedTask(loadedTasks[0]);
         setAgents(loadedAgents);
-        setDiff(changes.diff);
+        setSelectedAgent(loadedAgents.find((agent) => agent.available)?.name ?? "shell");
         setGitChanges(git.files);
         setGitStatus(git);
         setBusy("Ready");
-        if (loadedAgents.find((agent) => agent.available)?.name) setSelectedAgent(loadedAgents.find((agent) => agent.available)!.name);
       })
       .catch((reason: Error) => { setError(reason.message); setBusy("Daemon unavailable"); });
-    return connectEvents((event) => {
-      setEvents((current) => [...current.slice(-499), event]);
-      if (event.type === "agent.finished" || event.type === "agent.failed") setBusy(event.type === "agent.failed" ? "Agent failed" : "Ready");
-      if (event.type === "file.changed") void refreshGit(event.taskId).catch((reason: Error) => setError(reason.message));
-    });
   }, []);
 
-  useEffect(() => {
-    if (!selectedTask) return;
-    setRuns([]);
-    setSelectedRunId("");
-    Promise.all([api.events(selectedTask.id), api.runs(selectedTask.id), api.changes(), api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]).then(([loadedEvents, loadedRuns, changes, loadedHandoff, loadedGraph, loadedProvenance]) => { setEvents(loadedEvents); setRuns(loadedRuns); setSelectedRunId(loadedRuns.at(-1)?.id ?? ""); setDiff(changes.diff); setHandoff(loadedHandoff); setGraph(loadedGraph); setProvenance(loadedProvenance.records); });
-  }, [selectedTask]);
+  function onEvent(event: import("./api").AgentEvent) {
+    if (["run.completed", "run.failed", "run.interrupted", "run.terminated", "turn.completed", "turn.interrupted"].includes(event.type))
+      setBusy(event.type === "run.failed" ? "Agent failed" : "Ready");
+    if (event.type === "file.changed") void refreshGit().catch((reason: Error) => setError(reason.message));
+  }
 
-  useEffect(() => {
-    if (!currentRun || !agents.find((agent) => agent.name === currentRun.agent)?.interactive || runFinished) {
-      ptySocket.current?.close();
-      ptySocket.current = null;
-      return;
-    }
-    ptyPending.current = [];
-    const socket = connectPty(currentRun.id);
-    ptySocket.current = socket;
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "resize", ...ptySize.current }));
-      for (const input of ptyPending.current) socket.send(input);
-      ptyPending.current = [];
-    };
-    return () => { socket.close(); if (ptySocket.current === socket) ptySocket.current = null; };
-  }, [currentRun?.id, agents, runFinished]);
-
-  async function refreshGit(taskId = selectedTask?.id) {
-    const [git, changes] = await Promise.all([api.gitStatus(), api.changes()]);
+  async function refreshGit() {
+    const git = await api.gitStatus();
     setRepository(git.repository);
     setGitChanges(git.files);
     setGitStatus(git);
-    setDiff(changes.diff);
-    if (taskId) {
-      const [loadedHandoff, loadedGraph, loadedProvenance] = await Promise.all([api.handoff(taskId), api.graph(taskId), api.provenance(taskId)]);
-      setHandoff(loadedHandoff);
-      setGraph(loadedGraph);
-      setProvenance(loadedProvenance.records);
-    }
+    await review.refresh();
   }
 
   async function createTask() {
     if (!taskPrompt.trim()) return;
     try {
-      const task = await api.createTask(taskPrompt.trim());
-      setTasks((current) => [task, ...current]);
-      setSelectedTask(task);
+      await taskState.create(taskPrompt.trim());
       setTaskPrompt("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not create task"); }
   }
@@ -108,8 +67,8 @@ export function App() {
     setBusy(`Starting ${selectedAgent}…`);
     try {
       const run = await api.launch(selectedTask.id, selectedAgent);
-      setRuns((current) => [...current, run]);
-      setSelectedRunId(run.id);
+      workspace.setRuns((current) => [...current, run]);
+      workspace.setSelectedRunId(run.id);
       setBusy(`${selectedAgent} active`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not start agent"); setBusy("Start failed"); }
   }
@@ -117,33 +76,31 @@ export function App() {
   async function send() {
     if (!currentRun || !prompt.trim()) return;
     const message = prompt.trim();
-    setPrompt("");
-    try { await api.send(currentRun.id, message); setBusy("Agent working…"); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not send prompt"); }
+    try {
+      await api.send(currentRun.id, message);
+      setPrompt("");
+      setBusy("Agent working…");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not send prompt"); }
   }
 
   async function deleteRun(runId: string) {
-    const run = runs.find((item) => item.id === runId);
-    if (!run || !events.some((event) => event.runId === runId && (event.type === "agent.finished" || event.type === "agent.failed"))) return;
+    const run = workspace.runs.find((item) => item.id === runId);
+    if (!run || !["completed", "failed", "interrupted", "terminated"].includes(run.status)) return;
     if (!window.confirm(`Delete this ${run.agent} run and its transcript?`)) return;
     try {
       await api.deleteRun(runId);
-      const remaining = runs.filter((item) => item.id !== runId);
-      setRuns(remaining);
-      setEvents((current) => current.filter((event) => event.runId !== runId));
-      if (selectedRunId === runId) setSelectedRunId(remaining.at(-1)?.id ?? "");
-      if (selectedTask) {
-        const [loadedHandoff, loadedGraph, loadedProvenance] = await Promise.all([api.handoff(selectedTask.id), api.graph(selectedTask.id), api.provenance(selectedTask.id)]);
-        setHandoff(loadedHandoff);
-        setGraph(loadedGraph);
-        setProvenance(loadedProvenance.records);
-      }
+      const remaining = workspace.runs.filter((item) => item.id !== runId);
+      workspace.setRuns(remaining);
+      workspace.setEvents((current) => current.filter((event) => event.runId !== runId));
+      if (workspace.selectedRunId === runId) workspace.setSelectedRunId(remaining.at(-1)?.id ?? "");
+      await review.refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete run"); }
   }
 
   async function verify() {
+    if (!selectedTask) return;
     setBusy("Verifying…");
-    try { setVerification(await api.verify(["ctest", "--test-dir", "build"])); setBusy("Ready"); }
+    try { await review.verify(currentRun?.id); setBusy("Ready"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed"); setBusy("Verification failed"); }
   }
 
@@ -151,6 +108,11 @@ export function App() {
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} runs={runs} onSelectRun={setSelectedRunId} onDeleteRun={deleteRun} runFinished={runFinished} onPtyInput={(input) => { if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(input); else if (ptySocket.current?.readyState === WebSocket.CONNECTING) ptyPending.current.push(input); }} onPtyResize={(cols, rows) => { ptySize.current = { cols, rows }; if (ptySocket.current?.readyState === WebSocket.OPEN) ptySocket.current.send(JSON.stringify({ type: "resize", cols, rows })); }} events={currentRunEvents} activityEvents={currentEvents} prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
-    screen={screen} onScreen={setScreen} drawer={drawer ?? "review"} onDrawer={setDrawer} gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={diff} verification={verification} handoff={handoff} graph={graph} provenance={provenance} onVerify={verify} error={error} />;
+    run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} runFinished={runFinished}
+    onPtyInput={pty.send} onPtyResize={pty.resize} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
+    prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer}
+    gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit} diff={review.diff}
+    verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
+    onVerify={verify} error={error} />;
 }

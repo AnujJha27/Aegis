@@ -54,13 +54,13 @@ export function AgentSession({ task, run, runs, runFinished, interactive, onPtyI
     }
   }, [events, run?.id, interactive, runFinished]);
 
-  const cards = events.filter((event) => ["agent.message.completed", "agent.message.sent", "agent.failed"].includes(event.type) && readable(event.content).trim());
+  const cards = events.filter((event) => ["user.message", "agent.message.completed", "run.failed"].includes(event.type) && readable(event.content).trim());
   const hasRunOutput = Boolean(run && events.some((event) => event.runId === run.id && readable(event.content).trim()));
   const showEmpty = run ? !interactive && !hasRunOutput : !cards.length;
   return <section className="session">
     <div className="session-heading">
       <div><span className="eyebrow">ACTIVE TASK</span><h1>{task?.prompt ?? "Choose a task to begin"}</h1></div>
-      <span className="session-id">{run ? `${run.agent.toUpperCase()} · ${run.id.slice(0, 8)}${runFinished ? " · FINISHED" : " · LIVE"}` : "IDLE"}</span>
+      <span className="session-id">{run ? `${run.agent.toUpperCase()} · ${run.id.slice(0, 8)} · ${run.status.toUpperCase()}` : "IDLE"}</span>
     </div>
     <div className="output-surface">
       <div className={`terminal-wrap ${run && interactive ? "" : "terminal-hidden"}`}>

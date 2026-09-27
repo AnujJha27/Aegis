@@ -17,6 +17,7 @@ public:
     bool start(std::uint16_t port = 0);
     void stop();
     std::uint16_t port() const;
+    std::size_t activeEventClients() const { return server_.activeEventClients(); }
 
 private:
     std::filesystem::path repository_;

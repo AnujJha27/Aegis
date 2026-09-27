@@ -44,25 +44,29 @@ bool PtyAdapter::start(const RunContext &context) {
     winsize size{};
     size.ws_col = 100;
     size.ws_row = 30;
-    pid_ = forkpty(&master_, nullptr, nullptr, &size);
-    if (pid_ < 0) return false;
-    if (pid_ == 0) {
+    int master = -1;
+    const auto child = forkpty(&master, nullptr, nullptr, &size);
+    if (child < 0) return false;
+    if (child == 0) {
         if (chdir(context_.repository.c_str()) != 0) _exit(126);
         setenv("TERM", "xterm-256color", 1);
         execvp(argv.front(), argv.data());
         _exit(127);
     }
+    {
+        std::lock_guard lock(writeMutex_);
+        pid_ = child;
+        master_ = master;
+    }
     running_ = true;
-    publish("agent.started", "");
-    reader_ = std::thread([this] { readLoop(); });
+    reader_ = std::thread([this, master, child] { readLoop(master, child); });
     return true;
 }
 
-void PtyAdapter::send(std::string_view message) {
+SendResult PtyAdapter::send(std::string_view message) {
     std::string line(message);
     line += '\n';
-    if (!sendPty(line)) return;
-    publish("agent.message.sent", std::string(message));
+    return sendPty(line) ? SendResult::accepted : SendResult::unavailable;
 }
 
 bool PtyAdapter::sendPty(std::string_view input) {
@@ -94,39 +98,41 @@ bool PtyAdapter::resizePty(unsigned short cols, unsigned short rows) {
 }
 
 void PtyAdapter::interrupt() {
-    if (pid_ > 0) kill(-pid_, SIGINT);
+    int child;
+    {
+        std::lock_guard lock(writeMutex_);
+        child = pid_;
+    }
+    if (child > 0) {
+        kill(-child, SIGINT);
+        publish("turn.interrupted", "");
+    }
 }
 
 void PtyAdapter::terminate() {
-    if (pid_ <= 0 && !reader_.joinable()) return;
+    int child;
     running_ = false;
-    if (pid_ > 0) {
-        kill(-pid_, SIGTERM);
-        kill(pid_, SIGTERM);
-        int status = 0;
-        for (int attempt = 0; attempt < 100; ++attempt) {
-            const auto result = waitpid(pid_, &status, WNOHANG);
-            if (result == pid_ || (result < 0 && errno == ECHILD)) break;
-            usleep(10000);
-        }
-        if (kill(pid_, 0) == 0) {
-            kill(-pid_, SIGKILL);
-            kill(pid_, SIGKILL);
-            waitpid(pid_, &status, 0);
-        }
-        pid_ = -1;
+    {
+        std::lock_guard lock(writeMutex_);
+        child = pid_;
     }
-    if (master_ >= 0) {
-        close(master_);
-        master_ = -1;
+    if (child > 0) {
+        const auto processGroup = child;
+        kill(-child, SIGTERM);
+        kill(child, SIGTERM);
+        usleep(300000);
+        kill(-processGroup, SIGKILL);
     }
     if (reader_.joinable()) reader_.join();
+    std::lock_guard lock(writeMutex_);
+    if (master_ >= 0) close(master_);
+    master_ = -1;
 }
 
-void PtyAdapter::readLoop() {
+void PtyAdapter::readLoop(int master, int child) {
     char buffer[8192];
     while (running_) {
-        const auto count = read(master_, buffer, sizeof(buffer));
+        const auto count = read(master, buffer, sizeof(buffer));
         if (count > 0) {
             publish("agent.message.delta", std::string(buffer, static_cast<std::size_t>(count)));
             continue;
@@ -134,7 +140,23 @@ void PtyAdapter::readLoop() {
         if (count < 0 && errno == EINTR) continue;
         break;
     }
-    if (running_.exchange(false)) publish("agent.finished", "");
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    {
+        std::lock_guard lock(writeMutex_);
+        if (pid_ == child) pid_ = -1;
+        if (master_ == master) {
+            close(master_);
+            master_ = -1;
+        }
+    }
+    if (running_.exchange(false)) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) publish("run.completed", "");
+        else if (WIFSIGNALED(status) && WTERMSIG(status) == SIGINT) publish("run.interrupted", "");
+        else publish("run.failed", WIFEXITED(status)
+            ? "Agent exited with status " + std::to_string(WEXITSTATUS(status))
+            : "Agent process terminated");
+    }
 }
 
 void PtyAdapter::publish(std::string type, std::string content) {
