@@ -1,4 +1,6 @@
 #include "daemon/api/routes.h"
+#include "daemon/api/origin.h"
+#include "daemon/api/server.h"
 #include "daemon/agents/manager.h"
 #include "daemon/protocol/event_hub.h"
 #include "daemon/repository/git.h"
@@ -7,10 +9,12 @@
 #include "repository_fixture.h"
 
 #include <boost/beast/http.hpp>
+#include <boost/beast/websocket.hpp>
 #include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <filesystem>
+#include <iostream>
 #include <string>
 
 namespace {
@@ -22,6 +26,23 @@ http::response<http::string_body> request(const aegis::daemon::api::Context &con
     message.body() = std::move(body);
     message.prepare_payload();
     return aegis::daemon::api::handle(message, context);
+}
+
+std::pair<bool, http::status> eventSocketHandshake(std::uint16_t port, const std::string &origin) {
+    namespace asio = boost::asio;
+    namespace websocket = boost::beast::websocket;
+    asio::io_context io;
+    websocket::stream<asio::ip::tcp::socket> socket(io);
+    socket.next_layer().connect({asio::ip::make_address("127.0.0.1"), port});
+    socket.set_option(websocket::stream_base::decorator([&](websocket::request_type &message) {
+        if (!origin.empty()) message.set(http::field::origin, origin);
+    }));
+    http::response<http::string_body> response;
+    boost::system::error_code error;
+    socket.handshake(response, "127.0.0.1:" + std::to_string(port), "/ws/events", error);
+    boost::system::error_code ignored;
+    socket.next_layer().close(ignored);
+    return {!error, response.result()};
 }
 
 }
@@ -154,6 +175,31 @@ int main() {
     assert(deleted.result() == http::status::no_content);
     assert(store.runs(taskId).empty());
     assert(store.events(taskId).empty());
+
+    using aegis::daemon::api::allowedWebSocketOrigin;
+    assert(allowedWebSocketOrigin(""));
+    assert(allowedWebSocketOrigin("http://127.0.0.1:46729"));
+    assert(allowedWebSocketOrigin("http://localhost:5173"));
+    assert(allowedWebSocketOrigin("http://[::1]:5173"));
+    assert(!allowedWebSocketOrigin("https://attacker.example"));
+    assert(!allowedWebSocketOrigin("http://attacker.example"));
+    assert(!allowedWebSocketOrigin("http://localhost.evil.example:5173"));
+    assert(!allowedWebSocketOrigin("http://localhost:99999"));
+    assert(!allowedWebSocketOrigin("http://localhost:5173/path"));
+
+    aegis::daemon::api::Server server(context);
+    if (server.start()) {
+        const auto port = server.port();
+        const auto appOrigin = eventSocketHandshake(port, "http://127.0.0.1:" + std::to_string(port));
+        assert(appOrigin.first);
+        const auto viteOrigin = eventSocketHandshake(port, "http://localhost:5173");
+        assert(viteOrigin.first);
+        const auto externalOrigin = eventSocketHandshake(port, "https://attacker.example");
+        assert(!externalOrigin.first && externalOrigin.second == http::status::forbidden);
+        server.stop();
+    } else {
+        std::clog << "SKIP WebSocket handshake integration: loopback bind unavailable\n";
+    }
 
     std::filesystem::remove(database);
 }

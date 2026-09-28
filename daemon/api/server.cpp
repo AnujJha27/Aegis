@@ -1,4 +1,5 @@
 #include "daemon/api/server.h"
+#include "daemon/api/origin.h"
 
 #include "daemon/protocol/json.h"
 #include "daemon/agents/manager.h"
@@ -128,6 +129,16 @@ void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) 
     }
     const auto request = parser.release();
     if (boost::beast::websocket::is_upgrade(request)) {
+        const auto origin = request[boost::beast::http::field::origin];
+        if (request.count(boost::beast::http::field::origin) > 1 || !allowedWebSocketOrigin(origin)) {
+            Response response{boost::beast::http::status::forbidden, 11};
+            response.set(boost::beast::http::field::content_type, "application/json");
+            response.body() = R"({"error":{"code":"websocket_origin_forbidden","message":"WebSocket origin must be a loopback page"}})";
+            response.keep_alive(false);
+            response.prepare_payload();
+            boost::beast::http::write(*socket, response, error);
+            return;
+        }
         if (request.target() == "/ws/events") {
             serveWebSocket(socket, request);
             return;
