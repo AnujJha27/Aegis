@@ -10,7 +10,7 @@ vi.mock("@monaco-editor/react", () => ({
 }));
 
 const file: FileEntry = { path: "generated/huge.cpp", name: "huge.cpp", kind: "file", language: "cpp", size: 9 * 1024 * 1024, changed: false, git_status: "", old_path: null, additions: 0, deletions: 0, binary: false };
-const capped: FileContent = { source: "worktree", size: file.size, exists: true, binary: false, truncated: true, content: "" };
+const capped: FileContent = { source: "worktree", size: file.size ?? 120, exists: true, binary: false, truncated: true, content: "" };
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 

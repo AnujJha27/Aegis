@@ -48,6 +48,8 @@ int main() {
     const auto listing = request(context, http::verb::get, "/api/files?scope=all");
     assert(listing.result() == http::status::ok);
     assert(!nlohmann::json::parse(listing.body()).at("entries").empty());
+    const auto invalidFileOptions = request(context, http::verb::get, "/api/files?scope=all&include_changes=maybe");
+    assert(invalidFileOptions.result() == http::status::bad_request);
     const auto escapedFile = request(context, http::verb::get, "/api/files/content?path=%2e%2e%2fsecret");
     assert(escapedFile.result() == http::status::bad_request);
 

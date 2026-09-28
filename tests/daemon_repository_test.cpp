@@ -96,6 +96,9 @@ int main() {
 
     const auto nested = files.list("nested", aegis::daemon::repository::FileScope::all);
     assert(std::any_of(nested.entries.begin(), nested.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp"; }));
+    const auto unannotated = files.list("nested", aegis::daemon::repository::FileScope::all, 500, false, false);
+    const auto unannotatedFile = std::find_if(unannotated.entries.begin(), unannotated.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp"; });
+    assert(unannotatedFile != unannotated.entries.end() && !unannotatedFile->changed);
     const auto quickOpen = files.list("", aegis::daemon::repository::FileScope::all, 500, true);
     assert(std::any_of(quickOpen.entries.begin(), quickOpen.entries.end(), [](const auto &entry) { return entry.path == "nested/new file.cpp" && entry.kind == "file"; }));
     assert(std::none_of(quickOpen.entries.begin(), quickOpen.entries.end(), [](const auto &entry) { return entry.path.starts_with(".aegis/") || entry.path.starts_with("node_modules/"); }));

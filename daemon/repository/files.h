@@ -54,7 +54,8 @@ class Files final {
 public:
     explicit Files(const GitRepository &git);
 
-    FileListing list(const std::string &path, FileScope scope, std::size_t limit = 500, bool recursive = false) const;
+    FileListing list(const std::string &path, FileScope scope, std::size_t limit = 500,
+                     bool recursive = false, bool includeChanges = true) const;
     FileContent read(const std::string &path, FileSource source, bool loadLarge = false) const;
     FileComparison compare(const std::string &path,
                            FileSource base = FileSource::head,

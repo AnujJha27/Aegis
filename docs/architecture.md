@@ -89,7 +89,7 @@ The API uses structured errors:
 | DELETE | `/api/runs/:id` | Delete a terminal run and its events |
 | POST | `/api/verify` | Execute and persist an argv-array verification for a task and optional run |
 | POST | `/api/git/stage`, `/unstage`, `/commit`, `/branch`, `/pull`, `/push` | Local Git actions |
-| GET | `/api/files?path=...&scope=changed|all` | Lazy repository tree; `recursive=1` returns a bounded quick-open list |
+| GET | `/api/files?path=...&scope=changed|all` | Lazy repository tree; `recursive=1` returns a bounded quick-open list; `include_changes=0` skips repeated Git status annotation when the caller already has a repository snapshot |
 | GET | `/api/files/content?path=...&source=head|index|worktree` | One file at a Git/worktree source |
 | GET | `/api/files/compare?path=...&base=head|index&target=index|worktree` | Structured old/new contents for a review diff |
 | GET/POST | `/api/tasks/:id/findings` | List or add task findings with an optional run and line range |
@@ -100,7 +100,7 @@ The API uses structured errors:
 
 ## Read-only file review
 
-`Files` is the repository-layer boundary for lazy tree enumeration and source reads. It uses Git-aware path enumeration, excludes `.git`, `.aegis`, and `node_modules`, and limits each listing to 500 entries. `HEAD`, `INDEX`, and `WORKTREE` are explicit internal sources; the interface labels them All Changes, Staged, and Unstaged. Rename comparisons use the preserved old path. Missing sides (new/deleted files) are represented as empty content; binary content is identified without sending its bytes. Text is capped at 1 MiB by default and 8 MiB after an explicit user action.
+`Files` is the repository-layer boundary for lazy tree enumeration and source reads. It uses Git-aware path enumeration, excludes `.git`, `.aegis`, and `node_modules`, and limits each listing to 500 entries. The frontend derives Changed Files from its current Git snapshot and overlays that same snapshot onto All Files, avoiding repeated status subprocesses and preventing stale scope responses from replacing the current tree. The All Files tree is cached until repository state changes. `HEAD`, `INDEX`, and `WORKTREE` are explicit internal sources; the interface labels them All Changes, Staged, and Unstaged. Rename comparisons use the preserved old path. Missing sides (new/deleted files) are represented as empty content; binary content is identified without sending its bytes. Text is capped at 1 MiB by default and 8 MiB after an explicit user action.
 
 Review findings are local persisted records containing task, optional run, repository-relative file, optional positive line range, message, status, and timestamps. The API validates task/run ownership, file path shape, line bounds, and message size. Handoff context includes at most 20 findings with each message capped at 2 KiB. The current frontend does not create or resolve findings yet. Changed-file addition/deletion counts come from Git numstat records; binary files are marked separately, and untracked-file counts remain unavailable until Git tracks them.
 

@@ -131,12 +131,14 @@ std::optional<FileSource> parseFileSource(const std::string &source) {
     return std::nullopt;
 }
 
-FileListing Files::list(const std::string &path, FileScope scope, std::size_t limit, bool recursive) const {
+FileListing Files::list(const std::string &path, FileScope scope, std::size_t limit,
+                       bool recursive, bool includeChanges) const {
     const auto relative = relativePath(path, true);
     const auto prefix = relative == "." ? std::string{} : relative.generic_string() + "/";
     if (!git_.validRepository_ && scope == FileScope::all) return {};
     std::map<std::string, GitChange> changes;
-    for (const auto &change : git_.changes()) changes.emplace(change.path, change);
+    if (scope == FileScope::changed || includeChanges)
+        for (const auto &change : git_.changes()) changes.emplace(change.path, change);
 
     bool truncated = false;
     std::vector<std::string> paths;
