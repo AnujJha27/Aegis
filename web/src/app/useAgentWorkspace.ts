@@ -19,8 +19,10 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
     if (!taskId) return;
     let active = true;
     let snapshotLoaded = false;
+    let snapshotsInFlight = 0;
     const pending: AgentEvent[] = [];
     const refreshSnapshot = async () => {
+      snapshotsInFlight++;
       try {
         const [loadedEvents, loadedRuns] = await Promise.all([api.events(taskId), api.runs(taskId)]);
         if (!active) return;
@@ -31,6 +33,7 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
         setRuns(loadedRuns);
         setSelectedRunId((current) => loadedRuns.some((run) => run.id === current) ? current : loadedRuns.at(-1)?.id ?? "");
       } catch { /* The connection indicator reports the failure; the next reconnect retries the snapshot. */ }
+      finally { snapshotsInFlight--; }
     };
     const disconnect = connectEvents((event) => {
       onEventRef.current?.(event);
@@ -40,8 +43,8 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
         const status = lifecycle === "started" ? "running" : lifecycle;
         setRuns((current) => current.map((run) => run.id === event.runId ? { ...run, status, finishedAt: lifecycle === "started" ? 0 : event.timestamp } : run));
       }
+      if (!snapshotLoaded || snapshotsInFlight > 0) pending.push(event);
       if (snapshotLoaded) setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
-      else pending.push(event);
     }, (state, reconnected) => {
       setConnection(state);
       if (reconnected) { void refreshSnapshot().then(() => onReconnectRef.current?.()); }
