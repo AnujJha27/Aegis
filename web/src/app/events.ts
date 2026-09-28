@@ -1,6 +1,7 @@
 import { agentEvent, type AgentEvent } from "./api";
 
 export type EventConnection = "connecting" | "connected" | "reconnecting" | "unavailable";
+export type PtyConnection = EventConnection | "idle";
 
 export function connectEvents(onEvent: (event: AgentEvent) => void, onState: (state: EventConnection, reconnected: boolean) => void): () => void {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";

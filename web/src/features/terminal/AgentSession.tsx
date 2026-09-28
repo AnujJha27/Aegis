@@ -4,9 +4,10 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { AgentEvent, AgentRun, Task } from "../../app/api";
 import { readable } from "../../app/events";
+import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
 
-export function AgentSession({ task, run, runs, runFinished, interactive, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runs: AgentRun[]; runFinished: boolean; interactive: boolean; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
+export function AgentSession({ task, run, runs, runFinished, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runs: AgentRun[]; runFinished: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
   const terminalHost = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
   const fit = useRef<FitAddon | undefined>(undefined);
@@ -72,7 +73,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, onPtyI
     </div>
     <div className="composer">
       <div className="composer-tools">{children}</div>
-      {interactive ? <div className="composer-hint pty-hint">{runFinished ? "Run ended · terminal is read-only" : "Interactive CLI · click the terminal or start typing to answer prompts (e.g. project trust)"}<span className="composer-status"><i />{busy}</span></div> : <>
+      {interactive ? <div className="composer-hint pty-hint">{runFinished ? "Run ended · terminal is read-only" : ptyConnection === "connected" ? "Interactive CLI · click the terminal or start typing to answer prompts (e.g. project trust)" : ptyConnection === "connecting" ? "Connecting interactive terminal…" : `Terminal ${ptyConnection === "unavailable" ? "offline · retrying" : "reconnecting…"} · input paused`}<span className="composer-status"><i />{busy}</span></div> : <>
         <div className="prompt-row"><textarea aria-label="Message the active agent" value={prompt} onChange={(event) => onPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }} placeholder={run && !runFinished ? "Message the active agent…" : "Launch an agent to start prompting…"} disabled={!run || runFinished} /><button className="send-button" onClick={onSend} disabled={!run || runFinished || !prompt.trim()}>{busy.includes("working") ? "…" : "Send"}<span>↗</span></button></div>
         <div className="composer-hint"><span>Enter to send</span><span>Shift + Enter for newline</span><span className="composer-status"><i />{busy}</span></div>
       </>}
