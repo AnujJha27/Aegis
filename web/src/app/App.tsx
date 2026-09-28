@@ -30,18 +30,37 @@ export function App() {
   const pty = usePtySession(currentRun, interactive, runFinished);
 
   useEffect(() => {
-    Promise.all([api.repository(), api.agents(), api.gitStatus()])
-      .then(([repo, loadedAgents, git]) => {
+    let active = true;
+    let retryTimer = 0;
+    let retries = 0;
+    const load = async () => {
+      try {
+        const [, repo, loadedAgents, git] = await Promise.all([taskState.refresh(), api.repository(), api.agents(), api.gitStatus()]);
+        if (!active) return;
         setRepository(repo);
         setAgents(loadedAgents);
         setSelectedAgent(loadedAgents.find((agent) => agent.available)?.name ?? "shell");
         setGitChanges(git.files);
         setGitStatus(git);
+        setError("");
         setBusy("Ready");
         setDaemonConnection("connected");
-      })
-      .catch((reason: Error) => { setError(reason.message); setBusy("Daemon unavailable"); setDaemonConnection("unavailable"); });
-  }, []);
+      } catch (reason) {
+        if (!active) return;
+        setError(reason instanceof Error ? reason.message : "Could not connect to daemon");
+        setBusy("Daemon unavailable");
+        setDaemonConnection("unavailable");
+        const delay = Math.min(500 * 2 ** retries++, 8000);
+        retryTimer = window.setTimeout(() => {
+          setBusy("Reconnecting…");
+          setDaemonConnection("reconnecting");
+          void load();
+        }, delay);
+      }
+    };
+    void load();
+    return () => { active = false; window.clearTimeout(retryTimer); };
+  }, [taskState.refresh]);
 
   function onEvent(event: import("./api").AgentEvent) {
     if (["run.completed", "run.failed", "run.interrupted", "run.terminated", "turn.completed", "turn.interrupted"].includes(event.type))
