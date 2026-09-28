@@ -37,7 +37,8 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
       if (event.taskId !== taskId) return;
       const lifecycle = event.type.startsWith("run.") ? event.type.slice(4) : "";
       if (["started", "completed", "failed", "interrupted", "terminated"].includes(lifecycle)) {
-        setRuns((current) => current.map((run) => run.id === event.runId ? { ...run, status: lifecycle, finishedAt: lifecycle === "started" ? 0 : event.timestamp } : run));
+        const status = lifecycle === "started" ? "running" : lifecycle;
+        setRuns((current) => current.map((run) => run.id === event.runId ? { ...run, status, finishedAt: lifecycle === "started" ? 0 : event.timestamp } : run));
       }
       if (snapshotLoaded) setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
       else pending.push(event);
