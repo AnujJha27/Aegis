@@ -9,9 +9,12 @@ export type Repository = {
 
 export type GitChange = { path: string; old_path?: string | null; index_status: string; worktree_status: string; additions: number; deletions: number; binary: boolean };
 export type GitStatus = { repository: Repository; files: GitChange[]; branches: string[]; current_branch: string; clean: boolean; agent_running: boolean; output?: string };
+export type GitCommit = { id: string; parent_id: string | null; author: string; timestamp: number; subject: string };
+export type GitCommitFile = { path: string; old_path: string | null; status: string };
+export type GitCommitReview = { commit: GitCommit; files: GitCommitFile[] };
 export type FileEntry = { path: string; name: string; kind: "file" | "directory" | "symlink"; language: string; size?: number; changed: boolean; git_status: string; old_path?: string | null; additions: number; deletions: number; binary: boolean };
-export type FileContent = { source: "head" | "index" | "worktree"; size: number; exists: boolean; binary: boolean; truncated: boolean; content: string };
-export type FileComparison = { path: string; old_path: string | null; status: string; original: FileContent; modified: FileContent; binary: boolean; truncated: boolean };
+export type FileContent = { source: "head" | "index" | "worktree" | "commit"; revision?: string | null; size: number; exists: boolean; binary: boolean; truncated: boolean; content: string };
+export type FileComparison = { path: string; old_path: string | null; parent_commit?: string | null; commit?: string | null; status: string; original: FileContent; modified: FileContent; binary: boolean; truncated: boolean };
 
 export type Task = {
   id: string;
@@ -110,6 +113,9 @@ export const api = {
   files: (path = "", scope: "changed" | "all" = "changed", recursive = false, includeChanges = true) => request<{ entries: FileEntry[]; truncated: boolean }>(`/api/files?scope=${scope}&recursive=${recursive ? "1" : "0"}${includeChanges ? "" : "&include_changes=0"}${path ? `&path=${encodeURIComponent(path)}` : ""}`),
   fileContent: (path: string, source: "head" | "index" | "worktree" = "worktree", loadLarge = false) => request<FileContent>(`/api/files/content?path=${encodeURIComponent(path)}&source=${source}${loadLarge ? "&load_large=1" : ""}`),
   compareFiles: (path: string, base: "head" | "index" = "head", target: "index" | "worktree" = "worktree", loadLarge = false) => request<FileComparison>(`/api/files/compare?path=${encodeURIComponent(path)}&base=${base}&target=${target}${loadLarge ? "&load_large=1" : ""}`),
+  commits: () => request<GitCommit[]>("/api/git/commits"),
+  commitReview: (id: string) => request<GitCommitReview>(`/api/git/commits/${encodeURIComponent(id)}`),
+  compareCommit: (path: string, id: string, loadLarge = false) => request<FileComparison>(`/api/files/compare?path=${encodeURIComponent(path)}&commit=${encodeURIComponent(id)}${loadLarge ? "&load_large=1" : ""}`),
   gitStatus: () => request<GitStatus>("/api/git/status"),
   stage: (path: string) => request<GitStatus>("/api/git/stage", { method: "POST", body: JSON.stringify({ path }) }),
   unstage: (path: string) => request<GitStatus>("/api/git/unstage", { method: "POST", body: JSON.stringify({ path }) }),

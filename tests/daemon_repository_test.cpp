@@ -127,4 +127,42 @@ int main() {
     aegis::daemon::repository::Files emptyFiles(emptyGit);
     const auto firstCommitComparison = emptyFiles.compare("first.cpp");
     assert(!firstCommitComparison.original.exists && firstCommitComparison.modified.content == "int first = 1;\n");
+
+    RepositoryFixture history;
+    history.write("old name.cpp", "int renamed = 0;\n");
+    history.write("gone.cpp", "int gone = 0;\n");
+    history.write("space name.cpp", "int value = 0;\n");
+    history.commit("base snapshot");
+    history.git({"mv", "--", "old name.cpp", "new name.cpp"});
+    history.write("space name.cpp", "int value = 1;\n");
+    history.write("new file.cpp", "int fresh = 1;\n");
+    std::filesystem::remove(history.root() / "gone.cpp");
+    history.commit("inspectable snapshot");
+    auto commitId = history.git({"rev-parse", "HEAD"});
+    while (!commitId.empty() && (commitId.back() == '\n' || commitId.back() == '\r')) commitId.pop_back();
+    aegis::daemon::repository::GitRepository historyGit(history.root());
+    const auto commits = historyGit.commits();
+    assert(!commits.empty() && commits.front().id == commitId);
+    assert(commits.front().parentId && commits.front().subject == "inspectable snapshot");
+    const auto commitFiles = historyGit.commitFiles(commitId);
+    const auto commitFile = [&](const std::string &path) -> const aegis::daemon::repository::CommitFile * {
+        const auto item = std::find_if(commitFiles.begin(), commitFiles.end(), [&](const auto &entry) { return entry.path == path; });
+        return item == commitFiles.end() ? nullptr : &*item;
+    };
+    assert(commitFile("new name.cpp") && commitFile("new name.cpp")->status == "R");
+    assert(commitFile("new name.cpp")->oldPath == "old name.cpp");
+    assert(commitFile("space name.cpp") && commitFile("space name.cpp")->status == "M");
+    assert(commitFile("new file.cpp") && commitFile("new file.cpp")->status == "A");
+    assert(commitFile("gone.cpp") && commitFile("gone.cpp")->status == "D");
+
+    aegis::daemon::repository::Files historyFiles(historyGit);
+    const auto commitComparison = historyFiles.compareCommit(commitId, "space name.cpp");
+    assert(commitComparison.original.content == "int value = 0;\n");
+    assert(commitComparison.modified.content == "int value = 1;\n");
+    const auto commitRename = historyFiles.compareCommit(commitId, "new name.cpp");
+    assert(commitRename.oldPath == "old name.cpp");
+    assert(commitRename.original.content == "int renamed = 0;\n");
+    assert(commitRename.modified.content == "int renamed = 0;\n");
+    const auto commitDelete = historyFiles.compareCommit(commitId, "gone.cpp");
+    assert(commitDelete.original.content == "int gone = 0;\n" && !commitDelete.modified.exists);
 }

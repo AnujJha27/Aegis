@@ -120,6 +120,7 @@ std::string fileSourceName(FileSource source) {
     case FileSource::head: return "head";
     case FileSource::index: return "index";
     case FileSource::worktree: return "worktree";
+    case FileSource::commit: return "commit";
     }
     return "worktree";
 }
@@ -215,7 +216,15 @@ std::string Files::objectId(const std::string &path, FileSource source) const {
     return objectIdFromOutput(result.output);
 }
 
+std::string Files::objectIdAt(const std::string &path, const std::string &revision) const {
+    const auto result = process::run(git_.command({"--literal-pathspecs", "ls-tree", "-z", "--format=%(objectname)",
+                                                   revision, "--", path}), git_.path());
+    if (result.exitCode != 0) throw std::runtime_error("could not inspect commit file: " + result.output);
+    return objectIdFromOutput(result.output);
+}
+
 FileContent Files::read(const std::string &path, FileSource source, bool loadLarge) const {
+    if (source == FileSource::commit) throw std::invalid_argument("commit source requires a commit id");
     const auto relative = relativePath(path);
     if (source == FileSource::worktree) return readWorktree(relative.generic_string(), loadLarge);
     return readObject(relative.generic_string(), source, loadLarge);
@@ -283,9 +292,23 @@ FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
 }
 
 FileContent Files::readObject(const std::string &path, FileSource source, bool loadLarge) const {
+    const auto oid = objectId(path, source);
+    return readBlob(oid, source, source == FileSource::head ? std::optional<std::string>{"HEAD"} : std::optional<std::string>{"INDEX"}, loadLarge);
+}
+
+FileContent Files::readCommitObject(const std::string &path, const std::optional<std::string> &revision, bool loadLarge) const {
+    if (!revision) {
+        FileContent result;
+        result.source = FileSource::commit;
+        return result;
+    }
+    return readBlob(objectIdAt(path, *revision), FileSource::commit, revision, loadLarge);
+}
+
+FileContent Files::readBlob(const std::string &oid, FileSource source, std::optional<std::string> revision, bool loadLarge) const {
     FileContent result;
     result.source = source;
-    const auto oid = objectId(path, source);
+    result.revision = std::move(revision);
     if (oid.empty()) return result;
     const auto sizeResult = process::run(git_.command({"cat-file", "-s", oid}), git_.path());
     if (sizeResult.exitCode != 0) throw std::runtime_error("could not inspect Git blob size: " + sizeResult.output);
@@ -326,6 +349,27 @@ FileComparison Files::compare(const std::string &path, FileSource base, FileSour
     const auto originalPath = result.oldPath.value_or(result.path);
     result.original = read(originalPath, base, loadLarge);
     result.modified = read(result.path, target, loadLarge);
+    result.binary = result.original.binary || result.modified.binary;
+    result.truncated = result.original.truncated || result.modified.truncated;
+    return result;
+}
+
+FileComparison Files::compareCommit(const std::string &commitId, const std::string &path, bool loadLarge) const {
+    const auto relative = relativePath(path);
+    const auto commit = git_.findCommit(commitId);
+    if (!commit) throw std::invalid_argument("commit was not found");
+    const auto files = git_.commitFiles(commit->id);
+    const auto changed = std::find_if(files.begin(), files.end(), [&](const auto &file) { return file.path == relative.generic_string(); });
+    if (changed == files.end()) throw std::invalid_argument("file is not part of this commit");
+
+    FileComparison result;
+    result.path = changed->path;
+    result.oldPath = changed->oldPath;
+    result.parentCommit = commit->parentId;
+    result.commit = commit->id;
+    result.status = changed->status;
+    result.original = readCommitObject(changed->oldPath.value_or(changed->path), commit->parentId, loadLarge);
+    result.modified = readCommitObject(changed->path, commit->id, loadLarge);
     result.binary = result.original.binary || result.modified.binary;
     result.truncated = result.original.truncated || result.modified.truncated;
     return result;

@@ -37,14 +37,28 @@ inline nlohmann::json toJson(const repository::FileEntry &entry) {
 }
 
 inline nlohmann::json toJson(const repository::FileContent &content) {
-    return {{"source", repository::fileSourceName(content.source)}, {"size", content.size}, {"exists", content.exists},
+    return {{"source", repository::fileSourceName(content.source)},
+            {"revision", content.revision ? nlohmann::json(*content.revision) : nlohmann::json(nullptr)},
+            {"size", content.size}, {"exists", content.exists},
             {"binary", content.binary}, {"truncated", content.truncated}, {"content", content.content}};
 }
 
 inline nlohmann::json toJson(const repository::FileComparison &comparison) {
     return {{"path", comparison.path}, {"old_path", comparison.oldPath ? nlohmann::json(*comparison.oldPath) : nlohmann::json(nullptr)},
+            {"parent_commit", comparison.parentCommit ? nlohmann::json(*comparison.parentCommit) : nlohmann::json(nullptr)},
+            {"commit", comparison.commit ? nlohmann::json(*comparison.commit) : nlohmann::json(nullptr)},
             {"status", comparison.status}, {"original", toJson(comparison.original)}, {"modified", toJson(comparison.modified)},
             {"binary", comparison.binary}, {"truncated", comparison.truncated}};
+}
+
+inline nlohmann::json toJson(const repository::CommitSummary &commit) {
+    return {{"id", commit.id}, {"parent_id", commit.parentId ? nlohmann::json(*commit.parentId) : nlohmann::json(nullptr)},
+            {"author", commit.author}, {"timestamp", commit.timestamp}, {"subject", commit.subject}};
+}
+
+inline nlohmann::json toJson(const repository::CommitFile &file) {
+    return {{"path", file.path}, {"old_path", file.oldPath ? nlohmann::json(*file.oldPath) : nlohmann::json(nullptr)},
+            {"status", file.status}};
 }
 
 inline nlohmann::json toJson(const VerificationRun &run) {

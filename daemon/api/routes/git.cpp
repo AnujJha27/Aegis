@@ -4,6 +4,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <charconv>
+
 namespace aegis::daemon::api::routes {
 
 std::optional<Response> git(const Request &request, const Context &context) {
@@ -12,6 +14,34 @@ std::optional<Response> git(const Request &request, const Context &context) {
     if (method == boost::beast::http::verb::get && target == "/api/repository") {
         if (context.git) return jsonResponse(boost::beast::http::status::ok, protocol::toJson(context.git->state()));
         return jsonResponse(boost::beast::http::status::ok, {{"path", context.repository.string()}, {"exists", std::filesystem::is_directory(context.repository)}});
+    }
+    if (method == boost::beast::http::verb::get && target.substr(0, target.find('?')) == "/api/git/commits") {
+        if (!context.git) return error(boost::beast::http::status::service_unavailable, "git_unavailable", "repository service is unavailable");
+        bool valid = true;
+        const auto limitText = queryValue(target, "limit", valid);
+        if (!valid) return error(boost::beast::http::status::bad_request, "invalid_query", "query parameters must be valid and unique");
+        std::size_t limit = 50;
+        if (limitText) {
+            const auto [end, parseError] = std::from_chars(limitText->data(), limitText->data() + limitText->size(), limit);
+            if (parseError != std::errc{} || end != limitText->data() + limitText->size() || limit == 0 || limit > 100)
+                return error(boost::beast::http::status::bad_request, "invalid_limit", "limit must be between 1 and 100");
+        }
+        nlohmann::json commits = nlohmann::json::array();
+        for (const auto &commit : context.git->commits(limit)) commits.push_back(protocol::toJson(commit));
+        return jsonResponse(boost::beast::http::status::ok, commits);
+    }
+    constexpr std::string_view commitPrefix = "/api/git/commits/";
+    if (method == boost::beast::http::verb::get && target.starts_with(commitPrefix)) {
+        const auto end = target.find_first_of("/?", commitPrefix.size());
+        if (end == std::string::npos || target[end] == '?') {
+            if (!context.git) return error(boost::beast::http::status::service_unavailable, "git_unavailable", "repository service is unavailable");
+            const auto id = target.substr(commitPrefix.size(), (end == std::string::npos ? target.size() : end) - commitPrefix.size());
+            const auto commit = context.git->findCommit(id);
+            if (!commit) return error(boost::beast::http::status::not_found, "commit_not_found", "commit was not found");
+            nlohmann::json files = nlohmann::json::array();
+            for (const auto &file : context.git->commitFiles(commit->id)) files.push_back(protocol::toJson(file));
+            return jsonResponse(boost::beast::http::status::ok, {{"commit", protocol::toJson(*commit)}, {"files", files}});
+        }
     }
     if (method == boost::beast::http::verb::get && target == "/api/changes") {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");

@@ -9,7 +9,7 @@
 
 namespace aegis::daemon::repository {
 
-enum class FileSource { head, index, worktree };
+enum class FileSource { head, index, worktree, commit };
 enum class FileScope { changed, all };
 
 struct FileEntry {
@@ -33,6 +33,7 @@ struct FileListing {
 
 struct FileContent {
     FileSource source = FileSource::worktree;
+    std::optional<std::string> revision;
     std::uint64_t size = 0;
     bool exists = false;
     bool binary = false;
@@ -43,6 +44,8 @@ struct FileContent {
 struct FileComparison {
     std::string path;
     std::optional<std::string> oldPath;
+    std::optional<std::string> parentCommit;
+    std::optional<std::string> commit;
     std::string status;
     FileContent original;
     FileContent modified;
@@ -61,12 +64,19 @@ public:
                            FileSource base = FileSource::head,
                            FileSource target = FileSource::worktree,
                            bool loadLarge = false) const;
+    FileComparison compareCommit(const std::string &commit, const std::string &path,
+                                 bool loadLarge = false) const;
 
 private:
     std::vector<std::string> gitPaths(const std::string &prefix, bool &truncated) const;
     std::string objectId(const std::string &path, FileSource source) const;
+    std::string objectIdAt(const std::string &path, const std::string &revision) const;
     FileContent readWorktree(const std::string &path, bool loadLarge) const;
     FileContent readObject(const std::string &path, FileSource source, bool loadLarge) const;
+    FileContent readCommitObject(const std::string &path, const std::optional<std::string> &revision,
+                                 bool loadLarge) const;
+    FileContent readBlob(const std::string &oid, FileSource source, std::optional<std::string> revision,
+                         bool loadLarge) const;
 
     const GitRepository &git_;
 };

@@ -20,6 +20,7 @@ std::optional<Response> files(const Request &request, const Context &context) {
     const auto sourceText = queryValue(target, "source", validQuery);
     const auto baseText = queryValue(target, "base", validQuery);
     const auto targetText = queryValue(target, "target", validQuery);
+    const auto commitText = queryValue(target, "commit", validQuery);
     const auto largeText = queryValue(target, "load_large", validQuery);
     if (!validQuery) return error(boost::beast::http::status::bad_request, "invalid_query", "query parameters must be valid and unique");
     const bool loadLarge = largeText && (*largeText == "1" || *largeText == "true");
@@ -44,6 +45,14 @@ std::optional<Response> files(const Request &request, const Context &context) {
             const auto source = repository::parseFileSource(sourceText.value_or("worktree"));
             if (!source) return error(boost::beast::http::status::bad_request, "invalid_source", "source must be head, index, or worktree");
             return jsonResponse(boost::beast::http::status::ok, protocol::toJson(context.files->read(*requestedPath, *source, loadLarge)));
+        }
+        if (commitText) {
+            if (baseText || targetText || !context.git)
+                return error(boost::beast::http::status::bad_request, "invalid_commit_comparison", "commit comparison cannot be combined with source comparison");
+            if (!context.git->findCommit(*commitText))
+                return error(boost::beast::http::status::not_found, "commit_not_found", "commit was not found");
+            return jsonResponse(boost::beast::http::status::ok,
+                                protocol::toJson(context.files->compareCommit(*commitText, *requestedPath, loadLarge)));
         }
         const auto base = repository::parseFileSource(baseText.value_or("head"));
         const auto targetSource = repository::parseFileSource(targetText.value_or("worktree"));

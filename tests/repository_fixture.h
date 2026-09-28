@@ -34,11 +34,12 @@ public:
         assert(output.good());
     }
 
-    void git(const std::vector<std::string> &arguments) const {
+    std::string git(const std::vector<std::string> &arguments) const {
         auto command = std::vector<std::string>{"git"};
         command.insert(command.end(), arguments.begin(), arguments.end());
         const auto result = aegis::daemon::process::run(command, root_);
         assert(result.exitCode == 0);
+        return result.output;
     }
 
     void commit(const std::string &message) const {

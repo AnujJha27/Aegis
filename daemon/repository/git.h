@@ -2,13 +2,29 @@
 
 #include "daemon/domain/types.h"
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace aegis::daemon::repository {
 
 class Files;
+
+struct CommitSummary {
+    std::string id;
+    std::optional<std::string> parentId;
+    std::string author;
+    std::int64_t timestamp = 0;
+    std::string subject;
+};
+
+struct CommitFile {
+    std::string path;
+    std::optional<std::string> oldPath;
+    std::string status;
+};
 
 class GitRepository final {
 public:
@@ -17,6 +33,9 @@ public:
     const std::filesystem::path &path() const;
     RepositoryState state() const;
     std::vector<GitChange> changes() const;
+    std::vector<CommitSummary> commits(std::size_t limit = 50) const;
+    std::optional<CommitSummary> findCommit(const std::string &id) const;
+    std::vector<CommitFile> commitFiles(const std::string &id) const;
     std::vector<std::string> branches() const;
     std::string currentBranch() const;
     bool clean() const;

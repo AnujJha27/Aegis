@@ -31,3 +31,34 @@ import "monaco-editor/esm/vs/basic-languages/solidity/solidity.contribution";
 };
 
 loader.config({ monaco });
+
+monaco.editor.defineTheme("aegis-muted-dark", {
+  base: "vs-dark",
+  inherit: true,
+  rules: [
+    { token: "comment", foreground: "718087", fontStyle: "italic" },
+    { token: "string", foreground: "a6b89d" },
+    { token: "keyword", foreground: "a6afb9" },
+  ],
+  colors: {
+    "editor.background": "#0a0c0f",
+    "editor.foreground": "#c4cbd0",
+    "editorLineNumber.foreground": "#59636c",
+    "editorLineNumber.activeForeground": "#9aa6ab",
+    "editorCursor.foreground": "#82a4aa",
+    "editor.selectionBackground": "#29363b",
+    "editor.inactiveSelectionBackground": "#1b2529",
+    "editor.lineHighlightBackground": "#101417",
+    "editorIndentGuide.background1": "#1c2327",
+    "editorWidget.background": "#101418",
+    "editorWidget.border": "#252b31",
+    "editorGutter.background": "#0a0c0f",
+    "diffEditor.insertedTextBackground": "#26392d88",
+    "diffEditor.removedTextBackground": "#48272b88",
+    "diffEditor.insertedLineBackground": "#17231b88",
+    "diffEditor.removedLineBackground": "#2a191c88",
+    "scrollbarSlider.background": "#53616744",
+    "scrollbarSlider.hoverBackground": "#71808766",
+    "scrollbarSlider.activeBackground": "#87969c77",
+  },
+});

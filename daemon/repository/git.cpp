@@ -3,6 +3,7 @@
 #include "daemon/process/process.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -45,6 +46,33 @@ bool validGitEntry(const std::filesystem::path &root) {
     auto target = std::filesystem::path(line.substr(prefix.size()));
     if (target.is_relative()) target = root / target;
     return gitDirectory(target.lexically_normal());
+}
+
+bool validCommitId(const std::string &id) {
+    return (id.size() == 40 || id.size() == 64) &&
+        std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isxdigit(c); });
+}
+
+std::optional<CommitSummary> parseCommitSummary(const std::string &line) {
+    std::array<std::string_view, 5> fields;
+    std::size_t start = 0;
+    for (std::size_t index = 0; index + 1 < fields.size(); ++index) {
+        const auto end = line.find('\x1f', start);
+        if (end == std::string::npos) return std::nullopt;
+        fields[index] = std::string_view(line).substr(start, end - start);
+        start = end + 1;
+    }
+    fields.back() = std::string_view(line).substr(start);
+    CommitSummary result;
+    result.id = fields[0];
+    if (!validCommitId(result.id)) return std::nullopt;
+    const auto parentEnd = fields[1].find(' ');
+    if (!fields[1].empty()) result.parentId = std::string(fields[1].substr(0, parentEnd));
+    result.author = fields[2];
+    const auto [end, error] = std::from_chars(fields[3].data(), fields[3].data() + fields[3].size(), result.timestamp);
+    if (error != std::errc{} || end != fields[3].data() + fields[3].size()) return std::nullopt;
+    result.subject = fields[4];
+    return result;
 }
 
 }
@@ -168,6 +196,59 @@ std::vector<GitChange> GitRepository::changes() const {
         change.additions = parseCount(addedField);
         change.deletions = parseCount(removedField);
         change.binary = change.binary || addedField == "-" || removedField == "-";
+    }
+    return result;
+}
+
+std::vector<CommitSummary> GitRepository::commits(std::size_t limit) const {
+    if (!validRepository_) return {};
+    limit = std::clamp<std::size_t>(limit, 1, 100);
+    const auto output = process::run(command({"log", "-n", std::to_string(limit),
+        "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s"}), path_).output;
+    std::vector<CommitSummary> result;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line))
+        if (auto commit = parseCommitSummary(line)) result.push_back(std::move(*commit));
+    return result;
+}
+
+std::optional<CommitSummary> GitRepository::findCommit(const std::string &id) const {
+    if (!validRepository_ || !validCommitId(id)) return std::nullopt;
+    const auto output = process::run(command({"show", "-s", "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s", id}), path_);
+    if (output.exitCode != 0) return std::nullopt;
+    auto line = output.output;
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+    return parseCommitSummary(line);
+}
+
+std::vector<CommitFile> GitRepository::commitFiles(const std::string &id) const {
+    const auto selected = findCommit(id);
+    if (!selected) return {};
+    const auto output = process::run(command({"diff-tree", "--root", "--first-parent", "--no-commit-id",
+        "--name-status", "-r", "-M", "-z", selected->id}), path_);
+    if (output.exitCode != 0) throw std::runtime_error("could not list commit changes: " + output.output);
+    std::vector<CommitFile> result;
+    for (std::size_t offset = 0; offset < output.output.size();) {
+        const auto statusEnd = output.output.find('\0', offset);
+        if (statusEnd == std::string::npos) break;
+        const auto status = output.output.substr(offset, statusEnd - offset);
+        offset = statusEnd + 1;
+        const auto firstEnd = output.output.find('\0', offset);
+        if (firstEnd == std::string::npos) break;
+        CommitFile file;
+        file.status = status.substr(0, 1);
+        if ((file.status == "R" || file.status == "C") && firstEnd + 1 < output.output.size()) {
+            file.oldPath = output.output.substr(offset, firstEnd - offset);
+            const auto secondEnd = output.output.find('\0', firstEnd + 1);
+            if (secondEnd == std::string::npos) break;
+            file.path = output.output.substr(firstEnd + 1, secondEnd - firstEnd - 1);
+            offset = secondEnd + 1;
+        } else {
+            file.path = output.output.substr(offset, firstEnd - offset);
+            offset = firstEnd + 1;
+        }
+        result.push_back(std::move(file));
     }
     return result;
 }

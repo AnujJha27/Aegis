@@ -223,3 +223,23 @@ body { background: #0a0c0f; }
 .screen-toggle button, .review-tabs button { font-family: var(--mono); }
 .git-panel, .diff, .verification-status { background: #0d1013; }
 ::selection { color: #e7edf2; background: #31545b; }
+
+/* Calm surfaces shared by the app chrome and the read-only code renderer. */
+:root { --line: #242a2e; --muted: #879196; --faint: #626c71; --accent: #9bb494; --blue: #78999e; --danger: #bd777b; }
+body { background: var(--bg); }
+.topbar, .session-heading { background: #0d1013; }
+.session-heading { background-image: none; }
+.event-card { background: #0f1316; }
+.pulse, .composer-status i, .agent-state i, .brand-mark, .task-dot { box-shadow: none; }
+.event-card, .terminal-wrap { box-shadow: none; }
+button, select, textarea, .task-item, .file-row, .review-side-section, .code-toolbar, .code-segment button, .file-scope button {
+  transition: color 130ms ease, background-color 130ms ease, border-color 130ms ease;
+}
+.commit-picker { display: grid; gap: 7px; padding: 10px; border-bottom: 1px solid var(--line); }
+.commit-picker label { color: var(--faint); font: 9px var(--mono); letter-spacing: .08em; }
+.commit-picker select { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 1px; color: #c4cbd0; background: #0b0e10; font: 10px/1.4 var(--mono); }
+.commit-picker small { color: var(--muted); font: 9px/1.45 var(--mono); }
+.code-main, .code-editor, .code-editor .monaco-editor, .code-editor .monaco-diff-editor,
+.code-editor .monaco-editor .margin, .code-editor .monaco-editor-background { background-color: #0a0c0f !important; }
+.monaco-editor .scroll-decoration { box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }

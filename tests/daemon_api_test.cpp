@@ -4,6 +4,7 @@
 #include "daemon/repository/git.h"
 #include "daemon/repository/files.h"
 #include "daemon/session/store.h"
+#include "repository_fixture.h"
 
 #include <boost/beast/http.hpp>
 #include <nlohmann/json.hpp>
@@ -52,6 +53,31 @@ int main() {
     assert(invalidFileOptions.result() == http::status::bad_request);
     const auto escapedFile = request(context, http::verb::get, "/api/files/content?path=%2e%2e%2fsecret");
     assert(escapedFile.result() == http::status::bad_request);
+
+    RepositoryFixture commitFixture;
+    commitFixture.write("space name.cpp", "int value = 0;\n");
+    commitFixture.commit("base");
+    commitFixture.write("space name.cpp", "int value = 1;\n");
+    commitFixture.write("new.cpp", "int fresh = 1;\n");
+    commitFixture.commit("review commit");
+    auto commitId = commitFixture.git({"rev-parse", "HEAD"});
+    while (!commitId.empty() && (commitId.back() == '\n' || commitId.back() == '\r')) commitId.pop_back();
+    aegis::daemon::repository::GitRepository commitGit(commitFixture.root());
+    aegis::daemon::repository::Files commitFiles(commitGit);
+    const aegis::daemon::api::Context commitContext{&store, &events, &manager, &commitGit, &commitFiles, commitFixture.root(), {}};
+    const auto commitList = request(commitContext, http::verb::get, "/api/git/commits?limit=2");
+    assert(commitList.result() == http::status::ok);
+    assert(nlohmann::json::parse(commitList.body()).at(0).at("id") == commitId);
+    const auto commitDetail = request(commitContext, http::verb::get, "/api/git/commits/" + commitId);
+    assert(commitDetail.result() == http::status::ok);
+    assert(nlohmann::json::parse(commitDetail.body()).at("files").size() == 2);
+    const auto commitDiff = request(commitContext, http::verb::get,
+        "/api/files/compare?path=space%20name.cpp&commit=" + commitId);
+    assert(commitDiff.result() == http::status::ok);
+    const auto commitComparison = nlohmann::json::parse(commitDiff.body());
+    assert(commitComparison.at("original").at("content") == "int value = 0;\n");
+    assert(commitComparison.at("modified").at("content") == "int value = 1;\n");
+    assert(request(commitContext, http::verb::get, "/api/git/commits/not-a-commit").result() == http::status::not_found);
 
     const auto created = request(context, http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);
