@@ -2,6 +2,12 @@
 /build-core/
 /build-sanitize/
 /dist/
+/.qt/
+/CMakeCache.txt
+/CMakeFiles/
+/CTestTestfile.cmake
+/Makefile
+/cmake_install.cmake
 /.aegis/
 /.frontend.md
 /.aegis-git/
