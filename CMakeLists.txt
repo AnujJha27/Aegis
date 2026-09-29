@@ -53,6 +53,7 @@ target_link_libraries(aegis_daemon_services PUBLIC aegis_daemon_session Threads:
 
 add_library(aegis_daemon_api
     daemon/api/server.cpp
+    daemon/api/static_files.cpp
     daemon/api/routes.cpp
     daemon/api/routes/agents.cpp
     daemon/api/routes/tasks.cpp

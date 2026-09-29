@@ -37,8 +37,6 @@ private:
     void serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket);
     void serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request);
     void servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request);
-    Response serveStatic(const Request &request) const;
-
     Context context_;
     boost::asio::io_context io_;
     boost::asio::ip::tcp::acceptor acceptor_;

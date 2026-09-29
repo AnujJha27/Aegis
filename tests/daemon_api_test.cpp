@@ -1,6 +1,7 @@
 #include "daemon/api/routes.h"
 #include "daemon/api/origin.h"
 #include "daemon/api/server.h"
+#include "daemon/api/static_files.h"
 #include "daemon/agents/manager.h"
 #include "daemon/protocol/event_hub.h"
 #include "daemon/repository/git.h"
@@ -163,6 +164,22 @@ int main() {
     assert(handoff.body().find("inspect this") != std::string::npos);
     assert(handoff.body().find("verification-ok") != std::string::npos);
     assert(nlohmann::json::parse(handoff.body()).at("findings").size() == 1);
+
+    RepositoryFixture staticFixture;
+    staticFixture.write("web/index.html", "Aegis UI");
+    staticFixture.write("outside/secret.txt", "outside secret");
+    std::filesystem::create_directories(staticFixture.root() / "web/assets");
+    std::filesystem::create_symlink(staticFixture.root() / "outside/secret.txt", staticFixture.root() / "web/assets/leak.txt");
+    const auto staticIndex = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/");
+    assert(staticIndex.result() == http::status::ok && staticIndex.body() == "Aegis UI");
+    const auto staticQuery = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/?cache=1");
+    assert(staticQuery.result() == http::status::ok && staticQuery.body() == "Aegis UI");
+    const auto staticEscape = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/assets/leak.txt");
+    assert(staticEscape.result() == http::status::not_found && staticEscape.body().empty());
+    assert(aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/../outside/secret.txt").result() == http::status::bad_request);
+    staticFixture.write("web/large.bin", "");
+    std::filesystem::resize_file(staticFixture.root() / "web/large.bin", 16 * 1024 * 1024 + 1);
+    assert(aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/large.bin").result() == http::status::payload_too_large);
 
     const auto graph = request(context, http::verb::get, "/api/tasks/" + taskId + "/graph");
     assert(graph.result() == http::status::ok);
