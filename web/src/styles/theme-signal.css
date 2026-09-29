@@ -1,0 +1,20 @@
+/* Muted cyberpunk: hard edges, quiet grid, and a small amount of cold signal color. */
+.topbar { border-top: 1px solid #263b3e; background: rgba(9, 12, 17, .94); }
+.brand-mark, .task-dot, .pulse, .composer-status i, .agent-state i { color: var(--blue); background: var(--blue); box-shadow: 0 0 10px rgba(130, 179, 185, .32); }
+.screen-toggle, .screen-toggle button, .task-item, .session-id, .terminal-wrap, .event-card, .git-panel, .review-tabs button, .diff, .verification-status, .empty-icon { border-radius: 2px; }
+.task-item.selected { border-left: 2px solid var(--blue); background: #131c23; }
+.session-heading { background: linear-gradient(90deg, rgba(81, 133, 137, .055), transparent 42%); }
+.session-id { border: 1px solid var(--line); background: #0d1319; }
+.terminal-wrap { border-color: #304047; box-shadow: inset 0 1px rgba(130, 179, 185, .08); }
+.event-card { position: relative; border-color: #29353c; border-left: 2px solid var(--blue); background: linear-gradient(100deg, rgba(75, 121, 124, .07), rgba(14, 19, 25, .95) 32%); }
+.event-card.failed { border-color: #614044; border-left-color: var(--danger); }
+.event-meta { letter-spacing: .1em; }
+.event-meta span:nth-child(3) { color: var(--blue); }
+.composer { border-top-color: #304047; background: linear-gradient(180deg, #0e141a, #0a0e13); }
+.launch-button, .send-button { border-color: #42635e; color: #c4d7ca; background: #17221f; border-radius: 2px; }
+.launch-button:hover, .send-button:hover { border-color: #769f93; background: #1d2b27; }
+.prompt-row textarea:focus, .new-task textarea:focus { border-color: #5b8889; box-shadow: 0 0 0 1px rgba(130, 179, 185, .16); }
+.review-tabs { background: #0b1015; }
+.review-tabs button.active, .screen-toggle button.active { color: #c2d9d4; background: #192527; }
+.git-panel { border-color: #2b373d; background: #0b1015; }
+
