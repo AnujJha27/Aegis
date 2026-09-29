@@ -82,6 +82,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .delete-run-button { width: 23px; height: 23px; padding: 0; border: 1px solid var(--line); border-radius: 2px; color: #ba8585; background: #151719; font: 15px/1 var(--mono); }
 .delete-run-button:hover:not(:disabled) { border-color: #70464b; color: #f0aaaa; background: #281619; }
 .delete-run-button:disabled { opacity: .35; cursor: not-allowed; }
+.agent-dock { position: relative; }
+.delete-confirm { position: absolute; z-index: 5; bottom: calc(100% + 8px); left: 0; display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid #49383a; background: #121416; color: #c8d1d4; font: 10px var(--mono); }
+.delete-confirm span { margin-right: 4px; }
+.delete-confirm button { padding: 5px 7px; border: 1px solid var(--line); background: #171a1d; color: #bfc8cb; font: inherit; }
+.delete-confirm button:last-child { border-color: #70464b; color: #e6b7b7; }
 .agent-state { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .agent-state:not(.online) i { background: var(--faint); box-shadow: none; }
 .launch-button, .send-button { margin-left: auto; border: 1px solid #355044; border-radius: 6px; color: #cfeac3; background: #17271e; padding: 7px 11px; font-size: 11px; }

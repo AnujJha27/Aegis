@@ -113,7 +113,6 @@ export function App() {
   async function deleteRun(runId: string) {
     const run = workspace.runs.find((item) => item.id === runId);
     if (!run || !["completed", "failed", "interrupted", "terminated"].includes(run.status)) return;
-    if (!window.confirm(`Delete this ${run.agent} run and its transcript?`)) return;
     try {
       await api.deleteRun(runId);
       const remaining = workspace.runs.filter((item) => item.id !== runId);
