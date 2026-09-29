@@ -11,6 +11,7 @@
 #include <iterator>
 #include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 
 namespace aegis::daemon::repository {
@@ -51,6 +52,10 @@ bool validGitEntry(const std::filesystem::path &root) {
 bool validCommitId(const std::string &id) {
     return (id.size() == 40 || id.size() == 64) &&
         std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isxdigit(c); });
+}
+
+void requireComplete(const process::Result &result, std::string_view operation) {
+    if (result.outputTruncated) throw std::runtime_error(std::string(operation) + " output exceeded the 16 MiB capture limit");
 }
 
 std::optional<CommitSummary> parseCommitSummary(const std::string &line) {
@@ -114,8 +119,12 @@ RepositoryState GitRepository::state() const {
     RepositoryState result;
     result.path = path_.string();
     if (!validRepository_) return result;
-    const auto status = process::run(command({"status", "--short", "--branch"}), path_).output;
-    const auto numstat = process::run(command({"diff", "HEAD", "--numstat"}), path_).output;
+    const auto statusResult = process::run(command({"status", "--short", "--branch"}), path_);
+    const auto numstatResult = process::run(command({"diff", "HEAD", "--numstat"}), path_);
+    requireComplete(statusResult, "git status");
+    requireComplete(numstatResult, "git numstat");
+    const auto &status = statusResult.output;
+    const auto &numstat = numstatResult.output;
     std::istringstream statusLines(status);
     std::string line;
     while (std::getline(statusLines, line)) {
@@ -140,9 +149,11 @@ RepositoryState GitRepository::state() const {
     return result;
 }
 
-std::vector<GitChange> GitRepository::changes() const {
+std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit) const {
     if (!validRepository_) return {};
-    const auto output = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_).output;
+    const auto status = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
+    requireComplete(status, "git status");
+    const auto &output = status.output;
     std::vector<GitChange> result;
     for (std::size_t offset = 0; offset + 3 <= output.size();) {
         const auto index = output[offset];
@@ -162,11 +173,17 @@ std::vector<GitChange> GitRepository::changes() const {
             offset = originalEnd + 1;
         }
         result.push_back(std::move(change));
+        if (limit && result.size() > *limit) {
+            result.resize(*limit);
+            return result;
+        }
     }
 
     std::map<std::string, std::size_t> indexes;
     for (std::size_t index = 0; index < result.size(); ++index) indexes.emplace(result[index].path, index);
-    const auto numstat = process::run(command({"diff", "--numstat", "-z", "HEAD"}), path_).output;
+    const auto numstatResult = process::run(command({"diff", "--numstat", "-z", "HEAD"}), path_);
+    requireComplete(numstatResult, "git numstat");
+    const auto &numstat = numstatResult.output;
     const auto parseCount = [](std::string_view value) {
         int count = 0;
         const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
@@ -203,8 +220,10 @@ std::vector<GitChange> GitRepository::changes() const {
 std::vector<CommitSummary> GitRepository::commits(std::size_t limit) const {
     if (!validRepository_) return {};
     limit = std::clamp<std::size_t>(limit, 1, 100);
-    const auto output = process::run(command({"log", "-n", std::to_string(limit),
-        "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s"}), path_).output;
+    const auto log = process::run(command({"log", "-n", std::to_string(limit),
+        "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s"}), path_);
+    requireComplete(log, "git log");
+    const auto &output = log.output;
     std::vector<CommitSummary> result;
     std::istringstream lines(output);
     std::string line;
@@ -216,6 +235,7 @@ std::vector<CommitSummary> GitRepository::commits(std::size_t limit) const {
 std::optional<CommitSummary> GitRepository::findCommit(const std::string &id) const {
     if (!validRepository_ || !validCommitId(id)) return std::nullopt;
     const auto output = process::run(command({"show", "-s", "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s", id}), path_);
+    requireComplete(output, "git show");
     if (output.exitCode != 0) return std::nullopt;
     auto line = output.output;
     while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
@@ -227,6 +247,7 @@ std::vector<CommitFile> GitRepository::commitFiles(const std::string &id) const 
     if (!selected) return {};
     const auto output = process::run(command({"diff-tree", "--root", "--first-parent", "--no-commit-id",
         "--name-status", "-r", "-M", "-z", selected->id}), path_);
+    requireComplete(output, "git diff-tree");
     if (output.exitCode != 0) throw std::runtime_error("could not list commit changes: " + output.output);
     std::vector<CommitFile> result;
     for (std::size_t offset = 0; offset < output.output.size();) {
@@ -255,7 +276,9 @@ std::vector<CommitFile> GitRepository::commitFiles(const std::string &id) const 
 
 std::vector<std::string> GitRepository::branches() const {
     if (!validRepository_) return {};
-    const auto output = process::run(command({"branch", "--format=%(refname:short)"}), path_).output;
+    const auto branches = process::run(command({"branch", "--format=%(refname:short)"}), path_);
+    requireComplete(branches, "git branch");
+    const auto &output = branches.output;
     std::vector<std::string> result;
     std::istringstream lines(output);
     std::string line;
@@ -273,11 +296,19 @@ std::string GitRepository::currentBranch() const {
 bool GitRepository::clean() const {
     if (!validRepository_) return false;
     const auto result = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
-    return result.exitCode == 0 && result.output.empty();
+    return result.exitCode == 0 && !result.outputTruncated && result.output.empty();
 }
 
-std::string GitRepository::diff() const {
-    return validRepository_ ? process::run(command({"diff", "HEAD", "--no-ext-diff", "--no-color"}), path_).output : std::string{};
+std::string GitRepository::diff(std::size_t maxOutputBytes) const {
+    if (!validRepository_) return {};
+    auto result = process::run(command({"diff", "HEAD", "--no-ext-diff", "--no-color"}), path_, std::chrono::seconds(30), maxOutputBytes);
+    constexpr std::string_view marker = "...[diff truncated]";
+    if (result.outputTruncated) {
+        if (maxOutputBytes <= marker.size()) return std::string(marker.substr(0, maxOutputBytes));
+        result.output.resize(maxOutputBytes - marker.size());
+        result.output.append(marker);
+    }
+    return result.output;
 }
 
 bool GitRepository::stage(const std::string &path, std::string &error) const {

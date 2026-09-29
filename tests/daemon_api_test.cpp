@@ -13,10 +13,12 @@
 #include <boost/beast/websocket.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -77,7 +79,7 @@ int main() {
     assert(health.body().find("healthy") != std::string::npos);
     const auto version = request(context, http::verb::get, "/api/version");
     assert(version.result() == http::status::ok);
-    assert(nlohmann::json::parse(version.body()).at("schema_version") == 2);
+    assert(nlohmann::json::parse(version.body()).at("schema_version") == 3);
 
     const auto file = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&source=worktree");
     assert(file.result() == http::status::ok);
@@ -120,6 +122,32 @@ int main() {
     assert(commitComparison.at("original").at("content") == "int value = 0;\n");
     assert(commitComparison.at("modified").at("content") == "int value = 1;\n");
     assert(request(commitContext, http::verb::get, "/api/git/commits/not-a-commit").result() == http::status::not_found);
+
+    RepositoryFixture handoffFixture;
+    handoffFixture.write("modified.cpp", "before\n");
+    handoffFixture.write("deleted.cpp", "removed\n");
+    handoffFixture.commit("base");
+    handoffFixture.write("modified.cpp", "after\n");
+    std::filesystem::remove(handoffFixture.root() / "deleted.cpp");
+    handoffFixture.write("untracked.cpp", "new\n");
+    aegis::daemon::repository::GitRepository handoffGit(handoffFixture.root());
+    aegis::daemon::repository::Files handoffFiles(handoffGit);
+    const auto handoffTask = store.createTask("review changes", handoffFixture.root().string());
+    const aegis::daemon::api::Context handoffContext{&store, &events, &manager, &handoffGit, &handoffFiles, handoffFixture.root(), {}};
+    const auto handoffResponse = request(handoffContext, http::verb::get, "/api/tasks/" + handoffTask.id + "/handoff");
+    assert(handoffResponse.result() == http::status::ok);
+    auto handoffJson = nlohmann::json::parse(handoffResponse.body());
+    auto handoffFilesJson = handoffJson.at("changed_files").get<std::vector<std::string>>();
+    assert(!handoffJson.at("changed_files_truncated").get<bool>());
+    for (const auto *path : {"modified.cpp", "deleted.cpp", "untracked.cpp"})
+        assert(std::find(handoffFilesJson.begin(), handoffFilesJson.end(), path) != handoffFilesJson.end());
+    for (int index = 0; index < 105; ++index)
+        handoffFixture.write("extra-" + std::to_string(index) + ".txt", "bounded\n");
+    handoffJson = nlohmann::json::parse(request(handoffContext, http::verb::get,
+        "/api/tasks/" + handoffTask.id + "/handoff").body());
+    handoffFilesJson = handoffJson.at("changed_files").get<std::vector<std::string>>();
+    assert(handoffFilesJson.size() == 100);
+    assert(handoffJson.at("changed_files_truncated").get<bool>());
 
     const auto created = request(context, http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);

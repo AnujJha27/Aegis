@@ -9,13 +9,9 @@ std::optional<Response> review(const Request &request, const Context &context) {
     if (const auto taskId = pathId(target, "/handoff")) {
         const auto task = context.store->task(*taskId);
         if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
-        auto events = context.store->events(*taskId);
-        constexpr std::size_t maxEvents = 20;
-        if (events.size() > maxEvents) events.erase(events.begin(), events.end() - maxEvents);
+        auto events = context.store->events(*taskId, 20);
         for (auto &event : events) if (event.content.size() > 4000) event.content.resize(4000);
-        auto diff = context.git ? context.git->diff() : std::string{};
-        constexpr std::size_t maxDiff = 24000;
-        diff.resize(std::min(diff.size(), maxDiff));
+        auto diff = context.git ? context.git->diff(24000) : std::string{};
         auto verificationHistory = context.store->verifications(*taskId, 1);
         std::optional<VerificationRun> verification;
         if (!verificationHistory.empty()) {
@@ -26,7 +22,13 @@ std::optional<Response> review(const Request &request, const Context &context) {
         for (auto &finding : findings) if (finding.message.size() > 2000) finding.message.resize(2000);
         auto prompt = task->prompt;
         if (prompt.size() > 8000) prompt.resize(8000);
-        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, changedFiles(diff), std::move(verification), std::move(findings)};
+        auto changes = context.git ? context.git->changes(101) : std::vector<GitChange>{};
+        const bool changedFilesTruncated = changes.size() > 100;
+        if (changedFilesTruncated) changes.resize(100);
+        std::vector<std::string> changedFiles;
+        changedFiles.reserve(changes.size());
+        for (auto &change : changes) changedFiles.push_back(std::move(change.path));
+        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, std::move(changedFiles), changedFilesTruncated, std::move(verification), std::move(findings)};
         return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
     }
     if (const auto taskId = pathId(target, "/graph")) {

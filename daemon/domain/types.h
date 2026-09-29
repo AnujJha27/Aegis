@@ -83,6 +83,7 @@ struct HandoffContext {
     std::vector<AgentEvent> recentEvents;
     std::string diff;
     std::vector<std::string> changedFiles;
+    bool changedFilesTruncated = false;
     std::optional<VerificationRun> verification;
     std::vector<ReviewFinding> findings;
 };

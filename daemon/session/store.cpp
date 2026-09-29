@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <stdexcept>
@@ -97,6 +98,7 @@ Store::Store(const std::filesystem::path &path) {
         execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
         execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);");
         execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);");
+        execute("CREATE INDEX IF NOT EXISTS events_task_timestamp ON events(task_id, timestamp);");
         if (!hasColumn(database_, "runs", "external_session_id"))
             execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
         execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
@@ -104,7 +106,7 @@ Store::Store(const std::filesystem::path &path) {
         execute("CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line));");
         execute("CREATE INDEX IF NOT EXISTS findings_task_created ON findings(task_id, created_at DESC);");
         execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
-        execute("PRAGMA user_version = 2;");
+        execute("PRAGMA user_version = 3;");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -349,10 +351,14 @@ std::vector<Task> Store::tasks() const {
     return result;
 }
 
-std::vector<AgentEvent> Store::events(const std::string &taskId) const {
+std::vector<AgentEvent> Store::events(const std::string &taskId, std::optional<std::size_t> limit) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp, rowid");
+    const char *query = limit
+        ? "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?"
+        : "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp, rowid";
+    Statement statement(database_, query);
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event task");
+    if (limit) check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(*limit)), database_, "bind event limit");
     std::vector<AgentEvent> result;
     while (sqlite3_step(statement.get()) == SQLITE_ROW) {
         result.push_back({reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
@@ -363,6 +369,7 @@ std::vector<AgentEvent> Store::events(const std::string &taskId) const {
                           reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 5)),
                           sqlite3_column_int64(statement.get(), 6)});
     }
+    if (limit) std::reverse(result.begin(), result.end());
     return result;
 }
 

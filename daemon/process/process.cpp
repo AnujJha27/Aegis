@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 
 namespace aegis::daemon::process {
@@ -54,7 +55,8 @@ bool ChildProcess::start(const std::vector<std::string> &arguments, const std::f
 
 Result ChildProcess::wait(std::chrono::seconds timeout,
                           const std::function<void(std::string_view)> &onOutput,
-                          bool captureOutput) {
+                          bool captureOutput,
+                          std::size_t maxOutputBytes) {
     pid_t child;
     int output;
     {
@@ -84,7 +86,12 @@ Result ChildProcess::wait(std::chrono::seconds timeout,
                 const auto count = read(output, buffer, sizeof(buffer));
                 if (count > 0) {
                     const std::string_view chunk(buffer, static_cast<std::size_t>(count));
-                    if (captureOutput) result.output.append(chunk);
+                    if (captureOutput) {
+                        const auto remaining = maxOutputBytes - result.output.size();
+                        const auto captured = std::min(chunk.size(), remaining);
+                        result.output.append(chunk.data(), captured);
+                        result.outputTruncated = result.outputTruncated || captured < chunk.size();
+                    }
                     if (onOutput) onOutput(chunk);
                     continue;
                 }
@@ -160,10 +167,11 @@ void ChildProcess::terminate() {
 
 Result run(const std::vector<std::string> &arguments,
            const std::filesystem::path &directory,
-           std::chrono::seconds timeout) {
+           std::chrono::seconds timeout,
+           std::size_t maxOutputBytes) {
     ChildProcess child;
     if (!child.start(arguments, directory)) return {-1, std::strerror(errno), false};
-    return child.wait(timeout);
+    return child.wait(timeout, {}, true, maxOutputBytes);
 }
 
 }

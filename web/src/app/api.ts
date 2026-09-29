@@ -70,6 +70,7 @@ export type HandoffContext = {
   recent_events: AgentEvent[];
   diff: string;
   changed_files: string[];
+  changed_files_truncated: boolean;
   verification: VerificationRun | null;
   findings: ReviewFinding[];
 };

@@ -47,6 +47,9 @@ int main() {
     assert(find("deleted.cpp") && find("deleted.cpp")->worktreeStatus == "D" && find("deleted.cpp")->deletions == 1);
     assert(find("nested/new file.cpp") && find("nested/new file.cpp")->indexStatus == "?");
     assert(find("tracked-binary.dat") && find("tracked-binary.dat")->binary);
+    fixture.write("staged.cpp", std::string(300000, 'x'));
+    const auto boundedDiff = repository.diff(256);
+    assert(boundedDiff.size() == 256 && boundedDiff.ends_with("...[diff truncated]"));
 
     const auto renamed = find("new name.cpp");
     assert(renamed && renamed->indexStatus == "R");

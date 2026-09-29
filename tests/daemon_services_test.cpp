@@ -25,6 +25,13 @@ int main() {
     const auto command = aegis::daemon::process::run({"/usr/bin/printf", "ok"}, repository);
     assert(command.exitCode == 0);
     assert(command.output == "ok");
+    const auto cappedCommand = aegis::daemon::process::run(
+        {"/usr/bin/head", "-c", "100000", "/dev/zero"}, repository, std::chrono::seconds(30), 1024);
+    assert(cappedCommand.exitCode == 0 && cappedCommand.output.size() == 1024 && cappedCommand.outputTruncated);
+    const auto defaultCappedCommand = aegis::daemon::process::run(
+        {"/usr/bin/head", "-c", "16777217", "/dev/zero"}, repository);
+    assert(defaultCappedCommand.exitCode == 0 && defaultCappedCommand.output.size() == 16 * 1024 * 1024);
+    assert(defaultCappedCommand.outputTruncated);
 
     aegis::daemon::process::ChildProcess child;
     assert(child.start({"/bin/sh", "-c", "sleep 30"}, repository));
@@ -45,6 +52,10 @@ int main() {
     const auto verification = aegis::daemon::verification::run({"/usr/bin/true"}, repository, "test-task");
     assert(verification.exitCode == 0);
     assert(verification.taskId == "test-task");
+    const auto largeVerification = aegis::daemon::verification::run(
+        {"/usr/bin/head", "-c", "1100000", "/dev/zero"}, repository, "test-task");
+    assert(largeVerification.exitCode == 0 && largeVerification.output.size() < 1024 * 1024 + 100);
+    assert(largeVerification.output.ends_with("...[verification output truncated]"));
 
     const auto event = aegis::daemon::agents::parseCodexJsonLine(
         R"({"type":"item.completed","item":{"type":"agent_message","text":"implemented"}})", "task", "run", "codex");

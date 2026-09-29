@@ -61,9 +61,14 @@ int main() {
 
         store.appendEvent({"event-1", task.id, run.id, "agent.started", "codex", "", 1});
         store.appendEvent({"event-2", task.id, run.id, "agent.message.completed", "codex", "done", 2});
+        for (int index = 3; index <= 27; ++index)
+            store.appendEvent({"event-" + std::to_string(index), task.id, run.id, "agent.message.completed", "codex", "event", index});
 
         assert(store.tasks().size() == 1);
-        assert(store.events(task.id).size() == 2);
+        assert(store.events(task.id).size() == 27);
+        const auto recent = store.events(task.id, 3);
+        assert(recent.size() == 3 && recent.front().id == "event-25" && recent.back().id == "event-27");
+        assert(store.events(task.id, 0).empty());
     }
 
     {
@@ -108,8 +113,12 @@ int main() {
     assert(sqlite3_open(legacyPath.string().c_str(), &legacy) == SQLITE_OK);
     sqlite3_stmt *version = nullptr;
     assert(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK);
-    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 2);
+    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 3);
     sqlite3_finalize(version);
+    sqlite3_stmt *eventIndex = nullptr;
+    assert(sqlite3_prepare_v2(legacy, "SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_task_timestamp'", -1, &eventIndex, nullptr) == SQLITE_OK);
+    assert(sqlite3_step(eventIndex) == SQLITE_ROW);
+    sqlite3_finalize(eventIndex);
     sqlite3_close(legacy);
 
     const std::string corruptContents = "preserve this invalid database";

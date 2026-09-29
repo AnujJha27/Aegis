@@ -47,7 +47,7 @@ Agent event and provider-session callbacks are exception-contained at adapter th
 
 ## Persistence and migrations
 
-Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, and version 2 adds persisted review findings, while preserving existing task/run/event rows. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
+Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, version 2 adds persisted review findings, and version 3 indexes task/timestamp event queries. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
 
 Verification records contain task ID, optional run ID, the command as a JSON argv array, exit code, output, and start/finish timestamps. Commands are executed as argument arrays, never converted to a shell string. Deleting a run removes its events; associated verification records retain task history and have their run association cleared by the SQLite foreign key.
 
@@ -69,7 +69,7 @@ Provider thread IDs are stored on the run and do not become display events. The 
 
 ## Handoff bounds
 
-`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events (each content field capped at 4,000 bytes), a diff capped at 24,000 bytes, changed paths, the latest verification with output capped at 8,000 bytes, and up to 20 review findings with each message capped at 2,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection.
+`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events queried with SQL `LIMIT` (each content field capped at 4,000 bytes), a diff captured at no more than 24,000 bytes, up to 100 paths from Git status (including untracked and deleted files, with a truncation indicator), the latest verification with output capped at 8,000 bytes, and up to 20 review findings with each message capped at 2,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection.
 
 ## HTTP and WebSocket API
 
@@ -110,7 +110,7 @@ Review findings are local persisted records containing task, optional run, repos
 
 Worktree reads validate repository-relative paths, canonicalize the target, and open it beneath the repository using no-follow path traversal. Git-object reads use argv-based Git commands and literal pathspecs. The React viewer is strictly read-only: Monaco has editor mutation disabled and only renders file contents or diffs. Monaco and its workers are bundled locally and the renderer loads only after a file is opened; no CDN is used. Review offers changed/all files, a small tab set, quick-open, inline/split diff, contextual staging, verification, and activity-to-file navigation. Task attribution is shown only when an event identifies the file; repository dirt is otherwise unowned.
 
-HTTP request bodies are capped at 1 MiB, PTY WebSocket messages at 16 KiB, and static assets at 16 MiB. File responses obey the source-size caps above. Diagnostics go to stderr and exclude prompts, PTY input, and environment credentials. SQLite initialization errors include the database path and do not overwrite failed databases.
+HTTP request bodies are capped at 1 MiB, PTY WebSocket messages at 16 KiB, captured subprocess output at 16 MiB by default, verification output at 1 MiB, and static assets at 16 MiB. Git diff responses are captured at 1 MiB by default and handoff diffs at 24 KiB. File responses obey the source-size caps above. Diagnostics go to stderr and exclude prompts, PTY input, and environment credentials. SQLite initialization errors include the database path and do not overwrite failed databases.
 
 ## Launch and shutdown
 
