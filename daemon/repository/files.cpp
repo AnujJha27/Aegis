@@ -61,12 +61,12 @@ std::string languageFor(const std::filesystem::path &path) {
 }
 
 std::string statusFor(const GitChange &change) {
+    if (change.indexStatus == "C" || change.worktreeStatus == "C") return "C";
     if (change.oldPath) return "R";
     if (change.indexStatus == "?" || change.worktreeStatus == "?") return "?";
     if (change.indexStatus == "A" || change.worktreeStatus == "A") return "A";
     if (change.indexStatus == "D" || change.worktreeStatus == "D") return "D";
     if (change.indexStatus == "R" || change.worktreeStatus == "R") return "R";
-    if (change.indexStatus == "C" || change.worktreeStatus == "C") return "C";
     return "M";
 }
 

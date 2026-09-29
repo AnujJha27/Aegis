@@ -165,4 +165,25 @@ int main() {
     assert(commitRename.modified.content == "int renamed = 0;\n");
     const auto commitDelete = historyFiles.compareCommit(commitId, "gone.cpp");
     assert(commitDelete.original.content == "int gone = 0;\n" && !commitDelete.modified.exists);
+
+    RepositoryFixture copies;
+    const std::string copySource =
+        "int value_1 = 1;\nint value_2 = 2;\nint value_3 = 3;\nint value_4 = 4;\nint value_5 = 5;\n"
+        "int value_6 = 6;\nint value_7 = 7;\nint value_8 = 8;\nint value_9 = 9;\nint value_10 = 10;\n";
+    copies.write("original.cpp", copySource);
+    copies.commit("copy source");
+    copies.git({"mv", "original.cpp", "renamed.cpp"});
+    copies.write("renamed.cpp", copySource + "int appended = 11;\n");
+    copies.git({"add", "--all"});
+    copies.write("copy.cpp", copySource + "int appended = 11;\n");
+    copies.git({"add", "copy.cpp"});
+    copies.git({"config", "status.renames", "copies"});
+    aegis::daemon::repository::GitRepository copiesGit(copies.root());
+    const auto copyChanges = copiesGit.changes();
+    const auto copy = std::find_if(copyChanges.begin(), copyChanges.end(), [](const auto &change) { return change.path == "copy.cpp"; });
+    assert(copy != copyChanges.end() && copy->indexStatus == "C" && copy->oldPath == "original.cpp");
+    aegis::daemon::repository::Files copiesFiles(copiesGit);
+    const auto copyEntries = copiesFiles.list("", aegis::daemon::repository::FileScope::changed);
+    const auto copyEntry = std::find_if(copyEntries.entries.begin(), copyEntries.entries.end(), [](const auto &entry) { return entry.path == "copy.cpp"; });
+    assert(copyEntry != copyEntries.entries.end() && copyEntry->gitStatus == "C" && copyEntry->oldPath == "original.cpp");
 }

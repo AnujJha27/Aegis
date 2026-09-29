@@ -5,11 +5,11 @@ type Props = { scope: "changed" | "all"; changes: GitChange[]; refreshKey: unkno
 
 function changeStatus(change: GitChange) {
   const statuses = `${change.index_status}${change.worktree_status}`;
+  if (statuses.includes("C")) return "C";
   if (change.old_path || statuses.includes("R")) return "R";
   if (statuses.includes("?")) return "?";
   if (statuses.includes("A")) return "A";
   if (statuses.includes("D")) return "D";
-  if (statuses.includes("C")) return "C";
   return "M";
 }
 

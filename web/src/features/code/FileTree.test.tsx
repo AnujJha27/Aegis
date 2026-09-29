@@ -48,4 +48,10 @@ describe("file tree", () => {
     expect(files).toHaveBeenNthCalledWith(1, "", "all", false, false);
     expect(files).toHaveBeenNthCalledWith(2, "src", "all", false, false);
   });
+
+  it("shows copied files as copies even though they have an old path", () => {
+    const copy: GitChange = { path: "copy.cpp", old_path: "source.cpp", index_status: "C", worktree_status: " ", additions: 0, deletions: 0, binary: false };
+    render(<FileTree scope="changed" changes={[copy]} refreshKey="" selectedPath="" onSelect={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /copy\.cpp/ }).textContent).toContain("C");
+  });
 });
