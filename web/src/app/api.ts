@@ -131,8 +131,15 @@ export const api = {
   createFinding: (taskId: string, finding: NewReviewFinding) => request<ReviewFinding>(`/api/tasks/${encodeURIComponent(taskId)}/findings`, { method: "POST", body: JSON.stringify(finding) }),
   updateFindingStatus: async (findingId: string, status: ReviewFinding["status"]) => { await request(`/api/findings/${encodeURIComponent(findingId)}`, { method: "PATCH", body: JSON.stringify({ status }) }); },
   handoff: async (taskId: string) => {
-    const context = await request<Omit<HandoffContext, "recent_events"> & { recent_events: Record<string, unknown>[] }>(`/api/tasks/${taskId}/handoff`);
-    return { ...context, recent_events: context.recent_events.map(agentEvent) };
+    const context = await request<Omit<HandoffContext, "recent_events" | "verification"> & {
+      recent_events: Record<string, unknown>[];
+      verification: Record<string, unknown> | null;
+    }>(`/api/tasks/${taskId}/handoff`);
+    return {
+      ...context,
+      recent_events: context.recent_events.map(agentEvent),
+      verification: context.verification ? verification(context.verification) : null,
+    };
   },
   graph: (taskId: string) => request<TaskGraph>(`/api/tasks/${taskId}/graph`),
   provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[] }>(`/api/tasks/${taskId}/provenance`),
