@@ -4,9 +4,12 @@
 
 #include <filesystem>
 #include <functional>
+#include <exception>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace aegis::daemon::agents {
 
@@ -29,6 +32,28 @@ struct RunContext {
 
 using EventSink = std::function<void(AgentEvent)>;
 using SessionSink = std::function<void(const std::string &, std::string)>;
+
+inline void emitEvent(const EventSink &sink, AgentEvent event) {
+    if (!sink) return;
+    try {
+        sink(std::move(event));
+    } catch (const std::exception &error) {
+        std::cerr << "aegis_daemon: agent event callback failed: " << error.what() << '\n';
+    } catch (...) {
+        std::cerr << "aegis_daemon: agent event callback failed with an unknown error\n";
+    }
+}
+
+inline void notifySession(const SessionSink &sink, const std::string &runId, std::string sessionId) {
+    if (!sink) return;
+    try {
+        sink(runId, std::move(sessionId));
+    } catch (const std::exception &error) {
+        std::cerr << "aegis_daemon: agent session callback failed: " << error.what() << '\n';
+    } catch (...) {
+        std::cerr << "aegis_daemon: agent session callback failed with an unknown error\n";
+    }
+}
 
 class Adapter {
 public:

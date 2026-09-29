@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <stdexcept>
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
@@ -85,7 +86,10 @@ int main() {
             codexOutput.push_back(std::move(event));
             codexChanged.notify_all();
         },
-        [&](const std::string &, std::string session) { providerSession = std::move(session); });
+        [&](const std::string &, std::string session) {
+            providerSession = std::move(session);
+            throw std::runtime_error("test session callback failure");
+        });
     assert(codex.start({"task", "codex-run", "codex", repository, std::nullopt}));
     assert(codex.send("first") == aegis::daemon::agents::SendResult::accepted);
     assert(codex.send("overlap") == aegis::daemon::agents::SendResult::busy);
@@ -200,6 +204,23 @@ int main() {
     }
     assert(ptyFailure == "run.failed");
     failingPty.terminate();
+
+    std::mutex callbackFailureMutex;
+    std::condition_variable callbackFailureChanged;
+    bool callbackFailed = false;
+    aegis::daemon::agents::PtyAdapter throwingSink("shell", {"/bin/sh", "-c", "exit 0"},
+        [&](aegis::daemon::AgentEvent) {
+            std::lock_guard lock(callbackFailureMutex);
+            callbackFailed = true;
+            callbackFailureChanged.notify_all();
+            throw std::runtime_error("test callback failure");
+        });
+    assert(throwingSink.start({"task", "pty-callback-failure", "shell", repository, std::nullopt}));
+    {
+        std::unique_lock lock(callbackFailureMutex);
+        assert(callbackFailureChanged.wait_for(lock, std::chrono::seconds(2), [&] { return callbackFailed; }));
+    }
+    throwingSink.terminate();
 
     aegis::daemon::Store store(std::filesystem::temp_directory_path() / "aegis-daemon-services-test.sqlite");
     aegis::daemon::EventHub events;

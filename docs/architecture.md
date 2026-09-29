@@ -43,6 +43,8 @@ The adapter contract exposes the capabilities currently needed: structured outpu
 
 The manager stores shared adapter ownership, releases its map lock before adapter operations, and joins adapters during termination/shutdown. The Codex process owner handles wait/reap; PTY reader threads are joined before their descriptors are closed. HTTP/WebSocket connection workers are tracked, sockets are shut down, and workers are joined when the server stops. No connection or adapter worker is detached.
 
+Agent event and provider-session callbacks are exception-contained at adapter thread boundaries and log failures without emitting prompt/terminal contents. If SQLite itself rejects a write, that individual event/session ID may be lost, but the failure will not escape a worker thread and terminate the daemon.
+
 ## Persistence and migrations
 
 Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, and version 2 adds persisted review findings, while preserving existing task/run/event rows. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.

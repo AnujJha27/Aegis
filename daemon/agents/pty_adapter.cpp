@@ -160,7 +160,7 @@ void PtyAdapter::readLoop(int master, int child) {
 }
 
 void PtyAdapter::publish(std::string type, std::string content) {
-    if (sink_) sink_({eventId(), context_.taskId, context_.runId, std::move(type), name_, std::move(content), now()});
+    emitEvent(sink_, {eventId(), context_.taskId, context_.runId, std::move(type), name_, std::move(content), now()});
 }
 
 }

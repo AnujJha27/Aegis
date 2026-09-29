@@ -186,7 +186,7 @@ void CodexAdapter::workerLoop() {
                                 std::lock_guard lock(mutex_);
                                 context_.externalSessionId = event->content;
                             }
-                            if (sessionSink_) sessionSink_(context.runId, event->content);
+                            notifySession(sessionSink_, context.runId, event->content);
                         } else if (event->type == "run.failed") failure = event->content;
                         else publish(std::move(*event));
                     }
@@ -200,7 +200,7 @@ void CodexAdapter::workerLoop() {
                             std::lock_guard lock(mutex_);
                             context_.externalSessionId = event->content;
                         }
-                        if (sessionSink_) sessionSink_(context.runId, event->content);
+                        notifySession(sessionSink_, context.runId, event->content);
                     } else if (event->type == "run.failed") failure = event->content;
                     else publish(std::move(*event));
                 }
@@ -236,7 +236,7 @@ void CodexAdapter::workerLoop() {
 }
 
 void CodexAdapter::publish(AgentEvent event) {
-    if (sink_) sink_(std::move(event));
+    emitEvent(sink_, std::move(event));
 }
 
 }
