@@ -85,7 +85,7 @@ The API uses structured errors:
 | GET | `/api/health`, `/api/repository`, `/api/changes`, `/api/git/status` | Health and repository snapshots |
 | GET | `/api/agents` | Adapter availability and capabilities |
 | GET | `/api/tasks`, `/api/tasks/:id/runs`, `/api/tasks/:id/verifications` | Persisted task history |
-| GET | `/api/events?task_id=...` | Persisted normalized event timeline |
+| GET | `/api/events?task_id=...` | Latest 500 persisted normalized events in chronological order (the UI timeline window) |
 | GET | `/api/tasks/:id/handoff`, `/graph`, `/provenance` | Review snapshots |
 | POST | `/api/tasks` | Create a task |
 | POST | `/api/tasks/:id/runs` | Start an agent run |

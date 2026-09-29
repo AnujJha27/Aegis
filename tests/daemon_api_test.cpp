@@ -211,6 +211,13 @@ int main() {
     const auto taskId = nlohmann::json::parse(created.body()).at("id").get<std::string>();
 
     const auto findingRun = store.startRun(taskId, "codex");
+    for (int index = 0; index <= 500; ++index)
+        store.appendEvent({"history-" + std::to_string(index), taskId, findingRun.id, "agent.message.completed", "codex", "event", index + 1});
+    const auto recentEvents = request(context, http::verb::get, "/api/events?task_id=" + taskId);
+    const auto recentEventList = nlohmann::json::parse(recentEvents.body());
+    assert(recentEvents.result() == http::status::ok && recentEventList.size() == 500);
+    assert(recentEventList.front().at("id") == "history-1" && recentEventList.back().at("id") == "history-500");
+
     const auto findingCreated = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
         nlohmann::json{{"run_id", findingRun.id}, {"file_path", "src/main.cpp"}, {"start_line", 7},
                        {"end_line", 9}, {"message", "Check cleanup on early return."}}.dump());

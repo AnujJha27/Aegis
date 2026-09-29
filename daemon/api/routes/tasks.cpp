@@ -39,7 +39,7 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
         if (!taskId || taskId->empty()) return error(boost::beast::http::status::bad_request, "missing_task_id", "task_id is required");
         if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
         nlohmann::json result = nlohmann::json::array();
-        for (const auto &event : context.store->events(*taskId)) result.push_back(protocol::toJson(event));
+        for (const auto &event : context.store->events(*taskId, 500)) result.push_back(protocol::toJson(event));
         return jsonResponse(boost::beast::http::status::ok, result);
     }
     if (request.method() == boost::beast::http::verb::post && target == "/api/tasks") {
