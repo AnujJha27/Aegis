@@ -142,6 +142,13 @@ int main() {
     assert(merged.result() == http::status::ok);
     assert(mergeFiles.read("feature.txt", aegis::daemon::repository::FileSource::worktree).content == "feature\n");
     assert(mergeFiles.read("main.txt", aegis::daemon::repository::FileSource::worktree).content == "main\n");
+    const auto guardTask = store.createTask("protect agent work during merge", mergeFixture.root().string());
+    const auto activeRun = manager.launch(guardTask.id, "shell");
+    assert(activeRun);
+    const auto activeMerge = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
+    assert(activeMerge.result() == http::status::conflict);
+    assert(nlohmann::json::parse(activeMerge.body()).at("error").at("code") == "agent_running");
+    assert(manager.terminate(activeRun->id));
     mergeFixture.write("dirty.txt", "keep me\n");
     const auto dirtyMerge = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
     assert(dirtyMerge.result() == http::status::conflict);
