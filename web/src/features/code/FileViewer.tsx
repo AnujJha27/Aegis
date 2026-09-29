@@ -4,11 +4,11 @@ import "./monaco";
 import type { FileComparison, FileContent, FileEntry } from "../../app/api";
 import { api } from "../../app/api";
 
-type Props = { file: FileEntry; mode: "file" | "diff"; range: "all" | "staged" | "unstaged"; inline: boolean; commitId?: string };
+type Props = { file: FileEntry; mode: "file" | "diff"; range: "all" | "staged" | "unstaged"; inline: boolean; commitId?: string; refreshKey?: unknown };
 const editorOptions = { readOnly: true, domReadOnly: true, contextmenu: false, minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true, wordWrap: "off" as const, glyphMargin: false, folding: false, lineNumbersMinChars: 3, renderLineHighlight: "none" as const, quickSuggestions: false, suggestOnTriggerCharacters: false, parameterHints: { enabled: false }, codeLens: false };
 const language = (name: string) => name || "plaintext";
 
-export function FileViewer({ file, mode, range, inline, commitId }: Props) {
+export function FileViewer({ file, mode, range, inline, commitId, refreshKey }: Props) {
   const [content, setContent] = useState<FileContent>();
   const [comparison, setComparison] = useState<FileComparison>();
   const [loading, setLoading] = useState(false);
@@ -33,7 +33,7 @@ export function FileViewer({ file, mode, range, inline, commitId }: Props) {
     }).catch((reason: Error) => { if (!cancelled) setError(reason.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [file.path, mode, range, commitId]);
+  }, [file.path, mode, range, commitId, refreshKey]);
 
   async function loadFull() {
     setLoading(true);
