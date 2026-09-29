@@ -14,7 +14,7 @@ type Props = {
   run?: AgentRun; runs: AgentRun[]; onSelectRun: (id: string) => void; onDeleteRun: (id: string) => void; runFinished: boolean; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; ptyConnection: PtyConnection; events: AgentEvent[]; activityEvents: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string;
   screen: "session" | "review"; onScreen: (screen: "session" | "review") => void; connection: string;
   drawer: "review" | "graphs" | "activity"; onDrawer: (drawer: "review" | "graphs" | "activity") => void;
-  gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string; openFilePath?: string; onOpenFile: (path: string) => void;
+  gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string; onDismissError: () => void; openFilePath?: string; onOpenFile: (path: string) => void;
 };
 
 export function Layout(props: Props) {
@@ -26,6 +26,6 @@ export function Layout(props: Props) {
         <AgentPicker agents={props.agents} selected={props.selectedAgent} onChange={props.onAgentChange} onLaunch={props.onLaunch} runs={props.runs} run={props.run} runFinished={props.runFinished} onSelectRun={props.onSelectRun} onDeleteRun={props.onDeleteRun} />
       </AgentSession>
     </section> : <><nav className="review-tabs" aria-label="Review views"><button aria-pressed={props.drawer === "review"} className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Review</button><button aria-pressed={props.drawer === "graphs"} className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button aria-pressed={props.drawer === "activity"} className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button></nav><Suspense fallback={<div className="code-state">Loading review workspace…</div>}><ReviewPanel view={props.drawer} taskId={props.selectedTask?.id} activeRunId={props.run?.id} taskPrompt={props.selectedTask?.prompt} events={props.activityEvents} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} verificationRunning={props.busy === "Verifying…"} onVerify={props.onVerify} openFilePath={props.openFilePath} onOpenFile={props.onOpenFile} /></Suspense></>}
-    {props.error && <button className="error-toast" onClick={() => window.location.reload()}>{props.error} <span>reload</span></button>}
+    {props.error && <div className="error-toast" role="alert"><span>{props.error}</span><button aria-label="Dismiss error" onClick={props.onDismissError}>×</button></div>}
   </main>;
 }

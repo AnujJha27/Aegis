@@ -1,12 +1,13 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { App } from "./App";
 
 vi.mock("../components/Layout", () => ({
-  Layout: ({ connection, selectedTask }: { connection: string; selectedTask?: { id: string } }) => <div>
+  Layout: ({ connection, selectedTask, error, onDismissError }: { connection: string; selectedTask?: { id: string }; error: string; onDismissError?: () => void }) => <div>
     <output aria-label="connection">{connection}</output>
     <output aria-label="selected task">{selectedTask?.id ?? "none"}</output>
+    {error && <div role="alert">{error}<button aria-label="Dismiss error" onClick={onDismissError}>Dismiss</button></div>}
   </div>,
 }));
 vi.mock("./useAgentWorkspace", () => ({
@@ -37,5 +38,19 @@ describe("App startup recovery", () => {
 
     expect(screen.getByLabelText("selected task").textContent).toBe("task-1");
     expect(api.tasks).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows dismissing an error notice without reloading the page", async () => {
+    vi.spyOn(api, "tasks").mockRejectedValueOnce(new Error("offline"));
+    vi.spyOn(api, "repository").mockResolvedValue({ path: "/repo", branch: "main" });
+    vi.spyOn(api, "agents").mockResolvedValue([]);
+    vi.spyOn(api, "gitStatus").mockResolvedValue({ repository: { path: "/repo" }, files: [], branches: ["main"], current_branch: "main", clean: true, agent_running: false });
+
+    render(<App />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByRole("alert").textContent).toContain("offline");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

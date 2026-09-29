@@ -146,5 +146,5 @@ export function App() {
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
-    onVerify={verify} error={error} openFilePath={openFilePath} onOpenFile={openReviewFile} />;
+    onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFilePath} onOpenFile={openReviewFile} />;
 }
