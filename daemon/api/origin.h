@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -45,6 +46,13 @@ inline bool allowedWebSocketOrigin(std::string_view origin) {
     unsigned int number = 0;
     const auto [end, error] = std::from_chars(port.data(), port.data() + port.size(), number);
     return error == std::errc{} && end == port.data() + port.size() && number > 0 && number <= 65535;
+}
+
+inline bool allowedLoopbackHost(std::string_view host, std::size_t headerCount = 1) {
+    if (headerCount != 1) return false;
+    std::string origin = "http://";
+    origin.append(host);
+    return allowedWebSocketOrigin(origin);
 }
 
 }

@@ -119,6 +119,7 @@ The server binds explicitly to `127.0.0.1`. The default CMake build does not fin
 ## Local-only security
 
 - No Aegis accounts, cloud sync, or LAN binding.
+- HTTP requests require exactly one loopback `Host` value, preventing DNS-rebinding hostnames from reaching local API or static routes.
 - Browser WebSocket upgrades accept only loopback HTTP origins (`localhost`, `127.0.0.1`, or `[::1]`), covering the packaged UI and local Vite proxy while rejecting remote webpages. Origin-less native clients remain supported.
 - Repository/session data stays local unless the selected external agent sends its own prompt to its service.
 - Process commands use argv boundaries, not shell interpolation.

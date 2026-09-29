@@ -126,6 +126,15 @@ void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) 
         return;
     }
     const auto request = parser.release();
+    const auto host = request[boost::beast::http::field::host];
+    if (!allowedLoopbackHost(host, request.count(boost::beast::http::field::host))) {
+        Response response{boost::beast::http::status::forbidden, 11};
+        response.set(boost::beast::http::field::content_type, "application/json");
+        response.body() = R"({"error":{"code":"host_forbidden","message":"HTTP Host must be a loopback name"}})";
+        response.prepare_payload();
+        boost::beast::http::write(*socket, response, error);
+        return;
+    }
     if (boost::beast::websocket::is_upgrade(request)) {
         const auto origin = request[boost::beast::http::field::origin];
         if (request.count(boost::beast::http::field::origin) > 1 || !allowedWebSocketOrigin(origin)) {

@@ -46,6 +46,20 @@ std::pair<bool, http::status> eventSocketHandshake(std::uint16_t port, const std
     return {!error, response.result()};
 }
 
+http::status httpHealthRequest(std::uint16_t port, const std::string &host) {
+    namespace asio = boost::asio;
+    asio::io_context io;
+    asio::ip::tcp::socket socket(io);
+    socket.connect({asio::ip::make_address("127.0.0.1"), port});
+    http::request<http::empty_body> request(http::verb::get, "/api/health", 11);
+    request.set(http::field::host, host);
+    http::write(socket, request);
+    http::response<http::string_body> response;
+    boost::beast::flat_buffer buffer;
+    http::read(socket, buffer, response);
+    return response.result();
+}
+
 }
 
 int main() {
@@ -200,6 +214,13 @@ int main() {
     assert(store.events(taskId).empty());
 
     using aegis::daemon::api::allowedWebSocketOrigin;
+    using aegis::daemon::api::allowedLoopbackHost;
+    assert(allowedLoopbackHost("127.0.0.1:46729"));
+    assert(allowedLoopbackHost("localhost:5173"));
+    assert(!allowedLoopbackHost("attacker.example"));
+    assert(!allowedLoopbackHost("localhost.evil.example:5173"));
+    assert(!allowedLoopbackHost("127.0.0.1:46729", 0));
+    assert(!allowedLoopbackHost("127.0.0.1:46729", 2));
     assert(allowedWebSocketOrigin(""));
     assert(allowedWebSocketOrigin("http://127.0.0.1:46729"));
     assert(allowedWebSocketOrigin("http://localhost:5173"));
@@ -213,6 +234,8 @@ int main() {
     aegis::daemon::api::Server server(context);
     if (server.start()) {
         const auto port = server.port();
+        assert(httpHealthRequest(port, "127.0.0.1:" + std::to_string(port)) == http::status::ok);
+        assert(httpHealthRequest(port, "attacker.example") == http::status::forbidden);
         const auto appOrigin = eventSocketHandshake(port, "http://127.0.0.1:" + std::to_string(port));
         assert(appOrigin.first);
         const auto viteOrigin = eventSocketHandshake(port, "http://localhost:5173");
