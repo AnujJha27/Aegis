@@ -166,6 +166,10 @@ void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) 
             servePtyWebSocket(socket, request);
             return;
         }
+        if (request.target().starts_with("/ws/terminal/")) {
+            serveTerminalWebSocket(socket, request);
+            return;
+        }
     }
     const auto response = request.target().starts_with("/api/") ? handle(request, context_) : staticFileResponse(context_.webRoot, request.target());
     boost::beast::http::write(*socket, response, error);
@@ -231,6 +235,45 @@ void Server::servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socke
             return;
         }
     }
+}
+
+void Server::serveTerminalWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request) {
+    const std::string target(request.target());
+    const auto runId = target.substr(std::string("/ws/terminal/").size());
+    if (runId.empty() || runId.find('/') != std::string::npos || !context_.store->run(runId)) {
+        Response response{boost::beast::http::status::not_found, 11};
+        response.set(boost::beast::http::field::content_type, "application/json");
+        response.body() = R"({"error":{"code":"run_not_found","message":"agent run not found"}})";
+        response.prepare_payload();
+        boost::system::error_code ignored;
+        boost::beast::http::write(*socket, response, ignored);
+        return;
+    }
+    boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
+    boost::system::error_code error;
+    websocket.accept(request, error);
+    if (error) { std::cerr << "aegis_daemon: terminal WebSocket handshake failed: " << error.message() << '\n'; return; }
+    const auto subscription = context_.agentManager->terminalEvents().subscribe(runId);
+    const auto history = context_.store->terminalOutput(runId);
+    if (history.size() == 128) {
+        const auto marker = AgentEvent{"terminal-history-truncated-" + runId, history.back().taskId, runId,
+            "terminal.replay_truncated", history.back().agent,
+            "Only the latest 128 terminal output batches are retained; earlier output may be unavailable.",
+            history.back().timestamp, history.back().sequence};
+        websocket.write(boost::asio::buffer(protocol::toJson(marker).dump()), error);
+    }
+    for (const auto &event : history) {
+        if (error) break;
+        websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
+    }
+    while (!error && running_) {
+        AgentEvent event;
+        if (!context_.agentManager->terminalEvents().wait(subscription, event, std::chrono::seconds(1))) continue;
+        websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
+        if (event.type == "stream.resync_required") break;
+    }
+    context_.agentManager->terminalEvents().unsubscribe(subscription);
+    if (!error) websocket.close(boost::beast::websocket::close_code::normal, error);
 }
 
 }

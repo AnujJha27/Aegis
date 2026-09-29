@@ -1,5 +1,7 @@
 #include "daemon/agents/pty_adapter.h"
 
+#include "daemon/agents/event_id.h"
+
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -20,11 +22,6 @@ std::int64_t now() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
-}
-
-std::string eventId() {
-    static std::atomic_uint64_t sequence = 0;
-    return "event-" + std::to_string(now()) + "-" + std::to_string(++sequence);
 }
 
 }
@@ -198,7 +195,7 @@ void PtyAdapter::readLoop(int master, int child) {
 }
 
 void PtyAdapter::publish(std::string type, std::string content) {
-    emitEvent(sink_, {eventId(), context_.taskId, context_.runId, std::move(type), name_, std::move(content), now()});
+    emitEvent(sink_, {newEventId(), context_.taskId, context_.runId, std::move(type), name_, std::move(content), now()});
 }
 
 }

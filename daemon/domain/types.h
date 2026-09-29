@@ -33,6 +33,13 @@ struct AgentEvent {
     std::string agent;
     std::string content;
     std::int64_t timestamp = 0;
+    std::int64_t sequence = 0;
+};
+
+struct AgentEventPage {
+    std::vector<AgentEvent> events;
+    std::int64_t nextCursor = 0;
+    bool hasMore = false;
 };
 
 struct RepositoryState {

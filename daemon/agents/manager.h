@@ -36,6 +36,7 @@ public:
     bool resizePty(const std::string &runId, unsigned short cols, unsigned short rows);
     bool interrupt(const std::string &runId);
     bool terminate(const std::string &runId);
+    EventHub &terminalEvents() { return terminalEvents_; }
 
 private:
     void publish(AgentEvent event);
@@ -43,6 +44,7 @@ private:
     std::filesystem::path repository_;
     Store &store_;
     EventHub &events_;
+    EventHub terminalEvents_;
     mutable std::mutex mutex_;
     std::mutex eventMutex_;
     std::map<std::string, std::shared_ptr<Adapter>> active_;

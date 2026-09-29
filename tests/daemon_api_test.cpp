@@ -79,7 +79,21 @@ int main() {
     assert(health.body().find("healthy") != std::string::npos);
     const auto version = request(context, http::verb::get, "/api/version");
     assert(version.result() == http::status::ok);
-    assert(nlohmann::json::parse(version.body()).at("schema_version") == 3);
+    assert(nlohmann::json::parse(version.body()).at("schema_version") == 4);
+
+    const auto historyTask = store.createTask("history", std::filesystem::current_path().string());
+    const auto historyRun = store.startRun(historyTask.id, "shell");
+    store.appendEvent({"history-1", historyTask.id, historyRun.id, "user.message", "shell", "one", 1});
+    store.appendEvent({"history-terminal", historyTask.id, historyRun.id, "terminal.output", "shell", "raw", 2});
+    store.appendEvent({"history-2", historyTask.id, historyRun.id, "agent.message.completed", "shell", "two", 3});
+    const auto initialHistory = request(context, http::verb::get, "/api/events?task_id=" + historyTask.id);
+    const auto initialEvents = nlohmann::json::parse(initialHistory.body());
+    assert(initialEvents.size() == 2 && initialEvents[0].at("sequence").get<std::int64_t>() > 0);
+    const auto olderHistory = request(context, http::verb::get,
+        "/api/events?task_id=" + historyTask.id + "&before_sequence=" + std::to_string(initialEvents[1].at("sequence").get<std::int64_t>()) + "&limit=1");
+    const auto olderPage = nlohmann::json::parse(olderHistory.body());
+    assert(olderPage.at("events").size() == 1 && olderPage.at("events")[0].at("id") == "history-1");
+    assert(!olderPage.at("has_more").get<bool>());
 
     const auto file = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&source=worktree");
     assert(file.result() == http::status::ok);
@@ -215,11 +229,11 @@ int main() {
 
     const auto findingRun = store.startRun(taskId, "codex");
     for (int index = 0; index <= 500; ++index)
-        store.appendEvent({"history-" + std::to_string(index), taskId, findingRun.id, "agent.message.completed", "codex", "event", index + 1});
+        store.appendEvent({"paged-history-" + std::to_string(index), taskId, findingRun.id, "agent.message.completed", "codex", "event", index + 1});
     const auto recentEvents = request(context, http::verb::get, "/api/events?task_id=" + taskId);
     const auto recentEventList = nlohmann::json::parse(recentEvents.body());
     assert(recentEvents.result() == http::status::ok && recentEventList.size() == 500);
-    assert(recentEventList.front().at("id") == "history-1" && recentEventList.back().at("id") == "history-500");
+    assert(recentEventList.front().at("id") == "paged-history-1" && recentEventList.back().at("id") == "paged-history-500");
 
     const auto findingCreated = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
         nlohmann::json{{"run_id", findingRun.id}, {"file_path", "src/main.cpp"}, {"start_line", 7},

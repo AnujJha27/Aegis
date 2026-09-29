@@ -1,12 +1,12 @@
 #include "daemon/agents/manager.h"
 
 #include "daemon/agents/codex_adapter.h"
+#include "daemon/agents/event_id.h"
 #include "daemon/agents/pty_adapter.h"
 #include "daemon/repository/git.h"
 
 #include <chrono>
 #include <cstdlib>
-#include <atomic>
 #include <iostream>
 #include <unistd.h>
 
@@ -17,11 +17,6 @@ std::int64_t now() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
-}
-
-std::string eventId() {
-    static std::atomic_uint64_t sequence = 0;
-    return "event-" + std::to_string(now()) + "-" + std::to_string(++sequence);
 }
 
 bool isTerminal(const std::string &status) {
@@ -96,7 +91,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
         running_.insert(run.id);
     }
     store_.updateRunStatus(run.id, "running");
-    publish({eventId(), taskId, run.id, "run.started", agent, "", now()});
+    publish({newEventId(), taskId, run.id, "run.started", agent, "", now()});
     {
         std::lock_guard lock(mutex_);
         active_[run.id] = adapter;
@@ -114,7 +109,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
             running_.erase(run.id);
         }
         store_.updateRunStatus(run.id, "failed");
-        publish({eventId(), taskId, run.id, "run.failed", agent, "agent adapter failed to start", now()});
+        publish({newEventId(), taskId, run.id, "run.failed", agent, "agent adapter failed to start", now()});
         return std::nullopt;
     }
     return store_.run(run.id);
@@ -132,7 +127,7 @@ SendResult Manager::send(const std::string &runId, std::string_view message) {
     const auto result = adapter->send(message);
     if (result != SendResult::accepted) return result;
     if (const auto run = store_.run(runId)) {
-        AgentEvent event{eventId(), run->taskId, runId, "user.message", run->agent, std::string(message), now()};
+        AgentEvent event{newEventId(), run->taskId, runId, "user.message", run->agent, std::string(message), now()};
         store_.appendEvent(event);
         events_.publish(event);
     }
@@ -190,7 +185,7 @@ bool Manager::terminate(const std::string &runId) {
         initialGitStatus_.erase(runId);
     }
     if (const auto run = store_.run(runId); run && !isTerminal(run->status)) {
-        publish({eventId(), run->taskId, runId, "run.terminated", run->agent, "", now()});
+        publish({newEventId(), run->taskId, runId, "run.terminated", run->agent, "", now()});
     }
     return true;
 }
@@ -212,7 +207,8 @@ void Manager::publish(AgentEvent event) {
             running_.erase(event.runId);
         }
         store_.appendEvent(event);
-        events_.publish(event);
+        if (event.type == "terminal.output") terminalEvents_.publish(event);
+        else events_.publish(event);
         if (event.type == "run.completed" || event.type == "run.failed") {
             std::lock_guard lock(provenanceMutex_);
             const auto found = initialGitStatus_.find(event.runId);
@@ -230,7 +226,7 @@ void Manager::publish(AgentEvent event) {
         const auto current = change.indexStatus + change.worktreeStatus;
         const auto previous = baseline.find(change.path);
         if (previous != baseline.end() && previous->second == current) continue;
-        AgentEvent fileEvent{eventId(), event.taskId, event.runId, "file.changed", event.agent, change.path, now()};
+        AgentEvent fileEvent{newEventId(), event.taskId, event.runId, "file.changed", event.agent, change.path, now()};
         store_.appendEvent(fileEvent);
         events_.publish(fileEvent);
     }

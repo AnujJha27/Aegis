@@ -90,9 +90,12 @@ Store::Store(const std::filesystem::path &path) {
         throw std::runtime_error("database " + path.string() + ": " + message);
     }
     try {
-        Statement schemaVersion(database_, "PRAGMA user_version");
-        check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
-        const auto previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
+        int previousVersion = 0;
+        {
+            Statement schemaVersion(database_, "PRAGMA user_version");
+            check(sqlite3_step(schemaVersion.get()), database_, "read schema version");
+            previousVersion = sqlite3_column_int(schemaVersion.get(), 0);
+        }
         if (previousVersion > currentSchemaVersion) throw std::runtime_error("database schema is newer than this Aegis build");
         execute("PRAGMA foreign_keys = ON;");
         execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);");
@@ -106,7 +109,17 @@ Store::Store(const std::filesystem::path &path) {
         execute("CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line));");
         execute("CREATE INDEX IF NOT EXISTS findings_task_created ON findings(task_id, created_at DESC);");
         execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
-        execute("PRAGMA user_version = 3;");
+        if (previousVersion < 3) execute("PRAGMA user_version = 3;");
+        if (previousVersion < 4) {
+            execute("BEGIN IMMEDIATE;");
+            execute("ALTER TABLE events RENAME TO events_legacy;");
+            execute("CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);");
+            execute("INSERT INTO events (id, task_id, run_id, type, agent, content, timestamp) SELECT id, task_id, run_id, type, agent, content, timestamp FROM events_legacy ORDER BY rowid;");
+            execute("DROP TABLE events_legacy;");
+            execute("CREATE INDEX events_task_sequence ON events(task_id, sequence);");
+            execute("PRAGMA user_version = 4;");
+            execute("COMMIT;");
+        }
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -362,11 +375,13 @@ std::vector<Task> Store::tasks() const {
     return result;
 }
 
-std::vector<AgentEvent> Store::events(const std::string &taskId, std::optional<std::size_t> limit) const {
+std::vector<AgentEvent> Store::events(const std::string &taskId, std::optional<std::size_t> limit, bool includeTerminalOutput) const {
     std::lock_guard lock(mutex_);
-    const char *query = limit
-        ? "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?"
-        : "SELECT id, task_id, run_id, type, agent, content, timestamp FROM events WHERE task_id = ? ORDER BY timestamp, rowid";
+    const char *query = includeTerminalOutput
+        ? (limit ? "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE task_id = ? ORDER BY sequence DESC LIMIT ?"
+                 : "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE task_id = ? ORDER BY sequence")
+        : (limit ? "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE task_id = ? AND type != 'terminal.output' ORDER BY sequence DESC LIMIT ?"
+                 : "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE task_id = ? AND type != 'terminal.output' ORDER BY sequence");
     Statement statement(database_, query);
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event task");
     if (limit) check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(*limit)), database_, "bind event limit");
@@ -378,9 +393,44 @@ std::vector<AgentEvent> Store::events(const std::string &taskId, std::optional<s
                           reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
                           reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 4)),
                           reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 5)),
-                          sqlite3_column_int64(statement.get(), 6)});
+                          sqlite3_column_int64(statement.get(), 6), sqlite3_column_int64(statement.get(), 7)});
     }
     if (limit) std::reverse(result.begin(), result.end());
+    return result;
+}
+
+AgentEventPage Store::eventsBefore(const std::string &taskId, std::int64_t sequence, std::size_t limit) const {
+    std::lock_guard lock(mutex_);
+    limit = std::clamp<std::size_t>(limit, 1, 500);
+    Statement statement(database_, "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE task_id = ? AND sequence < ? AND type != 'terminal.output' ORDER BY sequence DESC LIMIT ?");
+    check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event task");
+    check(sqlite3_bind_int64(statement.get(), 2, sequence), database_, "bind event cursor");
+    check(sqlite3_bind_int64(statement.get(), 3, static_cast<sqlite3_int64>(limit + 1)), database_, "bind event page size");
+    AgentEventPage page;
+    while (sqlite3_step(statement.get()) == SQLITE_ROW) {
+        page.events.push_back({columnText(statement.get(), 0), columnText(statement.get(), 1), columnText(statement.get(), 2),
+                               columnText(statement.get(), 3), columnText(statement.get(), 4), columnText(statement.get(), 5),
+                               sqlite3_column_int64(statement.get(), 6), sqlite3_column_int64(statement.get(), 7)});
+    }
+    page.hasMore = page.events.size() > limit;
+    if (page.hasMore) page.events.pop_back();
+    std::reverse(page.events.begin(), page.events.end());
+    if (!page.events.empty()) page.nextCursor = page.events.front().sequence;
+    return page;
+}
+
+std::vector<AgentEvent> Store::terminalOutput(const std::string &runId, std::size_t limit) const {
+    std::lock_guard lock(mutex_);
+    limit = std::clamp<std::size_t>(limit, 1, 128);
+    Statement statement(database_, "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE run_id = ? AND type = 'terminal.output' ORDER BY sequence DESC LIMIT ?");
+    check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind terminal run");
+    check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit)), database_, "bind terminal limit");
+    std::vector<AgentEvent> result;
+    while (sqlite3_step(statement.get()) == SQLITE_ROW)
+        result.push_back({columnText(statement.get(), 0), columnText(statement.get(), 1), columnText(statement.get(), 2),
+                          columnText(statement.get(), 3), columnText(statement.get(), 4), columnText(statement.get(), 5),
+                          sqlite3_column_int64(statement.get(), 6), sqlite3_column_int64(statement.get(), 7)});
+    std::reverse(result.begin(), result.end());
     return result;
 }
 

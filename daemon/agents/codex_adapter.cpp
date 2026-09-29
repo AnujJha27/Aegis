@@ -1,5 +1,6 @@
 #include "daemon/agents/codex_adapter.h"
 
+#include "daemon/agents/event_id.h"
 #include "daemon/process/process.h"
 
 #include <nlohmann/json.hpp>
@@ -16,11 +17,6 @@ std::int64_t now() {
         .count();
 }
 
-std::string eventId() {
-    static std::atomic_uint64_t sequence = 0;
-    return "event-" + std::to_string(now()) + "-" + std::to_string(++sequence);
-}
-
 }
 
 std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
@@ -32,18 +28,18 @@ std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
         const auto type = object.value("type", std::string{});
         if (type == "thread.started") {
             const auto threadId = object.value("thread_id", std::string{});
-            if (!threadId.empty()) return AgentEvent{eventId(), taskId, runId, "run.session", agent, threadId, now()};
+            if (!threadId.empty()) return AgentEvent{newEventId(), taskId, runId, "run.session", agent, threadId, now()};
             return std::nullopt;
         }
         if (type == "error")
-            return AgentEvent{eventId(), taskId, runId, "run.failed", agent, object.value("message", std::string{"Codex error"}), now()};
+            return AgentEvent{newEventId(), taskId, runId, "run.failed", agent, object.value("message", std::string{"Codex error"}), now()};
         if (type != "item.started" && type != "item.completed") return std::nullopt;
         const auto item = object.value("item", nlohmann::json::object());
         const auto itemType = item.value("type", std::string{});
         if (type == "item.completed" && itemType == "agent_message")
-            return AgentEvent{eventId(), taskId, runId, "agent.message.completed", agent, item.value("text", std::string{}), now()};
+            return AgentEvent{newEventId(), taskId, runId, "agent.message.completed", agent, item.value("text", std::string{}), now()};
         if (itemType == "command_execution")
-            return AgentEvent{eventId(), taskId, runId,
+            return AgentEvent{newEventId(), taskId, runId,
                               type == "item.started" ? "command.started" : "command.completed",
                               agent, item.value("command", std::string{}), now()};
     } catch (const nlohmann::json::exception &) {
@@ -143,7 +139,7 @@ void CodexAdapter::workerLoop() {
             interrupted_ = false;
         }
 
-        publish({eventId(), context.taskId, context.runId, "turn.started", context.agent, "", now()});
+        publish({newEventId(), context.taskId, context.runId, "turn.started", context.agent, "", now()});
         std::vector<std::string> command{"codex", "exec"};
         if (context.externalSessionId) {
             command.push_back("resume");
@@ -219,19 +215,19 @@ void CodexAdapter::workerLoop() {
             busy_ = false;
         }
         if (stopping) return;
-        if (interrupted && resumable) publish({eventId(), context.taskId, context.runId, "turn.interrupted", context.agent, "", now()});
+        if (interrupted && resumable) publish({newEventId(), context.taskId, context.runId, "turn.interrupted", context.agent, "", now()});
         else if (interrupted) {
             running_ = false;
-            publish({eventId(), context.taskId, context.runId, "run.interrupted", context.agent, "Codex interrupted before a resumable session was available", now()});
+            publish({newEventId(), context.taskId, context.runId, "run.interrupted", context.agent, "Codex interrupted before a resumable session was available", now()});
             return;
         }
         else if (!started || result.exitCode != 0 || !failure.empty()) {
             running_ = false;
             const auto message = !started ? "Could not start Codex" : !failure.empty() ? failure :
                 result.timedOut ? "Codex timed out after 10 minutes" : "Codex exited with status " + std::to_string(result.exitCode);
-            publish({eventId(), context.taskId, context.runId, "run.failed", context.agent, message, now()});
+            publish({newEventId(), context.taskId, context.runId, "run.failed", context.agent, message, now()});
             return;
-        } else publish({eventId(), context.taskId, context.runId, "turn.completed", context.agent, "", now()});
+        } else publish({newEventId(), context.taskId, context.runId, "turn.completed", context.agent, "", now()});
     }
 }
 

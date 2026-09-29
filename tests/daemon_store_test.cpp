@@ -70,6 +70,11 @@ int main() {
         assert(store.events(task.id).size() == 27);
         const auto recent = store.events(task.id, 3);
         assert(recent.size() == 3 && recent.front().id == "event-25" && recent.back().id == "event-27");
+        const auto firstPage = store.eventsBefore(task.id, recent.front().sequence, 2);
+        assert(firstPage.events.size() == 2 && firstPage.events.front().id == "event-23");
+        assert(firstPage.hasMore && firstPage.nextCursor == firstPage.events.front().sequence);
+        const auto secondPage = store.eventsBefore(task.id, firstPage.nextCursor, 2);
+        assert(secondPage.events.size() == 2 && secondPage.events.front().id == "event-21");
         assert(store.events(task.id, 0).empty());
         const auto terminalRun = store.startRun(task.id, "shell");
         for (int index = 0; index < 140; ++index)
@@ -80,6 +85,7 @@ int main() {
             return item.runId == terminalRun.id && item.type == "terminal.output";
         });
         assert(retainedTerminalChunks == 128);
+        assert(store.terminalOutput(terminalRun.id).size() == 128);
         assert(std::any_of(terminalHistory.begin(), terminalHistory.end(), [&](const auto &item) {
             return item.runId == terminalRun.id && item.type == "run.completed";
         }));
@@ -110,7 +116,8 @@ int main() {
         "CREATE TABLE runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0);"
         "CREATE TABLE events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);"
         "INSERT INTO tasks VALUES ('legacy-task','legacy','/tmp','open',1);"
-        "INSERT INTO runs VALUES ('legacy-run','legacy-task','codex','starting',2,0);",
+        "INSERT INTO runs VALUES ('legacy-run','legacy-task','codex','starting',2,0);"
+        "INSERT INTO events VALUES ('legacy-event','legacy-task','legacy-run','user.message','codex','preserved',3);",
         nullptr, nullptr, nullptr) == SQLITE_OK);
     assert(sqlite3_exec(legacy, "PRAGMA user_version = 1;", nullptr, nullptr, nullptr) == SQLITE_OK);
     sqlite3_close(legacy);
@@ -119,6 +126,9 @@ int main() {
         const auto migratedRun = migrated.run("legacy-run");
         assert(migratedRun && migratedRun->status == "interrupted");
         assert(migratedRun->finishedAt > 0);
+        assert(migrated.events("legacy-task").size() == 1);
+        assert(migrated.events("legacy-task").front().sequence > 0);
+        assert(migrated.eventsBefore("legacy-task", 2, 10).events.front().id == "legacy-event");
         assert(migrated.verifications("legacy-task").empty());
         assert(migrated.findings("legacy-task").empty());
         const auto migratedFinding = migrated.createFinding("legacy-task", std::nullopt, "legacy.cpp", 1, std::nullopt, "Migration retained the task.");
@@ -127,10 +137,10 @@ int main() {
     assert(sqlite3_open(legacyPath.string().c_str(), &legacy) == SQLITE_OK);
     sqlite3_stmt *version = nullptr;
     assert(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK);
-    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 3);
+    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 4);
     sqlite3_finalize(version);
     sqlite3_stmt *eventIndex = nullptr;
-    assert(sqlite3_prepare_v2(legacy, "SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_task_timestamp'", -1, &eventIndex, nullptr) == SQLITE_OK);
+    assert(sqlite3_prepare_v2(legacy, "SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_task_sequence'", -1, &eventIndex, nullptr) == SQLITE_OK);
     assert(sqlite3_step(eventIndex) == SQLITE_ROW);
     sqlite3_finalize(eventIndex);
     sqlite3_close(legacy);
@@ -161,6 +171,14 @@ int main() {
     assert(!hub.wait(subscription, event, std::chrono::milliseconds(10)));
     hub.unsubscribe(subscription);
     assert(!hub.wait(subscription, event, std::chrono::milliseconds(1)));
+
+    aegis::daemon::EventHub runHub;
+    const auto runSubscription = runHub.subscribe("run-2");
+    runHub.publish({"other", "task", "run-1", "terminal.output", "shell", "ignored", 1});
+    runHub.publish({"wanted", "task", "run-2", "terminal.output", "shell", "kept", 2});
+    assert(runHub.wait(runSubscription, event, std::chrono::milliseconds(10)) && event.id == "wanted");
+    assert(!runHub.wait(runSubscription, event, std::chrono::milliseconds(1)));
+    runHub.unsubscribe(runSubscription);
 
     aegis::daemon::EventHub boundedHub;
     const auto slow = boundedHub.subscribe();

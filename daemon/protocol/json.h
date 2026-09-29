@@ -16,7 +16,7 @@ inline nlohmann::json toJson(const AgentRun &run) {
 }
 
 inline nlohmann::json toJson(const AgentEvent &event) {
-    return {{"id", event.id}, {"task_id", event.taskId}, {"run_id", event.runId}, {"type", event.type}, {"agent", event.agent}, {"content", event.content}, {"timestamp", event.timestamp}};
+    return {{"id", event.id}, {"task_id", event.taskId}, {"run_id", event.runId}, {"type", event.type}, {"agent", event.agent}, {"content", event.content}, {"timestamp", event.timestamp}, {"sequence", event.sequence}};
 }
 
 inline nlohmann::json toJson(const RepositoryState &state) {

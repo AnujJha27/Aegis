@@ -8,6 +8,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@ class EventHub final {
         std::deque<AgentEvent> events;
         std::size_t queuedBytes = 0;
         bool closed = false;
+        std::optional<std::string> runFilter;
     };
 
 public:
@@ -28,7 +30,7 @@ public:
 
     using Subscription = std::shared_ptr<Queue>;
 
-    Subscription subscribe();
+    Subscription subscribe(std::optional<std::string> runFilter = std::nullopt);
     void unsubscribe(const Subscription &subscription);
     void publish(const AgentEvent &event);
     bool wait(const Subscription &subscription, AgentEvent &event, std::chrono::milliseconds timeout);

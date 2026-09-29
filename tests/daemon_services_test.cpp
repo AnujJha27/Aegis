@@ -1,4 +1,5 @@
 #include "daemon/agents/codex_adapter.h"
+#include "daemon/agents/event_id.h"
 #include "daemon/agents/manager.h"
 #include "daemon/agents/pty_adapter.h"
 #include "daemon/process/process.h"
@@ -18,9 +19,13 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <thread>
+#include <unordered_set>
 #include <unistd.h>
 
 int main() {
+    std::unordered_set<std::string> eventIds;
+    for (int index = 0; index < 10000; ++index) assert(eventIds.insert(aegis::daemon::agents::newEventId()).second);
+
     const auto repository = std::filesystem::current_path();
     const auto command = aegis::daemon::process::run({"/usr/bin/printf", "ok"}, repository);
     assert(command.exitCode == 0);

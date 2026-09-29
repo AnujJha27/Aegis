@@ -12,8 +12,9 @@ std::size_t eventBytes(const AgentEvent &event) {
 
 }
 
-EventHub::Subscription EventHub::subscribe() {
+EventHub::Subscription EventHub::subscribe(std::optional<std::string> runFilter) {
     auto subscription = std::make_shared<Queue>();
+    subscription->runFilter = std::move(runFilter);
     std::lock_guard lock(subscribersMutex_);
     subscribers_.push_back(subscription);
     return subscription;
@@ -32,7 +33,7 @@ void EventHub::publish(const AgentEvent &event) {
     std::lock_guard registryLock(subscribersMutex_);
     auto write = [&](const std::shared_ptr<Queue> &subscription) {
         std::lock_guard queueLock(subscription->mutex);
-        if (subscription->closed) return;
+        if (subscription->closed || (subscription->runFilter && *subscription->runFilter != event.runId)) return;
         const auto bytes = eventBytes(event);
         if (subscription->events.size() >= maxQueuedEvents || bytes > maxQueuedBytes - subscription->queuedBytes) {
             AgentEvent marker{event.id + "-resync", event.taskId, event.runId, "stream.resync_required", event.agent,

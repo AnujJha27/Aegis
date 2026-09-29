@@ -14,7 +14,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 3;
+    static constexpr int currentSchemaVersion = 4;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();
@@ -37,7 +37,10 @@ public:
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;
     std::vector<Task> tasks() const;
-    std::vector<AgentEvent> events(const std::string &taskId, std::optional<std::size_t> limit = std::nullopt) const;
+    std::vector<AgentEvent> events(const std::string &taskId, std::optional<std::size_t> limit = std::nullopt,
+                                   bool includeTerminalOutput = true) const;
+    AgentEventPage eventsBefore(const std::string &taskId, std::int64_t sequence, std::size_t limit = 100) const;
+    std::vector<AgentEvent> terminalOutput(const std::string &runId, std::size_t limit = 128) const;
     std::vector<VerificationRun> verifications(const std::string &taskId, std::size_t limit = 20) const;
     std::vector<ReviewFinding> findings(const std::string &taskId, std::size_t limit = 100) const;
 
