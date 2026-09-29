@@ -59,6 +59,17 @@ describe("read-only review workspace", () => {
     expect(onGitChanged).toHaveBeenCalledOnce();
   });
 
+  it("identifies a copied file's source as a copy, not a rename", async () => {
+    const copied: GitChange = { path: "copy.cpp", old_path: "source.cpp", index_status: "C", worktree_status: " ", additions: 0, deletions: 0, binary: false };
+    render(<CodeWorkspace events={[]} gitChanges={[copied]} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /copy\.cpp/ }));
+
+    expect(screen.getByText("Copied from")).toBeTruthy();
+    expect(screen.queryByText("Renamed from")).toBeNull();
+    expect(screen.getByText("source.cpp")).toBeTruthy();
+  });
+
   it("adds and resolves a task finding for the selected file and active run", async () => {
     const finding: ReviewFinding = { id: "finding-1", task_id: "task-1", run_id: "run-1", file_path: file.path, start_line: 12, end_line: null, message: "Check this branch.", status: "open", created_at: 1, updated_at: 1 };
     vi.spyOn(api, "files").mockImplementation(async (path = "") => ({ entries: path ? [file] : [{ ...file, path: "src", name: "src", kind: "directory", language: "" }], truncated: false }));
