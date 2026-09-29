@@ -93,7 +93,7 @@ The API uses structured errors:
 | POST | `/api/runs/:id/interrupt`, `/terminate` | Interrupt a turn or stop a logical run |
 | DELETE | `/api/runs/:id` | Delete a terminal run and its events |
 | POST | `/api/verify` | Execute and persist an argv-array verification for a task and optional run |
-| POST | `/api/git/stage`, `/unstage`, `/commit`, `/branch`, `/pull`, `/push` | Local Git actions |
+| POST | `/api/git/stage`, `/unstage`, `/commit`, `/branch`, `/merge`, `/pull`, `/push` | Local Git actions; merge targets a selected local branch, requires a clean worktree and idle agents, and preserves conflicts for review |
 | GET | `/api/files?path=...&scope=changed|all` | Lazy repository tree; `recursive=1` returns a bounded quick-open list; `include_changes=0` skips repeated Git status annotation when the caller already has a repository snapshot |
 | GET | `/api/files/content?path=...&source=head|index|worktree` | One file at a Git/worktree source |
 | GET | `/api/files/compare?path=...&base=head|index&target=index|worktree` | Structured old/new contents for a review diff |

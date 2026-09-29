@@ -383,6 +383,20 @@ bool GitRepository::switchBranch(const std::string &branch, std::string &error) 
     return result.exitCode == 0;
 }
 
+bool GitRepository::merge(const std::string &branch, std::string &output) const {
+    if (!validRepository_) { output = "repository is not a Git work tree"; return false; }
+    const auto available = branches();
+    if (std::find(available.begin(), available.end(), branch) == available.end()) {
+        output = "branch does not exist locally";
+        return false;
+    }
+    if (branch == currentBranch()) { output = "cannot merge the current branch"; return false; }
+    if (!clean()) { output = "commit or discard working tree changes before merging"; return false; }
+    const auto result = process::run(command({"merge", "--no-edit", "--", branch}), path_, std::chrono::seconds(120));
+    output = result.output;
+    return result.exitCode == 0;
+}
+
 bool GitRepository::pull(std::string &output) const {
     if (!validRepository_) { output = "repository is not a Git work tree"; return false; }
     if (!clean()) {

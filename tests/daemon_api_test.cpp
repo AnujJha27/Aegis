@@ -123,6 +123,48 @@ int main() {
     assert(commitComparison.at("modified").at("content") == "int value = 1;\n");
     assert(request(commitContext, http::verb::get, "/api/git/commits/not-a-commit").result() == http::status::not_found);
 
+    RepositoryFixture mergeFixture;
+    mergeFixture.write("base.txt", "base\n");
+    mergeFixture.commit("base");
+    auto currentBranch = mergeFixture.git({"branch", "--show-current"});
+    if (!currentBranch.empty() && currentBranch.back() == '\n') currentBranch.pop_back();
+    mergeFixture.git({"branch", "feature"});
+    mergeFixture.write("main.txt", "main\n");
+    mergeFixture.commit("main work");
+    mergeFixture.git({"switch", "feature"});
+    mergeFixture.write("feature.txt", "feature\n");
+    mergeFixture.commit("feature work");
+    mergeFixture.git({"switch", currentBranch});
+    aegis::daemon::repository::GitRepository mergeGit(mergeFixture.root());
+    aegis::daemon::repository::Files mergeFiles(mergeGit);
+    const aegis::daemon::api::Context mergeContext{&store, &events, &manager, &mergeGit, &mergeFiles, mergeFixture.root(), {}};
+    const auto merged = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
+    assert(merged.result() == http::status::ok);
+    assert(mergeFiles.read("feature.txt", aegis::daemon::repository::FileSource::worktree).content == "feature\n");
+    assert(mergeFiles.read("main.txt", aegis::daemon::repository::FileSource::worktree).content == "main\n");
+    mergeFixture.write("dirty.txt", "keep me\n");
+    const auto dirtyMerge = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
+    assert(dirtyMerge.result() == http::status::conflict);
+    assert(nlohmann::json::parse(dirtyMerge.body()).at("error").at("message").get<std::string>().find("before merging") != std::string::npos);
+    assert(std::filesystem::exists(mergeFixture.root() / "dirty.txt"));
+    std::filesystem::remove(mergeFixture.root() / "dirty.txt");
+    mergeFixture.git({"branch", "conflict"});
+    mergeFixture.write("base.txt", "target side\n");
+    mergeFixture.commit("target edit");
+    mergeFixture.git({"switch", "conflict"});
+    mergeFixture.write("base.txt", "source side\n");
+    mergeFixture.commit("source edit");
+    mergeFixture.git({"switch", currentBranch});
+    const auto conflict = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"conflict"})");
+    assert(conflict.result() == http::status::conflict);
+    assert(nlohmann::json::parse(conflict.body()).at("error").at("message").get<std::string>().find("CONFLICT") != std::string::npos);
+    const auto conflictedFile = mergeFiles.read("base.txt", aegis::daemon::repository::FileSource::worktree);
+    assert(conflictedFile.content.find("<<<<<<<") != std::string::npos);
+    const auto conflicts = mergeGit.changes();
+    assert(std::any_of(conflicts.begin(), conflicts.end(), [](const auto &change) {
+        return change.path == "base.txt" && change.indexStatus == "U" && change.worktreeStatus == "U";
+    }));
+
     RepositoryFixture handoffFixture;
     handoffFixture.write("modified.cpp", "before\n");
     handoffFixture.write("deleted.cpp", "removed\n");

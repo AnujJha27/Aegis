@@ -80,7 +80,7 @@ Its historical CLI utilities (`status`, `review`, `verify`, `analyze`, and other
 - Add task-scoped review notes to a file or line range, resolve/reopen them, and carry bounded findings into handoff context.
 - Jump from a task's file-change activity directly to the read-only diff; use `Ctrl/Cmd+P` to quick-open a repository file.
 - Inspect bounded handoff context before switching agents.
-- Stage, unstage, commit, push, pull, and switch local branches through the Git view.
+- Stage, unstage, commit, push, pull, merge a local branch, and switch local branches through the Git view. Merge, pull, and branch switching require a clean worktree and no active agent run. Merge conflicts are left intact and refreshed in Review for inspection or agent-led resolution.
 
 The daemon serves only on `127.0.0.1`. HTTP request bodies are capped at 1 MiB, PTY WebSocket frames at 16 KiB, static assets at 16 MiB, and source file responses at 1 MiB by default (explicit load is capped at 8 MiB). File reads reject traversal and symlink escapes. Task data is stored in `<repository>/.aegis/aegis.sqlite`; data is sent to an external service only when the selected coding agent itself requires it.
 

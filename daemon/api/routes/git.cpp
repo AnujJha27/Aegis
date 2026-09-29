@@ -51,18 +51,20 @@ std::optional<Response> git(const Request &request, const Context &context) {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
         return jsonResponse(boost::beast::http::status::ok, gitSnapshot(context));
     }
-    if (method == boost::beast::http::verb::post && (target == "/api/git/branch" || target == "/api/git/pull" || target == "/api/git/push")) {
+    if (method == boost::beast::http::verb::post && (target == "/api/git/branch" || target == "/api/git/merge" || target == "/api/git/pull" || target == "/api/git/push")) {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
         if (target != "/api/git/push" && context.agentManager && context.agentManager->hasRunningRuns())
-            return error(boost::beast::http::status::conflict, "agent_running", "stop the active agent before switching branches or pulling");
+            return error(boost::beast::http::status::conflict, "agent_running", "stop the active agent before switching branches, merging, or pulling");
         try {
             const auto body = request.body().empty() ? nlohmann::json::object() : nlohmann::json::parse(request.body());
             std::string output;
             bool succeeded = false;
             if (target == "/api/git/branch") succeeded = context.git->switchBranch(body.value("branch", std::string{}), output);
+            else if (target == "/api/git/merge") succeeded = context.git->merge(body.value("branch", std::string{}), output);
             else if (target == "/api/git/pull") succeeded = context.git->pull(output);
             else succeeded = context.git->push(output);
-            if (!succeeded) return jsonResponse(target == "/api/git/branch" ? boost::beast::http::status::bad_request : boost::beast::http::status::bad_gateway,
+            if (!succeeded) return jsonResponse(target == "/api/git/merge" ? boost::beast::http::status::conflict
+                    : target == "/api/git/branch" ? boost::beast::http::status::bad_request : boost::beast::http::status::bad_gateway,
                 {{"error", {{"code", "git_operation_failed"}, {"message", output.empty() ? "Git operation failed" : output}}}});
             auto result = gitSnapshot(context);
             result["output"] = output;
