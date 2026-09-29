@@ -42,6 +42,26 @@ describe("useAgentWorkspace run lifecycle", () => {
     expect(result.current.runs[0]?.finishedAt).toBe(0);
   });
 
+  it("keeps a completed turn resumable inside its still-running run", async () => {
+    const { result } = renderHook(() => useAgentWorkspace("task-1"));
+    await waitFor(() => expect(result.current.runs[0]?.status).toBe("starting"));
+    act(() => emit({ id: "start", taskId: "task-1", runId: "run-1", type: "run.started", agent: "codex", content: "", timestamp: 20 }));
+    act(() => emit({ id: "turn-start", taskId: "task-1", runId: "run-1", type: "turn.started", agent: "codex", content: "", timestamp: 21 }));
+    expect(result.current.turnBusy).toBe(true);
+
+    act(() => emit({ id: "turn-done", taskId: "task-1", runId: "run-1", type: "turn.completed", agent: "codex", content: "", timestamp: 22 }));
+
+    expect(result.current.runs[0]?.status).toBe("running");
+    expect(result.current.runFinished).toBe(false);
+    expect(result.current.turnBusy).toBe(false);
+    expect(result.current.turnCompleted).toBe(true);
+
+    act(() => emit({ id: "turn-stop", taskId: "task-1", runId: "run-1", type: "turn.interrupted", agent: "codex", content: "", timestamp: 23 }));
+    expect(result.current.runFinished).toBe(false);
+    expect(result.current.turnCompleted).toBe(false);
+    expect(result.current.turnInterrupted).toBe(true);
+  });
+
   it("keeps live events that arrive while reconnect history is loading", async () => {
     let finishHistory!: (events: AgentEvent[]) => void;
     vi.spyOn(api, "events")

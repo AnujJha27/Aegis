@@ -27,7 +27,8 @@ export function App() {
   const gitRefreshTimer = useRef<number | undefined>(undefined);
   const currentRun = workspace.currentRun;
   const runFinished = workspace.runFinished;
-  const interactive = Boolean(agents.find((agent) => agent.name === currentRun?.agent)?.interactive);
+  const currentAgent = agents.find((agent) => agent.name === currentRun?.agent);
+  const interactive = Boolean(currentAgent?.interactive);
   const pty = usePtySession(currentRun, interactive, runFinished);
 
   useEffect(() => { if (review.error) setError(review.error); }, [review.error]);
@@ -84,8 +85,12 @@ export function App() {
 
   function onEvent(event: import("./api").AgentEvent) {
     if (event.type === "terminal.output") window.dispatchEvent(new CustomEvent("aegis:terminal-output", { detail: event }));
-    if (["run.completed", "run.failed", "run.interrupted", "run.terminated", "turn.completed", "turn.interrupted"].includes(event.type))
-      setBusy(event.type === "run.failed" ? "Agent failed" : "Ready");
+    if (event.type === "turn.started") setBusy("Agent working…");
+    else if (event.type === "turn.completed") setBusy("Ready for next prompt");
+    else if (event.type === "turn.interrupted" || event.type === "run.interrupted") setBusy("Agent interrupted");
+    else if (event.type === "run.completed") setBusy("Run complete");
+    else if (event.type === "run.failed") setBusy("Agent failed");
+    else if (event.type === "run.terminated") setBusy("Agent stopped");
     if (event.type === "file.changed") {
       window.clearTimeout(gitRefreshTimer.current);
       gitRefreshTimer.current = window.setTimeout(() => void refreshGit().catch((reason: Error) => setError(reason.message)), 100);
@@ -147,6 +152,27 @@ export function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete run"); }
   }
 
+  async function interruptRun(runId: string) {
+    const run = workspace.runs.find((item) => item.id === runId);
+    const adapter = agents.find((item) => item.name === run?.agent);
+    if (!run || !adapter?.interruptible || !["starting", "running"].includes(run.status) ||
+        !(run.status === "starting" || workspace.turnBusy || adapter.interactive)) return;
+    setBusy("Interrupting turn…");
+    try { await api.interrupt(runId); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not interrupt agent"); setBusy("Interrupt failed"); }
+  }
+
+  async function terminateRun(runId: string) {
+    const run = workspace.runs.find((item) => item.id === runId);
+    if (!run || !["starting", "running"].includes(run.status)) return;
+    setBusy("Stopping agent…");
+    try {
+      await api.terminate(runId);
+      workspace.setRuns((current) => current.map((item) => item.id === runId ? { ...item, status: "terminated", finishedAt: Date.now() } : item));
+      setBusy("Agent stopped");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not stop agent"); setBusy("Stop failed"); }
+  }
+
   async function verify() {
     if (!selectedTask) return;
     setBusy("Verifying…");
@@ -163,8 +189,8 @@ export function App() {
   return <Layout
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
-    agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch}
-    run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} runFinished={runFinished}
+    agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch} canLaunch={Boolean(selectedTask && agents.some((agent) => agent.name === selectedAgent && agent.available))}
+    run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} onInterruptRun={interruptRun} onTerminateRun={terminateRun} actionsBusy={busy === "Interrupting turn…" || busy === "Stopping agent…"} runFinished={runFinished} turnBusy={workspace.turnBusy} turnCompleted={workspace.turnCompleted} turnInterrupted={workspace.turnInterrupted} resumable={Boolean(currentAgent?.resumable)}
     onPtyInput={pty.send} onPtyResize={pty.resize} ptyConnection={pty.connection} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
     prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}

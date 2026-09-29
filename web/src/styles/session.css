@@ -21,6 +21,13 @@
 .eyebrow, .picker-label, .subheading { color: var(--faint); font-size: 9px; letter-spacing: .14em; font-weight: 750; }
 .session-heading h1 { margin: 7px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -.025em; color: #edf2f8; }
 .session-id { padding: 5px 8px; border-radius: 4px; background: #161d28; color: var(--muted); font-size: 10px; letter-spacing: .09em; }
+.session-id.status-running { border-color: #42566f; color: #abc5e2; }
+.session-id.status-busy { border-color: #806943; color: #f0ca82; }
+.session-id.status-completed { border-color: #42566f; color: #abc5e2; }
+.session-id.status-interrupted { border-color: #806943; color: #f0ca82; }
+.session-id.status-terminated { border-color: #515a65; color: #a4adba; }
+.session-id.status-failed { border-color: #79494e; color: #f0a6a8; }
+.session-id.status-starting { border-color: #42566f; color: #abc5e2; }
 .output-surface { flex: 1; min-height: 300px; overflow: auto; padding: 30px 9%; }
 .terminal-wrap { max-width: 850px; margin: 0 auto 18px; border: 1px solid #252f3d; border-radius: 8px; overflow: hidden; background: #0b0f15; }
 .terminal-label { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #202936; color: var(--faint); font-size: 9px; letter-spacing: .12em; font-weight: 750; }
@@ -54,11 +61,21 @@
 .delete-confirm button:last-child { border-color: #70464b; color: #e6b7b7; }
 .agent-state { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .agent-state:not(.online) i { background: var(--faint); box-shadow: none; }
+.agent-state.busy i { background: #f0ca82; box-shadow: 0 0 8px #806943; }
+.agent-state.failed i, .agent-state.interrupted i { background: #f0a6a8; box-shadow: 0 0 8px #79494e; }
+.agent-state.terminated i, .agent-state.completed i { background: #9aa8b7; box-shadow: none; }
+.run-action, .continue-button { border: 1px solid #3b4f66; border-radius: 4px; color: #b7cbe2; background: #18222e; padding: 6px 8px; font: 10px var(--mono); }
+.run-action:hover:not(:disabled), .continue-button:hover { border-color: #607d9e; background: #202e3e; }
+.run-action:disabled { opacity: .4; cursor: not-allowed; }
+.run-action.stop { border-color: #654348; color: #e2a5a8; background: #21191b; }
+.run-action.stop:hover:not(:disabled) { border-color: #805258; background: #2b1c1f; }
+.run-switch-hint { color: var(--muted); font-size: 9px; }
 .launch-button, .send-button { margin-left: auto; border: 1px solid #355044; border-radius: 6px; color: #cfeac3; background: #17271e; padding: 7px 11px; font-size: 11px; }
 .launch-button:hover, .send-button:hover { background: #203a29; border-color: #5d956e; }
 .prompt-row { display: flex; gap: 9px; margin: 0 auto; max-width: 850px; }
 .prompt-row textarea { height: 57px; }
 .send-button { align-self: stretch; min-width: 72px; }
+.continue-button { align-self: stretch; white-space: nowrap; }
 .send-button span, .launch-button span { margin-left: 8px; }
 .composer-hint { display: flex; gap: 15px; max-width: 850px; margin: 7px auto 0; }
 .composer-status { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #a8b3c2; }

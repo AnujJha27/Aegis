@@ -64,7 +64,11 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
   const currentRun = runs.find((run) => run.id === selectedRunId) ?? runs.at(-1);
   const currentEvents = useMemo(() => taskId ? events.filter((event) => event.taskId === taskId) : [], [events, taskId]);
   const currentRunEvents = useMemo(() => currentRun ? currentEvents.filter((event) => event.runId === currentRun.id) : [], [currentEvents, currentRun]);
+  const lastTurn = [...currentRunEvents].reverse().find((event) => ["turn.started", "turn.completed", "turn.interrupted"].includes(event.type));
+  const turnBusy = lastTurn?.type === "turn.started";
+  const turnCompleted = lastTurn?.type === "turn.completed";
+  const turnInterrupted = lastTurn?.type === "turn.interrupted";
   const runFinished = currentRun ? ["completed", "failed", "interrupted", "terminated"].includes(currentRun.status) : false;
 
-  return { runs, setRuns, selectedRunId, setSelectedRunId, events, setEvents, currentRun, currentEvents, currentRunEvents, runFinished, connection };
+  return { runs, setRuns, selectedRunId, setSelectedRunId, events, setEvents, currentRun, currentEvents, currentRunEvents, runFinished, turnBusy, turnCompleted, turnInterrupted, connection };
 }

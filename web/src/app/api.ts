@@ -147,6 +147,8 @@ export const api = {
   createTask: async (prompt: string) => task(await request<Record<string, unknown>>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })),
   launch: async (taskId: string, agent: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify({ agent }) })),
   deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),
+  interrupt: (runId: string) => request<{ status: string }>(`/api/runs/${runId}/interrupt`, { method: "POST", body: "{}" }),
+  terminate: (runId: string) => request<{ status: string }>(`/api/runs/${runId}/terminate`, { method: "POST", body: "{}" }),
   send: (runId: string, message: string) => request<{ status: string }>(`/api/runs/${runId}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
   verify: async (taskId: string, command: string[], runId?: string) => verification(await request<Record<string, unknown>>("/api/verify", { method: "POST", body: JSON.stringify({ task_id: taskId, run_id: runId ?? null, command }) })),
 };

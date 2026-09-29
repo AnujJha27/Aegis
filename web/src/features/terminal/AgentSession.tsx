@@ -8,8 +8,9 @@ import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
 import { AegisMark } from "../../components/AegisMark";
 
-export function AgentSession({ task, run, runs, runFinished, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runs: AgentRun[]; runFinished: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
+export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, turnInterrupted, resumable, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runFinished: boolean; turnBusy: boolean; turnCompleted: boolean; turnInterrupted: boolean; resumable: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
   const terminalHost = useRef<HTMLDivElement>(null);
+  const promptInput = useRef<HTMLTextAreaElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
   const fit = useRef<FitAddon | undefined>(undefined);
   const rendered = useRef(new Set<string>());
@@ -72,10 +73,13 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
   const cards = events.filter((event) => ["user.message", "agent.message.completed", "run.failed"].includes(event.type) && readable(event.content).trim());
   const hasRunOutput = Boolean(run && events.some((event) => event.runId === run.id && readable(event.content).trim()));
   const showEmpty = run ? !interactive && !hasRunOutput : !cards.length;
+  const stateLabel = !run ? "IDLE" : run.status === "failed" ? "FAILED" : run.status === "interrupted" ? "INTERRUPTED" : run.status === "terminated" ? "TERMINATED" : run.status === "completed" ? "COMPLETE" : run.status === "starting" ? "STARTING" : turnBusy ? "TURN BUSY · RUN ACTIVE" : turnInterrupted ? "TURN INTERRUPTED · RUN ACTIVE" : turnCompleted ? "TURN COMPLETE · RUN ACTIVE" : "RUN ACTIVE";
+  const stateClass = !run ? "idle" : runFinished ? run.status : turnBusy ? "busy" : turnInterrupted ? "interrupted" : "running";
+  const waitingForTurn = turnBusy || busy === "Agent working…";
   return <section className="session">
     <div className="session-heading">
       <div><span className="eyebrow">ACTIVE TASK</span><h1>{task?.prompt ?? "Choose a task to begin"}</h1></div>
-      <span className="session-id">{run ? `${run.agent.toUpperCase()} · ${run.id.slice(0, 8)} · ${run.status.toUpperCase()}` : "IDLE"}</span>
+      <span className={`session-id status-${stateClass}`} role="status" aria-live="polite">{run ? `${run.agent.toUpperCase()} · ${run.id.slice(0, 8)} · ${stateLabel}` : "IDLE"}</span>
     </div>
     <div className="output-surface">
       <div className={`terminal-wrap ${run && interactive ? "" : "terminal-hidden"}`}>
@@ -88,7 +92,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
     <div className="composer">
       <div className="composer-tools">{children}</div>
       {interactive ? <div className="composer-hint pty-hint">{runFinished ? "Run ended · terminal is read-only" : ptyConnection === "connected" ? "Interactive CLI · click the terminal or start typing to answer prompts (e.g. project trust)" : ptyConnection === "connecting" ? "Connecting interactive terminal…" : `Terminal ${ptyConnection === "unavailable" ? "offline · retrying" : "reconnecting…"} · input paused`}<span className="composer-status"><i />{busy}</span></div> : <>
-        <div className="prompt-row"><textarea aria-label="Message the active agent" value={prompt} onChange={(event) => onPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }} placeholder={run && !runFinished ? "Message the active agent…" : "Launch an agent to start prompting…"} disabled={!run || runFinished} /><button className="send-button" onClick={onSend} disabled={!run || runFinished || !prompt.trim()}>{busy.includes("working") ? "…" : "Send"}<span>↗</span></button></div>
+        <div className="prompt-row"><textarea ref={promptInput} aria-label="Message the active agent" value={prompt} onChange={(event) => onPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSend(); } }} placeholder={turnCompleted && resumable ? "Continue this run with a new prompt…" : run && !runFinished ? "Message the active agent…" : "Launch an agent to start prompting…"} disabled={!run || runFinished || waitingForTurn} />{run && !runFinished && turnCompleted && resumable && <button className="continue-button" onClick={() => promptInput.current?.focus()}>Continue run</button>}<button className="send-button" onClick={onSend} disabled={!run || runFinished || waitingForTurn || !prompt.trim()}>{waitingForTurn ? "…" : "Send"}<span>↗</span></button></div>
         <div className="composer-hint"><span>Enter to send</span><span>Shift + Enter for newline</span><span className="composer-status"><i />{busy}</span></div>
       </>}
     </div>
