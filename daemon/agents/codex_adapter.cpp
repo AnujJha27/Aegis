@@ -88,6 +88,7 @@ SendResult CodexAdapter::send(std::string_view message) {
     std::lock_guard lock(mutex_);
     if (!running_ || stopping_) return SendResult::unavailable;
     if (busy_) return SendResult::busy;
+    interrupted_ = false;
     pendingPrompt_ = std::string(message);
     hasPendingPrompt_ = true;
     busy_ = true;
@@ -136,7 +137,6 @@ void CodexAdapter::workerLoop() {
             pendingPrompt_.clear();
             hasPendingPrompt_ = false;
             context = context_;
-            interrupted_ = false;
         }
 
         publish({newEventId(), context.taskId, context.runId, "turn.started", context.agent, "", now()});

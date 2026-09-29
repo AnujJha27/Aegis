@@ -115,6 +115,20 @@ websocket::stream<asio::ip::tcp::socket> eventSocket(std::uint16_t port, asio::i
     return socket;
 }
 
+websocket::stream<asio::ip::tcp::socket> terminalSocket(std::uint16_t port, asio::io_context &io, const std::string &runId) {
+    websocket::stream<asio::ip::tcp::socket> socket(io);
+    socket.next_layer().connect({asio::ip::make_address("127.0.0.1"), port});
+    socket.handshake("127.0.0.1:" + std::to_string(port), "/ws/terminal/" + runId);
+    return socket;
+}
+
+websocket::stream<asio::ip::tcp::socket> ptySocket(std::uint16_t port, asio::io_context &io, const std::string &runId) {
+    websocket::stream<asio::ip::tcp::socket> socket(io);
+    socket.next_layer().connect({asio::ip::make_address("127.0.0.1"), port});
+    socket.handshake("127.0.0.1:" + std::to_string(port), "/ws/pty/" + runId);
+    return socket;
+}
+
 Json nextEvent(websocket::stream<asio::ip::tcp::socket> &socket, const std::string &type) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     beast::flat_buffer buffer;
@@ -127,6 +141,20 @@ Json nextEvent(websocket::stream<asio::ip::tcp::socket> &socket, const std::stri
         if (event.value("type", std::string{}) == type) return event;
     }
     throw std::runtime_error("timed out waiting for event " + type);
+}
+
+Json nextTerminalOutput(websocket::stream<asio::ip::tcp::socket> &socket, const std::string &content) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    beast::flat_buffer buffer;
+    while (std::chrono::steady_clock::now() < deadline) {
+        pollfd ready{socket.next_layer().native_handle(), POLLIN, 0};
+        if (poll(&ready, 1, 100) <= 0) continue;
+        socket.read(buffer);
+        auto event = Json::parse(beast::buffers_to_string(buffer.data()));
+        buffer.consume(buffer.size());
+        if (event.value("type", std::string{}) == "terminal.output" && event.value("content", std::string{}).find(content) != std::string::npos) return event;
+    }
+    throw std::runtime_error("timed out waiting for terminal output " + content);
 }
 
 Json get(std::uint16_t port, const std::string &target) {
@@ -166,6 +194,9 @@ int main(int argc, char **argv) {
                   "case \"$prompt\" in\n"
                   "  'edit files') printf 'int value = 1;\\n' > modify.cpp; printf 'int added = 1;\\n' > added.cpp; mv rename-old.cpp renamed.cpp; rm delete.cpp ;;\n"
                   "  'edit staged') printf 'int value = 2;\\n' > modify.cpp ;;\n"
+                  "  'hold turn') sleep 1 ;;\n"
+                  "  'interrupt startup') sleep 30 ;;\n"
+                  "  'wait forever') printf '%s\\n' \"$$\" > \"$AEGIS_FAKE_CODEX_PID\"; exec sleep 30 ;;\n"
                   "esac\n"
                   "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"fake-session\"}'\n"
                   "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"synthetic response\"}}'\n";
@@ -175,6 +206,8 @@ int main(int argc, char **argv) {
     const auto path = fakeBin.string() + ":" + oldPath;
     assert(setenv("PATH", path.c_str(), 1) == 0);
     assert(setenv("AEGIS_FAKE_CODEX_LOG", fakeLog.c_str(), 1) == 0);
+    const auto fakePid = fixture.root() / ".aegis/fake-codex.pid";
+    assert(setenv("AEGIS_FAKE_CODEX_PID", fakePid.c_str(), 1) == 0);
 
     const auto daemonExecutable = std::filesystem::absolute(argv[1]).string();
     Daemon daemon(daemonExecutable, fixture.root());
@@ -187,6 +220,12 @@ int main(int argc, char **argv) {
     const auto started = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
     assert(started.status == http::status::created);
     const auto runId = started.body.at("id").get<std::string>();
+
+    post(daemon.port(), "/api/runs/" + runId + "/messages", {{"message", "hold turn"}}, http::status::accepted);
+    const auto overlappingPrompt = request(daemon.port(), http::verb::post, "/api/runs/" + runId + "/messages", {{"message", "second concurrent prompt"}});
+    assert(overlappingPrompt.status == http::status::conflict);
+    assert(nextEvent(events, "agent.message.completed").at("run_id") == runId);
+    assert(nextEvent(events, "turn.completed").at("run_id") == runId);
 
     post(daemon.port(), "/api/runs/" + runId + "/messages", {{"message", "edit files"}}, http::status::accepted);
     assert(nextEvent(events, "agent.message.completed").at("content") == "synthetic response");
@@ -245,13 +284,59 @@ int main(int argc, char **argv) {
     const auto retainedRunId = retained.body.at("id").get<std::string>();
     post(daemon.port(), "/api/runs/" + retainedRunId + "/messages", {{"message", "persist history"}}, http::status::accepted);
     assert(nextEvent(events, "agent.message.completed").at("run_id") == retainedRunId);
+
+    const auto startup = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
+    const auto startupRunId = startup.body.at("id").get<std::string>();
+    post(daemon.port(), "/api/runs/" + startupRunId + "/messages", {{"message", "interrupt startup"}}, http::status::accepted);
+    assert(nextEvent(events, "turn.started").at("run_id") == startupRunId);
+    post(daemon.port(), "/api/runs/" + startupRunId + "/interrupt", Json::object(), http::status::accepted);
+    assert(nextEvent(events, "run.interrupted").at("run_id") == startupRunId);
+
+    const auto ptyRun = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "shell"}});
+    const auto ptyRunId = ptyRun.body.at("id").get<std::string>();
+    asio::io_context ptyIo;
+    auto terminal = terminalSocket(daemon.port(), ptyIo, ptyRunId);
+    auto pty = ptySocket(daemon.port(), ptyIo, ptyRunId);
+    pty.write(asio::buffer(std::string("printf 'first-pty-marker\\n'\n")));
+    const auto firstPtyOutput = nextTerminalOutput(terminal, "first-pty-marker");
+    boost::system::error_code closeError;
+    terminal.next_layer().close(closeError);
+    pty.write(asio::buffer(std::string("printf 'reconnected-pty-marker\\n'\n")));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto reconnectedTerminal = terminalSocket(daemon.port(), ptyIo, ptyRunId);
+    const auto replayedPtyOutput = nextTerminalOutput(reconnectedTerminal, "reconnected-pty-marker");
+    assert(firstPtyOutput.at("run_id") == ptyRunId && replayedPtyOutput.at("run_id") == ptyRunId);
+    boost::system::error_code ignoredPty;
+    reconnectedTerminal.next_layer().close(ignoredPty);
+    pty.next_layer().close(ignoredPty);
+    post(daemon.port(), "/api/runs/" + ptyRunId + "/terminate", Json::object(), http::status::accepted);
+
+    const auto active = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
+    const auto activeRunId = active.body.at("id").get<std::string>();
+    post(daemon.port(), "/api/runs/" + activeRunId + "/messages", {{"message", "wait forever"}}, http::status::accepted);
+    assert(nextEvent(events, "turn.started").at("run_id") == activeRunId);
+    for (int index = 0; index < 100 && !std::filesystem::exists(fakePid); ++index)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(std::filesystem::exists(fakePid));
+    std::ifstream childPidFile(fakePid);
+    pid_t childPid = -1;
+    childPidFile >> childPid;
+    assert(childPid > 0);
     boost::system::error_code ignored;
     events.next_layer().close(ignored);
     daemon.stop();
+    assert(kill(childPid, 0) != 0);
 
     Daemon restarted(daemonExecutable, fixture.root());
     assert(get(restarted.port(), "/api/tasks").at(0).at("id") == taskId);
     assert(get(restarted.port(), "/api/tasks/" + taskId + "/runs").at(0).at("status") == "terminated");
+    const auto restartedRuns = get(restarted.port(), "/api/tasks/" + taskId + "/runs");
+    assert(std::any_of(restartedRuns.begin(), restartedRuns.end(), [&](const auto &run) {
+        return run.at("id") == activeRunId && run.at("status") == "terminated";
+    }));
+    assert(std::any_of(restartedRuns.begin(), restartedRuns.end(), [&](const auto &run) {
+        return run.at("id") == startupRunId && run.at("status") == "interrupted";
+    }));
     const auto history = get(restarted.port(), "/api/events?task_id=" + taskId);
     assert(std::any_of(history.begin(), history.end(), [&](const auto &event) {
         return event.at("run_id") == retainedRunId && event.at("type") == "agent.message.completed";

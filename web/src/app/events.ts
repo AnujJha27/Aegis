@@ -41,6 +41,11 @@ export function connectPty(runId: string): WebSocket {
   return new WebSocket(`${protocol}//${window.location.host}/ws/pty/${encodeURIComponent(runId)}`);
 }
 
+export function connectTerminal(runId: string): WebSocket {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return new WebSocket(`${protocol}//${window.location.host}/ws/terminal/${encodeURIComponent(runId)}`);
+}
+
 export function readable(content: string): string {
   return content
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")

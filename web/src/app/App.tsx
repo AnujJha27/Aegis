@@ -26,6 +26,10 @@ export function App() {
   const [error, setError] = useState("");
   const gitRefreshTimer = useRef<number | undefined>(undefined);
   const currentRun = workspace.currentRun;
+  const selectedTaskIdRef = useRef(selectedTask?.id);
+  const currentRunIdRef = useRef(currentRun?.id);
+  selectedTaskIdRef.current = selectedTask?.id;
+  currentRunIdRef.current = currentRun?.id;
   const runFinished = workspace.runFinished;
   const currentAgent = agents.find((agent) => agent.name === currentRun?.agent);
   const interactive = Boolean(currentAgent?.interactive);
@@ -119,24 +123,39 @@ export function App() {
   }
 
   async function launch() {
-    if (!selectedTask) return;
-    setBusy(`Starting ${selectedAgent}…`);
+    const taskId = selectedTask?.id;
+    const agent = selectedAgent;
+    if (!taskId) return;
+    setBusy(`Starting ${agent}…`);
     try {
-      const run = await api.launch(selectedTask.id, selectedAgent);
+      const run = await api.launch(taskId, agent);
+      if (selectedTaskIdRef.current !== taskId) return;
       workspace.setRuns((current) => [...current, run]);
       workspace.setSelectedRunId(run.id);
-      setBusy(`${selectedAgent} active`);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not start agent"); setBusy("Start failed"); }
+      setBusy(`${agent} active`);
+    } catch (reason) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setError(reason instanceof Error ? reason.message : "Could not start agent");
+      setBusy("Start failed");
+    }
   }
 
   async function send() {
     if (!currentRun || !prompt.trim()) return;
+    const taskId = currentRun.taskId;
+    const runId = currentRun.id;
     const message = prompt.trim();
+    setBusy("Agent working…");
     try {
-      await api.send(currentRun.id, message);
+      await api.send(runId, message);
+      if (selectedTaskIdRef.current !== taskId || currentRunIdRef.current !== runId) return;
       setPrompt("");
       setBusy("Agent working…");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not send prompt"); }
+    } catch (reason) {
+      if (selectedTaskIdRef.current !== taskId || currentRunIdRef.current !== runId) return;
+      setError(reason instanceof Error ? reason.message : "Could not send prompt");
+      setBusy("Send failed");
+    }
   }
 
   async function deleteRun(runId: string) {

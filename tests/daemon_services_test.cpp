@@ -84,6 +84,7 @@ int main() {
     const auto codexScript = fakeBin / "codex";
     std::ofstream(codexScript) << "#!/bin/sh\n"
         << "printf '%s\\n' \"$*\" >> \"$CODEX_TEST_LOG\"\n"
+        << "case \"$*\" in *interrupt-before-session*) sleep 30;; esac\n"
         << "if [ \"$2\" != resume ]; then echo '{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}'; fi\n"
         << "sleep 0.2\n"
         << "case \"$*\" in *slow*) sleep 30;; esac\n"
@@ -132,6 +133,18 @@ int main() {
     }();
     assert(invocationText.find("exec resume --json thread-123 second") != std::string::npos);
     assert(invocationText.find("exec resume --json thread-123 after interrupt") != std::string::npos);
+
+    aegis::daemon::agents::CodexAdapter startingCodex([&](aegis::daemon::AgentEvent event) {
+        std::lock_guard lock(codexMutex);
+        codexOutput.push_back(std::move(event));
+        codexChanged.notify_all();
+    }, {});
+    assert(startingCodex.start({"task", "startup-run", "codex", repository, std::nullopt}));
+    assert(startingCodex.send("interrupt-before-session") == aegis::daemon::agents::SendResult::accepted);
+    startingCodex.interrupt();
+    assert(waitForEvents("run.interrupted", 1));
+    assert(startingCodex.send("invalid after startup interrupt") == aegis::daemon::agents::SendResult::unavailable);
+    startingCodex.terminate();
 
     const auto activeManagerDb = std::filesystem::temp_directory_path() / "aegis-manager-shutdown-test.sqlite";
     std::filesystem::remove(activeManagerDb);

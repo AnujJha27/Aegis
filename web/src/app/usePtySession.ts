@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { connectPty } from "./events";
+import { agentEvent } from "./api";
+import { connectPty, connectTerminal } from "./events";
 import type { PtyConnection } from "./events";
 import type { AgentRun } from "./api";
 
@@ -9,6 +10,34 @@ export function usePtySession(run?: AgentRun, interactive = false, finished = fa
   const firstConnection = useRef(true);
   const size = useRef({ cols: 100, rows: 30 });
   const [connection, setConnection] = useState<PtyConnection>("idle");
+
+  useEffect(() => {
+    if (!run || !interactive) return;
+    let active = true;
+    let retries = 0;
+    let retryTimer = 0;
+    let terminal: WebSocket | undefined;
+    const connect = () => {
+      if (!active) return;
+      const current = connectTerminal(run.id);
+      terminal = current;
+      current.onmessage = (message) => {
+        try {
+          const event = agentEvent(JSON.parse(message.data) as Record<string, unknown>);
+          if (event.runId === run.id && ["terminal.output", "terminal.replay_truncated", "stream.resync_required"].includes(event.type))
+            window.dispatchEvent(new CustomEvent("aegis:terminal-output", { detail: event }));
+        } catch { /* The next reconnect replays persisted terminal output. */ }
+      };
+      current.onerror = () => current.close();
+      current.onopen = () => { retries = 0; };
+      current.onclose = () => {
+        if (!active || terminal !== current) return;
+        retryTimer = window.setTimeout(connect, Math.min(500 * 2 ** retries++, 8000));
+      };
+    };
+    connect();
+    return () => { active = false; window.clearTimeout(retryTimer); terminal?.close(); };
+  }, [run?.id, interactive]);
 
   useEffect(() => {
     if (!run || !interactive || finished) {

@@ -45,8 +45,8 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
   useEffect(() => {
     const receive = (message: Event) => {
       const event = (message as CustomEvent<AgentEvent>).detail;
-      if (!terminal.current || event.type !== "terminal.output" || event.runId !== activeRun.current || rendered.current.has(event.id)) return;
-      terminal.current.write(event.content);
+      if (!terminal.current || !["terminal.output", "terminal.replay_truncated", "stream.resync_required"].includes(event.type) || event.runId !== activeRun.current || rendered.current.has(event.id)) return;
+      terminal.current.write(event.type === "terminal.output" ? event.content : `\r\n[aegis: ${event.content}]\r\n`);
       rendered.current.add(event.id);
       if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
     };
@@ -63,8 +63,8 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
       if (interactive && run && !runFinished) terminal.current.focus();
     }
     for (const event of events) {
-      if (event.runId !== run?.id || event.type !== "terminal.output" || rendered.current.has(event.id)) continue;
-      terminal.current.write(event.content);
+      if (event.runId !== run?.id || !["terminal.output", "terminal.replay_truncated", "stream.resync_required"].includes(event.type) || rendered.current.has(event.id)) continue;
+      terminal.current.write(event.type === "terminal.output" ? event.content : `\r\n[aegis: ${event.content}]\r\n`);
       rendered.current.add(event.id);
       if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
     }
