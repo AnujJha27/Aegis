@@ -322,13 +322,14 @@ int main(int argc, char **argv) {
     auto pty = ptySocket(daemon.port(), ptyIo, ptyRunId);
     pty.write(asio::buffer(std::string("printf 'first-pty-marker\\n'\n")));
     const auto firstPtyOutput = nextTerminalOutput(terminal, "first-pty-marker");
+    pty.write(asio::buffer(std::string("printf 'reconnected-pty-marker\\n'\n")));
+    const auto disconnectedPtyOutput = nextTerminalOutput(terminal, "reconnected-pty-marker");
     boost::system::error_code closeError;
     terminal.next_layer().close(closeError);
-    pty.write(asio::buffer(std::string("printf 'reconnected-pty-marker\\n'\n")));
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto reconnectedTerminal = terminalSocket(daemon.port(), ptyIo, ptyRunId);
     const auto replayedPtyOutput = nextTerminalOutput(reconnectedTerminal, "reconnected-pty-marker");
-    assert(firstPtyOutput.at("run_id") == ptyRunId && replayedPtyOutput.at("run_id") == ptyRunId);
+    assert(firstPtyOutput.at("run_id") == ptyRunId && disconnectedPtyOutput.at("run_id") == ptyRunId &&
+        replayedPtyOutput.at("run_id") == ptyRunId);
     boost::system::error_code ignoredPty;
     reconnectedTerminal.next_layer().close(ignoredPty);
     pty.next_layer().close(ignoredPty);
