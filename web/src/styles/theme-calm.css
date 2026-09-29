@@ -1,11 +1,42 @@
 /* Calm surfaces shared by the app chrome and the read-only code renderer. */
-:root { --line: #242a2e; --muted: #879196; --faint: #626c71; --accent: #9bb494; --blue: #78999e; --danger: #bd777b; }
+:root { --bg: #111419; --panel: #171b21; --panel-2: #1d232b; --line: #2a323d; --muted: #7f8b99; --faint: #626f7d; --accent: #9baa91; --blue: #91a9c4; --danger: #bc8981; }
 body { background: var(--bg); }
-.topbar, .session-heading { background: #0d1013; }
+.topbar { border-top-color: var(--line); background: #141820; }
+.session-heading { background: #141820; }
 .session-heading { background-image: none; }
-.event-card { background: #0f1316; }
+.event-card { background: #151a21; }
 .pulse, .composer-status i, .agent-state i, .brand-mark, .task-dot { box-shadow: none; }
+.pulse, .task-dot { background: var(--blue); }
+.brand-mark { display: grid; width: 23px; height: 27px; place-items: center; flex: none; background: transparent; color: var(--blue); font-size: 0; }
+.brand-mark svg { display: block; width: 100%; height: 100%; }
+.empty-icon { border-color: var(--line); background: #141820; color: var(--blue); }
+.empty-icon svg { width: 23px; height: 27px; }
 .event-card, .terminal-wrap { box-shadow: none; }
+.event-card { border-color: var(--line); border-left-color: var(--blue); }
+.terminal-wrap { border-color: var(--line); background: #151a21; }
+.launch-button, .send-button { border-color: #4a5869; color: #c3d0df; background: #222a34; }
+.launch-button:hover, .send-button:hover { border-color: #657c96; background: #2a3441; }
+.prompt-row textarea:focus, .new-task textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 1px #91a9c426; }
+.review-tabs { background: #141820; }
+.review-tabs button.active, .screen-toggle button.active { color: var(--text, #e0e4e9); background: #222a34; }
+.file-row.selected { color: #e0e4e9; background: #222a34; }
+.file-scope button.active, .code-segment button.active { color: #d4deea; background: #222a34; }
+.code-state button { border-color: #4a5869; color: #c3d0df; background: #222a34; }
+.review-stage-actions button, .side-section-heading button { border-color: #4a5869; color: #c3d0df; background: #222a34; }
+.code-main, .code-editor, .code-editor .monaco-editor, .code-editor .monaco-diff-editor,
+.code-editor .monaco-editor .margin, .code-editor .monaco-editor-background { background-color: #151a21 !important; }
+.git-commit button { border-color: #4a5869; color: #c3d0df; background: #222a34; }
+.git-commit button:hover { border-color: #657c96; background: #2a3441; }
+.graph-node.root { border-color: #53677f; background: #202a36; }
+.evidence-trail { position: relative; display: grid; gap: 0; margin: 0; padding: 2px 0 0 17px; list-style: none; }
+.evidence-trail::before { position: absolute; top: 7px; bottom: 13px; left: 3px; width: 1px; background: #46515e; content: ""; }
+.evidence-step { position: relative; display: grid; gap: 2px; padding: 0 0 14px; }
+.evidence-step::before { position: absolute; top: 4px; left: -17px; width: 6px; height: 6px; border: 1px solid #778391; background: #161a21; content: ""; }
+.evidence-step.complete::before { border-color: var(--accent); background: var(--accent); }
+.evidence-step.current::before { border-color: var(--blue); background: var(--blue); }
+.evidence-step.failed::before { border-color: var(--danger); background: var(--danger); }
+.evidence-step strong { color: #cbd4df; font: 10px var(--mono); font-weight: 500; }
+.evidence-step small { color: var(--muted); font: 9px/1.5 var(--mono); overflow-wrap: anywhere; }
 button, select, textarea, .task-item, .file-row, .review-side-section, .code-toolbar, .code-segment button, .file-scope button {
   transition: color 130ms ease, background-color 130ms ease, border-color 130ms ease;
 }

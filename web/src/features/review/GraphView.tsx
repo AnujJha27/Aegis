@@ -1,6 +1,6 @@
 import type { TaskGraph } from "../../app/api";
 
-const colors: Record<string, string> = { task: "#9fe870", run: "#7eb6ff", event: "#a9b6c8", file: "#e7bd79" };
+const colors: Record<string, string> = { task: "#91a9c4", run: "#a9b6c8", event: "#8b96a4", file: "#b5b8a7" };
 
 export function GraphView({ graph }: { graph?: TaskGraph }) {
   if (!graph?.nodes.length) return <p className="muted">No graph data for this task yet.</p>;

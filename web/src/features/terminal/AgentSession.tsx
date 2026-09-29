@@ -6,6 +6,7 @@ import type { AgentEvent, AgentRun, Task } from "../../app/api";
 import { readable } from "../../app/events";
 import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
+import { AegisMark } from "../../components/AegisMark";
 
 export function AgentSession({ task, run, runs, runFinished, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runs: AgentRun[]; runFinished: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
   const terminalHost = useRef<HTMLDivElement>(null);
@@ -22,7 +23,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
 
   useEffect(() => {
     if (!terminalHost.current) return;
-    const next = new Terminal({ convertEol: true, cursorBlink: false, fontFamily: "SFMono-Regular, Consolas, monospace", fontSize: 12, theme: { background: "#0b0f15", foreground: "#d5deea", cursor: "#9fe870" } });
+    const next = new Terminal({ convertEol: true, cursorBlink: false, fontFamily: "SFMono-Regular, Consolas, monospace", fontSize: 12, theme: { background: "#151a21", foreground: "#d5deea", cursor: "#91a9c4" } });
     const addon = new FitAddon();
     next.loadAddon(addon);
     next.open(terminalHost.current);
@@ -68,7 +69,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
         <div className="terminal-label">LIVE PTY OUTPUT <span>{run?.agent ?? "terminal"}</span></div>
         <div className="xterm-host" ref={terminalHost} onClick={() => terminal.current?.focus()} />
       </div>
-      {showEmpty && <div className="empty-output"><div className="empty-icon">✦</div><h2>{run ? `${run.agent} is ready` : task ? "Ready for direction" : "Your workspace is ready"}</h2><p>{run ? interactive ? "The terminal is ready. Type directly into it to answer setup prompts or interact with the CLI." : "Send a prompt below to start the agent." : task ? "Launch an agent, then send a prompt from the dock below." : "Create a task on the left to start an agent run."}</p></div>}
+      {showEmpty && <div className="empty-output"><div className="empty-icon"><AegisMark /></div><h2>{run ? `${run.agent} is ready` : task ? "Ready for direction" : "Your workspace is ready"}</h2><p>{run ? interactive ? "The terminal is ready. Type directly into it to answer setup prompts or interact with the CLI." : "Send a prompt below to start the agent." : task ? "Launch an agent, then send a prompt from the dock below." : "Create a task on the left to start an agent run."}</p></div>}
       {cards.map((event) => <article className={`event-card ${event.type.includes("failed") ? "failed" : ""}`} key={event.id}><div className="event-meta"><span className={`event-dot ${event.type.includes("completed") || event.type.includes("finished") ? "done" : ""}`} /><span>{event.agent || "system"}</span><span>{event.type.replaceAll(".", " / ")}</span><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><pre>{readable(event.content)}</pre></article>)}
     </div>
     <div className="composer">

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { api, type AgentEvent, type FileEntry, type GitChange, type GitCommit, type GitCommitFile, type GitStatus, type HandoffContext, type VerificationRun } from "../../app/api";
+import { api, type AgentEvent, type AgentRun, type FileEntry, type GitChange, type GitCommit, type GitCommitFile, type GitStatus, type HandoffContext, type VerificationRun } from "../../app/api";
 import { GitPanel } from "../git/GitPanel";
 import { VerificationPanel } from "../verification/VerificationPanel";
 import { FileTabs } from "./FileTabs";
@@ -9,7 +9,7 @@ import { ReviewFindings } from "./ReviewFindings";
 
 const FileViewer = lazy(() => import("./FileViewer").then((module) => ({ default: module.FileViewer })));
 
-type Props = { taskId?: string; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string; openFileToken?: number };
+type Props = { taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string; openFileToken?: number };
 type Range = "all" | "staged" | "unstaged";
 const commitFileChange = (file: GitCommitFile): GitChange => ({ path: file.path, old_path: file.old_path, index_status: file.status, worktree_status: " ", additions: 0, deletions: 0, binary: false });
 
@@ -70,6 +70,7 @@ export function CodeWorkspace(props: Props) {
   }, [props.openFilePath, props.openFileToken]);
 
   const currentChange = props.gitChanges.find((item) => item.path === selected);
+  const fileEvent = props.events.find((event) => event.type === "file.changed" && event.content.trim() === selected);
   const staged = Boolean(currentChange && currentChange.index_status !== " " && currentChange.index_status !== "?");
   const unstaged = Boolean(currentChange && (currentChange.worktree_status !== " " || currentChange.index_status === "?"));
 
@@ -109,7 +110,12 @@ export function CodeWorkspace(props: Props) {
       {commitMode && selectedCommit && <section className="review-side-section"><span className="subheading">COMMIT</span><p className="task-context">{selectedCommit.subject}</p><small>{selectedCommit.author} · {new Date(selectedCommit.timestamp * 1000).toLocaleString()}</small><code className="side-file-path">{selectedCommit.id}</code></section>}
       {file && <section className="review-side-section"><span className="subheading">FILE</span><code className="side-file-path">{file.path}</code><div className="file-meta"><span>Status</span><strong>{file.git_status || (file.changed ? "Modified" : "Unchanged")}</strong>{file.size !== undefined && <><span>Size</span><strong>{file.size.toLocaleString()} bytes</strong></>}{file.old_path && <><span>{file.git_status === "C" ? "Copied from" : "Renamed from"}</span><strong>{file.old_path}</strong></>}</div>{!commitMode && currentChange && <div className="review-stage-actions">{unstaged && <button onClick={() => void stage(file.path, true)}>Stage file</button>}{staged && <button onClick={() => void stage(file.path, false)}>Unstage file</button>}</div>}{stageError && <p className="file-tree-error" role="alert">{stageError}</p>}</section>}
       <ReviewFindings key={props.taskId ?? ""} taskId={props.taskId} activeRunId={props.activeRunId} filePath={file?.path} />
-      {!commitMode && file?.changed && <section className="review-side-section"><span className="subheading">PROVENANCE</span><p className="muted">{props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path) ? `Changed during ${props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path)?.agent ?? "agent"} run ${(props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path)?.runId ?? "").slice(0, 8)}` : "Attribution unknown for this repository change."}</p></section>}
+      <section className="review-side-section evidence-section"><span className="subheading">EVIDENCE TRAIL</span><ol className="evidence-trail" aria-label="Task evidence">
+        <li className={`evidence-step ${props.taskPrompt ? "complete" : "pending"}`}><strong>Task</strong><small>{props.taskPrompt || "No task selected"}</small></li>
+        <li className={`evidence-step ${props.activeRun ? props.activeRun.status === "running" || props.activeRun.status === "starting" ? "current" : "complete" : "pending"}`}><strong>Agent run</strong><small>{props.activeRun ? `${props.activeRun.agent} · ${props.activeRun.status} · ${props.activeRun.id.slice(0, 8)}` : "No agent run selected"}</small></li>
+        <li className={`evidence-step ${file ? "current" : "pending"}`}><strong>File</strong><small>{file ? <>{file.path} · {fileEvent ? `Changed during ${fileEvent.agent} run ${fileEvent.runId.slice(0, 8)}` : file.changed ? "Attribution unknown" : "Not recorded as changed"}</> : "Select a file to inspect"}</small></li>
+        <li className={`evidence-step ${props.verificationRunning ? "current" : props.verification ? props.verification.exitCode === 0 ? "complete" : "failed" : "pending"}`}><strong>Verification</strong><small>{props.verificationRunning ? "Running…" : props.verification ? `${props.verification.exitCode === 0 ? "Passed" : "Failed"} · ${props.verification.command.join(" ")}` : "Not run"}</small></li>
+      </ol></section>
       <section className="review-side-section"><div className="side-section-heading"><span className="subheading">VERIFICATION</span></div><VerificationPanel run={props.verification} running={props.verificationRunning} onVerify={props.onVerify} /></section>
       <details className="review-git-details"><summary>Git operations</summary><GitPanel changes={props.gitChanges} status={props.gitStatus} onChanged={props.onGitChanged} showFiles={false} /></details>
       {props.handoff && <details className="review-git-details"><summary>Handoff context</summary><pre className="review-handoff">{props.handoff.prompt}{"\n\n"}{props.handoff.changed_files.join("\n")}</pre></details>}

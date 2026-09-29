@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, type FileEntry, type GitChange, type GitCommit, type ReviewFinding } from "../../app/api";
+import { api, type AgentEvent, type AgentRun, type FileEntry, type GitChange, type GitCommit, type ReviewFinding, type VerificationRun } from "../../app/api";
 import { CodeWorkspace } from "./CodeWorkspace";
 
 vi.mock("./FileViewer", () => ({
@@ -18,6 +18,19 @@ const commit: GitCommit = { id: "0123456789abcdef0123456789abcdef01234567", pare
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("read-only review workspace", () => {
+  it("connects task, agent run, selected file attribution, and verification in the evidence trail", () => {
+    const run: AgentRun = { id: "run-123456", taskId: "task-1", agent: "codex", status: "running", startedAt: 1, finishedAt: 0 };
+    const event: AgentEvent = { id: "event-1", taskId: "task-1", runId: run.id, type: "file.changed", agent: "codex", content: file.path, timestamp: 2 };
+    const verification: VerificationRun = { id: "verify-1", taskId: "task-1", runId: run.id, command: ["ctest", "--test-dir", "build"], exitCode: 0, output: "ok", startedAt: 3, finishedAt: 4 };
+    render(<CodeWorkspace taskId="task-1" taskPrompt="Fix run submission" activeRun={run} events={[event]} gitChanges={[change]} verification={verification} openFilePath={file.path} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);
+
+    const trail = screen.getByRole("list", { name: "Task evidence" });
+    expect(trail.textContent).toContain("Fix run submission");
+    expect(trail.textContent).toContain("codex · running · run-1234");
+    expect(trail.textContent).toContain("Changed during codex run run-1234");
+    expect(trail.textContent).toContain("Passed · ctest --test-dir build");
+  });
+
   it("offers commit history as a review scope", () => {
     render(<CodeWorkspace events={[]} gitChanges={[]} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);
     expect(screen.getByRole("button", { name: "Commits" })).toBeTruthy();
