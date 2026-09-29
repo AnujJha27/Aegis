@@ -47,9 +47,13 @@ std::optional<Response> git(const Request &request, const Context &context) {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
         return jsonResponse(boost::beast::http::status::ok, {{"diff", context.git->diff()}});
     }
-    if (method == boost::beast::http::verb::get && target == "/api/git/status") {
+    if (method == boost::beast::http::verb::get && target.substr(0, target.find('?')) == "/api/git/status") {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
-        return jsonResponse(boost::beast::http::status::ok, gitSnapshot(context));
+        bool valid = true;
+        const auto refresh = queryValue(target, "refresh", valid);
+        if (!valid || (refresh && *refresh != "0" && *refresh != "1"))
+            return error(boost::beast::http::status::bad_request, "invalid_query", "refresh must be 0 or 1");
+        return jsonResponse(boost::beast::http::status::ok, gitSnapshot(context, refresh == "1"));
     }
     if (method == boost::beast::http::verb::post && (target == "/api/git/branch" || target == "/api/git/merge" || target == "/api/git/pull" || target == "/api/git/push")) {
         if (!context.git) return error(boost::beast::http::status::internal_server_error, "git_unavailable", "repository service is unavailable");
@@ -66,7 +70,7 @@ std::optional<Response> git(const Request &request, const Context &context) {
             if (!succeeded) return jsonResponse(target == "/api/git/merge" ? boost::beast::http::status::conflict
                     : target == "/api/git/branch" ? boost::beast::http::status::bad_request : boost::beast::http::status::bad_gateway,
                 {{"error", {{"code", "git_operation_failed"}, {"message", output.empty() ? "Git operation failed" : output}}}});
-            auto result = gitSnapshot(context);
+            auto result = gitSnapshot(context, true);
             result["output"] = output;
             return jsonResponse(boost::beast::http::status::ok, result);
         } catch (const nlohmann::json::exception &) {
@@ -85,7 +89,7 @@ std::optional<Response> git(const Request &request, const Context &context) {
                 succeeded = target == "/api/git/stage" ? context.git->stage(path, output) : context.git->unstage(path, output);
             }
             if (!succeeded) return error(boost::beast::http::status::bad_request, "git_operation_failed", output.empty() ? "Git operation failed" : output);
-            auto result = gitSnapshot(context);
+            auto result = gitSnapshot(context, true);
             result["output"] = output;
             return jsonResponse(boost::beast::http::status::ok, result);
         } catch (const nlohmann::json::exception &) {

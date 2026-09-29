@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <mutex>
+#include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,11 +32,18 @@ struct CommitFile {
 
 class GitRepository final {
 public:
+    struct Snapshot {
+        RepositoryState state;
+        std::vector<GitChange> changes;
+        std::uint64_t version = 0;
+    };
+
     explicit GitRepository(std::filesystem::path path);
 
     const std::filesystem::path &path() const;
     RepositoryState state() const;
-    std::vector<GitChange> changes(std::optional<std::size_t> limit = std::nullopt) const;
+    Snapshot snapshot(bool refresh = false) const;
+    std::vector<GitChange> changes(std::optional<std::size_t> limit = std::nullopt, bool refresh = false) const;
     std::vector<CommitSummary> commits(std::size_t limit = 50) const;
     std::optional<CommitSummary> findCommit(const std::string &id) const;
     std::vector<CommitFile> commitFiles(const std::string &id) const;
@@ -53,10 +63,16 @@ private:
     friend class Files;
     std::vector<std::string> command(std::vector<std::string> arguments) const;
     std::optional<GitChange> change(const std::string &path) const;
+    void invalidateSnapshot() const;
 
     std::filesystem::path path_;
     std::filesystem::path gitDirectory_;
     bool validRepository_ = false;
+    mutable std::mutex snapshotMutex_;
+    mutable Snapshot cachedSnapshot_;
+    mutable std::chrono::steady_clock::time_point snapshotAt_{};
+    mutable bool snapshotValid_ = false;
+    mutable std::uint64_t snapshotVersion_ = 0;
 };
 
 }

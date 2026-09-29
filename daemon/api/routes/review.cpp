@@ -1,6 +1,8 @@
 #include "daemon/api/route_handlers.h"
 #include "daemon/api/route_helpers.h"
 
+#include <map>
+
 namespace aegis::daemon::api::routes {
 namespace {
 
@@ -61,7 +63,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         for (auto &finding : findings) if (finding.message.size() > 2000) finding.message.resize(2000);
         auto prompt = task->prompt;
         if (prompt.size() > 8000) prompt.resize(8000);
-        auto changes = context.git ? context.git->changes(101) : std::vector<GitChange>{};
+        auto changes = context.git ? context.git->changes(101, true) : std::vector<GitChange>{};
         const bool changedFilesTruncated = changes.size() > 100;
         if (changedFilesTruncated) changes.resize(100);
         appendUntrackedFiles(diff, changes, context.files);
@@ -73,17 +75,20 @@ std::optional<Response> review(const Request &request, const Context &context) {
     }
     if (const auto taskId = pathId(target, "/graph")) {
         if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
-        TaskGraph graph{*taskId, {{"task:" + *taskId, "task", "Task"}}, {}};
-        const auto events = context.store->events(*taskId);
+        auto events = context.store->events(*taskId, 5001);
+        const bool truncated = events.size() > 5000;
+        if (truncated) events.erase(events.begin(), events.end() - 5000);
+        TaskGraph graph{*taskId, {{"task:" + *taskId, "task", "Task"}}, {}, truncated};
         const auto runs = context.store->runs(*taskId);
+        std::map<std::string, std::vector<const AgentEvent *>> eventsByRun;
+        for (const auto &event : events) eventsByRun[event.runId].push_back(&event);
         for (const auto &run : runs) {
             const auto runNode = "run:" + run.id;
             graph.nodes.push_back({runNode, "run", run.agent});
             graph.edges.push_back({"task:" + *taskId, runNode});
-            for (const auto &event : events) {
-                if (event.runId != run.id) continue;
-                const auto eventNode = "event:" + event.id;
-                graph.nodes.push_back({eventNode, "event", event.type});
+            for (const auto *event : eventsByRun[run.id]) {
+                const auto eventNode = "event:" + event->id;
+                graph.nodes.push_back({eventNode, "event", event->type});
                 graph.edges.push_back({runNode, eventNode});
             }
         }
@@ -98,12 +103,15 @@ std::optional<Response> review(const Request &request, const Context &context) {
     if (const auto taskId = pathId(target, "/provenance")) {
         if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
         nlohmann::json records = nlohmann::json::array();
-        for (const auto &event : context.store->events(*taskId)) {
-            ProvenanceRecord record{event.id, event.taskId, event.runId, event.agent, event.type, event.timestamp, "unknown", {}};
-            if (event.type == "file.changed" && !event.content.empty()) record.changedFiles.push_back(event.content);
+        const auto events = context.store->events(*taskId, 2001);
+        const bool truncated = events.size() > 2000;
+        const auto first = truncated ? events.end() - 2000 : events.begin();
+        for (auto event = first; event != events.end(); ++event) {
+            ProvenanceRecord record{event->id, event->taskId, event->runId, event->agent, event->type, event->timestamp, "unknown", {}};
+            if (event->type == "file.changed" && !event->content.empty()) record.changedFiles.push_back(event->content);
             records.push_back(protocol::toJson(record));
         }
-        return jsonResponse(boost::beast::http::status::ok, {{"task_id", *taskId}, {"records", records}});
+        return jsonResponse(boost::beast::http::status::ok, {{"task_id", *taskId}, {"records", records}, {"truncated", truncated}});
     }
     return std::nullopt;
 }

@@ -103,6 +103,7 @@ struct TaskGraph {
     std::string taskId;
     std::vector<GraphNode> nodes;
     std::vector<GraphEdge> edges;
+    bool truncated = false;
 };
 
 struct ProvenanceRecord {

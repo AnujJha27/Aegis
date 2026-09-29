@@ -97,12 +97,15 @@ inline std::vector<std::string> changedFiles(const std::string &diff) {
     return files;
 }
 
-inline nlohmann::json gitSnapshot(const Context &context) {
+inline nlohmann::json gitSnapshot(const Context &context, bool refresh = false) {
+    const auto snapshot = context.git->snapshot(refresh);
     nlohmann::json files = nlohmann::json::array();
-    for (const auto &file : context.git->changes()) files.push_back(protocol::toJson(file));
-    return {{"repository", protocol::toJson(context.git->state())},
+    for (const auto &file : snapshot.changes) files.push_back(protocol::toJson(file));
+    auto currentBranch = snapshot.state.branch;
+    if (currentBranch.starts_with("HEAD ") || currentBranch.starts_with("No commits yet on ")) currentBranch.clear();
+    return {{"version", snapshot.version}, {"repository", protocol::toJson(snapshot.state)},
             {"files", files}, {"branches", context.git->branches()},
-            {"current_branch", context.git->currentBranch()}, {"clean", context.git->clean()},
+            {"current_branch", currentBranch}, {"clean", snapshot.changes.empty()},
             {"agent_running", context.agentManager && context.agentManager->hasRunningRuns()}};
 }
 

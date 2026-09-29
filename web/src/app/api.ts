@@ -8,7 +8,7 @@ export type Repository = {
 };
 
 export type GitChange = { path: string; old_path?: string | null; index_status: string; worktree_status: string; additions: number; deletions: number; binary: boolean };
-export type GitStatus = { repository: Repository; files: GitChange[]; branches: string[]; current_branch: string; clean: boolean; agent_running: boolean; output?: string };
+export type GitStatus = { version?: number; repository: Repository; files: GitChange[]; branches: string[]; current_branch: string; clean: boolean; agent_running: boolean; output?: string };
 export type GitCommit = { id: string; parent_id: string | null; author: string; timestamp: number; subject: string };
 export type GitCommitFile = { path: string; old_path: string | null; status: string };
 export type GitCommitReview = { commit: GitCommit; files: GitCommitFile[] };
@@ -79,7 +79,7 @@ export type NewReviewFinding = { file_path: string; run_id?: string; start_line?
 
 export type GraphNode = { id: string; type: string; label: string };
 export type GraphEdge = { from: string; to: string };
-export type TaskGraph = { task_id: string; nodes: GraphNode[]; edges: GraphEdge[] };
+export type TaskGraph = { task_id: string; nodes: GraphNode[]; edges: GraphEdge[]; truncated?: boolean };
 export type ProvenanceRecord = {
   event_id: string;
   task_id: string;
@@ -118,7 +118,7 @@ export const api = {
   commits: () => request<GitCommit[]>("/api/git/commits"),
   commitReview: (id: string) => request<GitCommitReview>(`/api/git/commits/${encodeURIComponent(id)}`),
   compareCommit: (path: string, id: string, loadLarge = false) => request<FileComparison>(`/api/files/compare?path=${encodeURIComponent(path)}&commit=${encodeURIComponent(id)}${loadLarge ? "&load_large=1" : ""}`),
-  gitStatus: () => request<GitStatus>("/api/git/status"),
+  gitStatus: (refresh = false) => request<GitStatus>(`/api/git/status${refresh ? "?refresh=1" : ""}`),
   stage: (path: string) => request<GitStatus>("/api/git/stage", { method: "POST", body: JSON.stringify({ path }) }),
   unstage: (path: string) => request<GitStatus>("/api/git/unstage", { method: "POST", body: JSON.stringify({ path }) }),
   commit: (message: string) => request<GitStatus>("/api/git/commit", { method: "POST", body: JSON.stringify({ message }) }),
@@ -143,7 +143,7 @@ export const api = {
     };
   },
   graph: (taskId: string) => request<TaskGraph>(`/api/tasks/${taskId}/graph`),
-  provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[] }>(`/api/tasks/${taskId}/provenance`),
+  provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[]; truncated?: boolean }>(`/api/tasks/${taskId}/provenance`),
   createTask: async (prompt: string) => task(await request<Record<string, unknown>>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })),
   launch: async (taskId: string, agent: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify({ agent }) })),
   deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),

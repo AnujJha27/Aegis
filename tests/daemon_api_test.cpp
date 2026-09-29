@@ -87,6 +87,9 @@ int main() {
     const auto listing = request(context, http::verb::get, "/api/files?scope=all");
     assert(listing.result() == http::status::ok);
     assert(!nlohmann::json::parse(listing.body()).at("entries").empty());
+    const auto refreshedGitStatus = request(context, http::verb::get, "/api/git/status?refresh=1");
+    assert(refreshedGitStatus.result() == http::status::ok);
+    assert(nlohmann::json::parse(refreshedGitStatus.body()).at("version").get<std::uint64_t>() > 0);
     const auto invalidFileOptions = request(context, http::verb::get, "/api/files?scope=all&include_changes=maybe");
     assert(invalidFileOptions.result() == http::status::bad_request);
     const auto invalidRecursive = request(context, http::verb::get, "/api/files?scope=all&recursive=maybe");
@@ -285,6 +288,10 @@ int main() {
     std::filesystem::create_symlink(staticFixture.root() / "outside/secret.txt", staticFixture.root() / "web/assets/leak.txt");
     const auto staticIndex = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/");
     assert(staticIndex.result() == http::status::ok && staticIndex.body() == "Aegis UI");
+    assert(staticIndex[http::field::cache_control] == "no-cache");
+    staticFixture.write("web/assets/app.js", "export {};");
+    const auto staticAsset = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/assets/app.js");
+    assert(staticAsset[http::field::cache_control] == "public, max-age=31536000, immutable");
     const auto staticQuery = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/?cache=1");
     assert(staticQuery.result() == http::status::ok && staticQuery.body() == "Aegis UI");
     const auto staticEscape = aegis::daemon::api::staticFileResponse(staticFixture.root() / "web", "/assets/leak.txt");

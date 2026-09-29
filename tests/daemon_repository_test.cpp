@@ -34,6 +34,15 @@ int main() {
     fixture.write("tracked-binary.dat", std::string("c\0d", 3));
 
     aegis::daemon::repository::GitRepository repository(fixture.root());
+    const auto firstSnapshot = repository.snapshot(true);
+    assert(repository.snapshot().version == firstSnapshot.version);
+    fixture.write("snapshot-probe.tmp", "external change\n");
+    assert(repository.snapshot().version == firstSnapshot.version);
+    const auto refreshedSnapshot = repository.snapshot(true);
+    assert(refreshedSnapshot.version > firstSnapshot.version);
+    assert(std::any_of(refreshedSnapshot.changes.begin(), refreshedSnapshot.changes.end(), [](const auto &item) { return item.path == "snapshot-probe.tmp"; }));
+    std::filesystem::remove(fixture.root() / "snapshot-probe.tmp");
+    repository.snapshot(true);
     const auto changes = repository.changes();
     const auto find = [&](const std::string &path) -> const aegis::daemon::GitChange * {
         const auto item = std::find_if(changes.begin(), changes.end(), [&](const auto &change) { return change.path == path; });

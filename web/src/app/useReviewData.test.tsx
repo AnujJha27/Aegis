@@ -12,13 +12,32 @@ function deferred<T>() {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("useReviewData task ownership", () => {
+  it("loads graph, activity, and handoff data only for the opened review view", async () => {
+    const handoff = vi.spyOn(api, "handoff").mockResolvedValue({ task_id: "task-1", prompt: "task", recent_events: [], diff: "", changed_files: [], changed_files_truncated: false, verification: null, findings: [] });
+    const graph = vi.spyOn(api, "graph").mockResolvedValue({ task_id: "task-1", nodes: [], edges: [] });
+    const provenance = vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-1", records: [] });
+    const verifications = vi.spyOn(api, "verifications").mockResolvedValue([]);
+    const { rerender } = renderHook(({ view }) => useReviewData("task-1", view), { initialProps: { view: undefined as "review" | "graphs" | "activity" | undefined } });
+    await act(async () => {});
+    expect(handoff).not.toHaveBeenCalled();
+    expect(graph).not.toHaveBeenCalled();
+    expect(provenance).not.toHaveBeenCalled();
+    expect(verifications).not.toHaveBeenCalled();
+
+    rerender({ view: "graphs" });
+    await waitFor(() => expect(graph).toHaveBeenCalledOnce());
+    expect(handoff).not.toHaveBeenCalled();
+    expect(provenance).not.toHaveBeenCalled();
+    expect(verifications).not.toHaveBeenCalled();
+  });
+
   it("surfaces a failed review snapshot instead of leaving it unhandled", async () => {
     vi.spyOn(api, "handoff").mockRejectedValue(new Error("daemon unavailable"));
     vi.spyOn(api, "graph").mockResolvedValue({ task_id: "task-1", nodes: [], edges: [] });
     vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-1", records: [] });
     vi.spyOn(api, "verifications").mockResolvedValue([]);
 
-    const { result } = renderHook(() => useReviewData("task-1"));
+    const { result } = renderHook(() => useReviewData("task-1", "review"));
 
     await waitFor(() => expect(result.current.error).toBe("daemon unavailable"));
   });
@@ -32,7 +51,7 @@ describe("useReviewData task ownership", () => {
     vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-new", records: [] });
     vi.spyOn(api, "verifications").mockResolvedValue([]);
 
-    const { result, rerender } = renderHook(({ taskId }) => useReviewData(taskId), { initialProps: { taskId: "task-old" } });
+    const { result, rerender } = renderHook(({ taskId }) => useReviewData(taskId, "review"), { initialProps: { taskId: "task-old" } });
     rerender({ taskId: "task-new" });
     await waitFor(() => expect(result.current.handoff?.task_id).toBe("task-new"));
 
@@ -49,7 +68,7 @@ describe("useReviewData task ownership", () => {
     vi.spyOn(api, "verifications").mockReturnValue(oldHistory.promise);
     const latest: VerificationRun = { id: "verify-new", taskId: "task-1", runId: null, command: ["ctest"], exitCode: 0, output: "passed", startedAt: 10, finishedAt: 12 };
     vi.spyOn(api, "verify").mockResolvedValue(latest);
-    const { result } = renderHook(() => useReviewData("task-1"));
+    const { result } = renderHook(() => useReviewData("task-1", "review"));
 
     await act(async () => { await result.current.verify(); });
     expect(result.current.verification).toEqual(latest);

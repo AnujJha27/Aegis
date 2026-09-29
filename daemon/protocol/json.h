@@ -98,7 +98,7 @@ inline nlohmann::json toJson(const TaskGraph &graph) {
     nlohmann::json edges = nlohmann::json::array();
     for (const auto &node : graph.nodes) nodes.push_back(toJson(node));
     for (const auto &edge : graph.edges) edges.push_back(toJson(edge));
-    return {{"task_id", graph.taskId}, {"nodes", nodes}, {"edges", edges}};
+    return {{"task_id", graph.taskId}, {"nodes", nodes}, {"edges", edges}, {"truncated", graph.truncated}};
 }
 
 inline nlohmann::json toJson(const ProvenanceRecord &record) {

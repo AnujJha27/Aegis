@@ -68,6 +68,10 @@ std::vector<GitChange> parseChanges(std::string_view output, std::optional<std::
         const auto pathEnd = output.find('\0', pathStart);
         if (pathEnd == std::string_view::npos) break;
         GitChange change;
+        if (index == '#' && worktree == '#') {
+            offset = pathEnd + 1;
+            continue;
+        }
         change.path = output.substr(pathStart, pathEnd - pathStart);
         change.indexStatus = std::string(1, index);
         change.worktreeStatus = std::string(1, worktree);
@@ -146,51 +150,32 @@ const std::filesystem::path &GitRepository::path() const {
 }
 
 RepositoryState GitRepository::state() const {
-    RepositoryState result;
-    result.path = path_.string();
-    if (!validRepository_) return result;
-    const auto statusResult = process::run(command({"status", "--short", "--branch"}), path_);
-    const auto numstatResult = process::run(command({"diff", "HEAD", "--numstat"}), path_);
-    requireComplete(statusResult, "git status");
-    requireComplete(numstatResult, "git numstat");
-    const auto &status = statusResult.output;
-    const auto &numstat = numstatResult.output;
-    std::istringstream statusLines(status);
-    std::string line;
-    while (std::getline(statusLines, line)) {
-        if (line.rfind("## ", 0) == 0) {
-            result.branch = line.substr(3);
-            const auto separator = result.branch.find("...");
-            if (separator != std::string::npos) result.branch.resize(separator);
-        } else if (line.size() >= 2) {
-            ++result.files;
-        }
-    }
-    std::istringstream numstatLines(numstat);
-    while (std::getline(numstatLines, line)) {
-        std::istringstream columns(line);
-        int added = 0;
-        int removed = 0;
-        if (columns >> added >> removed) {
-            result.insertions += added;
-            result.deletions += removed;
-        }
-    }
-    return result;
+    return snapshot().state;
 }
 
-std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit) const {
-    if (!validRepository_) return {};
-    const auto status = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
+GitRepository::Snapshot GitRepository::snapshot(bool refresh) const {
+    std::lock_guard lock(snapshotMutex_);
+    if (!refresh && snapshotValid_ && std::chrono::steady_clock::now() - snapshotAt_ < std::chrono::milliseconds(250)) return cachedSnapshot_;
+    Snapshot result;
+    result.state.path = path_.string();
+    if (!validRepository_) return result;
+    const auto status = process::run(command({"status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all"}), path_);
     requireComplete(status, "git status");
-    bool truncated = false;
-    auto result = parseChanges(status.output, limit, &truncated);
-    if (truncated) return result;
+    if (status.exitCode != 0) throw std::runtime_error("git status failed: " + status.output);
+    const auto branchEnd = status.output.find('\0');
+    if (status.output.starts_with("## ")) {
+        result.state.branch = status.output.substr(3, branchEnd == std::string::npos ? std::string::npos : branchEnd - 3);
+        const auto separator = result.state.branch.find("...");
+        if (separator != std::string::npos) result.state.branch.resize(separator);
+    }
+    result.changes = parseChanges(status.output);
 
     std::map<std::string, std::size_t> indexes;
-    for (std::size_t index = 0; index < result.size(); ++index) indexes.emplace(result[index].path, index);
+    for (std::size_t index = 0; index < result.changes.size(); ++index) indexes.emplace(result.changes[index].path, index);
     const auto numstatResult = process::run(command({"diff", "--numstat", "-z", "HEAD"}), path_);
     requireComplete(numstatResult, "git numstat");
+    if (numstatResult.exitCode != 0 && process::run(command({"rev-parse", "--verify", "HEAD"}), path_).exitCode == 0)
+        throw std::runtime_error("git numstat failed: " + numstatResult.output);
     const auto &numstat = numstatResult.output;
     const auto parseCount = [](std::string_view value) {
         int count = 0;
@@ -217,12 +202,32 @@ std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit) 
         }
         const auto found = indexes.find(filePath);
         if (found == indexes.end()) continue;
-        auto &change = result[found->second];
+        auto &change = result.changes[found->second];
         change.additions = parseCount(addedField);
         change.deletions = parseCount(removedField);
         change.binary = change.binary || addedField == "-" || removedField == "-";
     }
+    result.state.files = static_cast<int>(result.changes.size());
+    for (const auto &change : result.changes) {
+        result.state.insertions += change.additions;
+        result.state.deletions += change.deletions;
+    }
+    result.version = ++snapshotVersion_;
+    cachedSnapshot_ = result;
+    snapshotAt_ = std::chrono::steady_clock::now();
+    snapshotValid_ = true;
     return result;
+}
+
+std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit, bool refresh) const {
+    auto result = snapshot(refresh).changes;
+    if (limit && result.size() > *limit) result.resize(*limit);
+    return result;
+}
+
+void GitRepository::invalidateSnapshot() const {
+    std::lock_guard lock(snapshotMutex_);
+    snapshotValid_ = false;
 }
 
 std::optional<GitChange> GitRepository::change(const std::string &path) const {
@@ -316,16 +321,11 @@ std::vector<std::string> GitRepository::branches() const {
 }
 
 std::string GitRepository::currentBranch() const {
-    if (!validRepository_) return {};
-    auto branch = process::run(command({"branch", "--show-current"}), path_).output;
-    if (!branch.empty() && branch.back() == '\n') branch.pop_back();
-    return branch;
+    return state().branch;
 }
 
 bool GitRepository::clean() const {
-    if (!validRepository_) return false;
-    const auto result = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
-    return result.exitCode == 0 && !result.outputTruncated && result.output.empty();
+    return validRepository_ && snapshot(true).changes.empty();
 }
 
 std::string GitRepository::diff(std::size_t maxOutputBytes) const {
@@ -345,6 +345,7 @@ bool GitRepository::stage(const std::string &path, std::string &error) const {
     if (!validPath(path, error)) return false;
     const auto result = process::run(command({"add", "--", ":(literal)" + path}), path_);
     error = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 
@@ -353,6 +354,7 @@ bool GitRepository::unstage(const std::string &path, std::string &error) const {
     if (!validPath(path, error)) return false;
     const auto result = process::run(command({"restore", "--staged", "--", ":(literal)" + path}), path_);
     error = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 
@@ -364,6 +366,7 @@ bool GitRepository::commit(const std::string &message, std::string &error) const
     }
     const auto result = process::run(command({"commit", "-m", message}), path_);
     error = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 
@@ -380,6 +383,7 @@ bool GitRepository::switchBranch(const std::string &branch, std::string &error) 
     }
     const auto result = process::run(command({"switch", "--", branch}), path_);
     error = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 
@@ -394,6 +398,7 @@ bool GitRepository::merge(const std::string &branch, std::string &output) const 
     if (!clean()) { output = "commit or discard working tree changes before merging"; return false; }
     const auto result = process::run(command({"merge", "--no-edit", "--", branch}), path_, std::chrono::seconds(120));
     output = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 
@@ -405,6 +410,7 @@ bool GitRepository::pull(std::string &output) const {
     }
     const auto result = process::run(command({"-c", "pull.ff=true", "pull", "--no-rebase"}), path_, std::chrono::seconds(120));
     output = result.output;
+    invalidateSnapshot();
     return result.exitCode == 0;
 }
 

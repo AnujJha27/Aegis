@@ -98,6 +98,8 @@ Response staticFileResponse(const std::filesystem::path &webRoot, std::string_vi
     const auto extension = relativePath.extension().string();
     const auto contentType = extension == ".html" ? "text/html" : extension == ".js" ? "text/javascript" : extension == ".css" ? "text/css" : "application/octet-stream";
     response.set(boost::beast::http::field::content_type, contentType);
+    response.set(boost::beast::http::field::cache_control,
+                 path.starts_with("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
     response.body() = std::move(body);
     response.prepare_payload();
     return response;
