@@ -57,6 +57,17 @@ Review is a read-only code inspection workspace. It uses Monaco to render workin
 
 See [docs/architecture.md](docs/architecture.md) for lifecycle states, interruption behavior, schema migration, API/event contracts, ownership, and security assumptions.
 
+## Performance smoke benchmark
+
+The optional `aegis_perf_bench` target seeds 100,000 SQLite events and a temporary 10,000-file Git repository, then reports latest-history p50/p95, fixture/database size, Git change enumeration, lazy root listing, and selected-file comparison timings:
+
+```bash
+cmake --build build --target aegis_perf_bench -j2
+./build/aegis_perf_bench
+```
+
+This is a local, synthetic benchmark (not a CI gate); compare runs on the same filesystem and machine. Fast CI instead exercises PTY burst batching, bounded slow-subscriber recovery, Git fixtures, persistence, and frontend reconnection.
+
 ## Requirements and build options
 
 The default build does **not** require Qt. It uses a C++23 compiler, CMake, SQLite, Boost headers, POSIX PTY support, and Threads. Node.js/npm are required to build the web bundle.
