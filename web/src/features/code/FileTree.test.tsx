@@ -23,6 +23,7 @@ describe("file tree", () => {
     const changes: GitChange[] = [{ path: "src/agent.cpp", old_path: null, index_status: " ", worktree_status: "M", additions: 2, deletions: 1, binary: false }];
     const props = { refreshKey: "", selectedPath: "", onSelect: vi.fn() };
     const view = render(<FileTree {...props} changes={changes} scope="all" />);
+    expect(screen.getByRole("group", { name: "Repository files" })).toBeTruthy();
     await waitFor(() => expect(files).toHaveBeenCalledWith("", "all", false, false));
 
     view.rerender(<FileTree {...props} changes={changes} scope="changed" />);

@@ -129,7 +129,7 @@ export function FileTree({ scope, changes, refreshKey, selectedPath, onSelect }:
     </div>);
   }
 
-  return <div className="file-tree" role="tree" aria-label={scope === "changed" ? "Changed files" : "Repository files"}>
+  return <div className="file-tree" role="group" aria-label={scope === "changed" ? "Changed files" : "Repository files"}>
     {loading.has("") && !children[""] && <p className="file-tree-empty">Loading files…</p>}
     {error && <p className="file-tree-error" role="alert">{error}</p>}
     {!loading.has("") && !error && !entries("").length && <p className="file-tree-empty">{scope === "changed" ? "No changed files" : "No visible files"}</p>}
