@@ -6,6 +6,7 @@ export function useReviewData(taskId?: string) {
   const [handoff, setHandoff] = useState<HandoffContext>();
   const [graph, setGraph] = useState<TaskGraph>();
   const [provenance, setProvenance] = useState<ProvenanceRecord[]>([]);
+  const [error, setError] = useState("");
   const refreshSequence = useRef(0);
   const currentTaskId = useRef(taskId);
   currentTaskId.current = taskId;
@@ -14,14 +15,21 @@ export function useReviewData(taskId?: string) {
     if (!taskId) return;
     const requestedTaskId = taskId;
     const sequence = ++refreshSequence.current;
-    const [loadedHandoff, loadedGraph, loadedProvenance, verifications] = await Promise.all([
-      api.handoff(requestedTaskId), api.graph(requestedTaskId), api.provenance(requestedTaskId), api.verifications(requestedTaskId),
-    ]);
-    if (sequence !== refreshSequence.current || requestedTaskId !== currentTaskId.current) return;
-    setHandoff(loadedHandoff);
-    setGraph(loadedGraph);
-    setProvenance(loadedProvenance.records);
-    setVerification(verifications[0]);
+    try {
+      const [loadedHandoff, loadedGraph, loadedProvenance, verifications] = await Promise.all([
+        api.handoff(requestedTaskId), api.graph(requestedTaskId), api.provenance(requestedTaskId), api.verifications(requestedTaskId),
+      ]);
+      if (sequence !== refreshSequence.current || requestedTaskId !== currentTaskId.current) return;
+      setHandoff(loadedHandoff);
+      setGraph(loadedGraph);
+      setProvenance(loadedProvenance.records);
+      setVerification(verifications[0]);
+      setError("");
+    } catch (reason) {
+      if (sequence === refreshSequence.current && requestedTaskId === currentTaskId.current)
+        setError(reason instanceof Error ? reason.message : "Could not load task review data");
+      throw reason;
+    }
   }
 
   useEffect(() => {
@@ -30,7 +38,8 @@ export function useReviewData(taskId?: string) {
     setHandoff(undefined);
     setGraph(undefined);
     setProvenance([]);
-    if (taskId) void refresh();
+    setError("");
+    if (taskId) void refresh().catch(() => {});
   }, [taskId]);
 
   async function verify(runId?: string) {
@@ -41,5 +50,5 @@ export function useReviewData(taskId?: string) {
     return result;
   }
 
-  return { verification, setVerification, handoff, graph, provenance, refresh, verify };
+  return { verification, setVerification, handoff, graph, provenance, error, refresh, verify };
 }

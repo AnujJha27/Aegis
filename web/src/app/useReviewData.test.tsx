@@ -12,6 +12,17 @@ function deferred<T>() {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("useReviewData task ownership", () => {
+  it("surfaces a failed review snapshot instead of leaving it unhandled", async () => {
+    vi.spyOn(api, "handoff").mockRejectedValue(new Error("daemon unavailable"));
+    vi.spyOn(api, "graph").mockResolvedValue({ task_id: "task-1", nodes: [], edges: [] });
+    vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-1", records: [] });
+    vi.spyOn(api, "verifications").mockResolvedValue([]);
+
+    const { result } = renderHook(() => useReviewData("task-1"));
+
+    await waitFor(() => expect(result.current.error).toBe("daemon unavailable"));
+  });
+
   it("ignores an older task snapshot that resolves after the selected task", async () => {
     const old = deferred<HandoffContext>();
     const previous: HandoffContext = { task_id: "task-old", prompt: "old task", recent_events: [], diff: "", changed_files: [], verification: null, findings: [] };

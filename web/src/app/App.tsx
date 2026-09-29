@@ -29,6 +29,8 @@ export function App() {
   const interactive = Boolean(agents.find((agent) => agent.name === currentRun?.agent)?.interactive);
   const pty = usePtySession(currentRun, interactive, runFinished);
 
+  useEffect(() => { if (review.error) setError(review.error); }, [review.error]);
+
   useEffect(() => {
     let active = true;
     let retryTimer = 0;
