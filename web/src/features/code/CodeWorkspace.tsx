@@ -9,7 +9,7 @@ import { ReviewFindings } from "./ReviewFindings";
 
 const FileViewer = lazy(() => import("./FileViewer").then((module) => ({ default: module.FileViewer })));
 
-type Props = { taskId?: string; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string };
+type Props = { taskId?: string; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string; openFileToken?: number };
 type Range = "all" | "staged" | "unstaged";
 const commitFileChange = (file: GitCommitFile): GitChange => ({ path: file.path, old_path: file.old_path, index_status: file.status, worktree_status: " ", additions: 0, deletions: 0, binary: false });
 
@@ -67,7 +67,7 @@ export function CodeWorkspace(props: Props) {
     const existing = tabs.find((item) => item.path === path);
     const changed = props.gitChanges.find((item) => item.path === path);
     openFile(existing ?? { path, name: path.split("/").at(-1) ?? path, kind: "file", language: "plaintext", size: 0, changed: Boolean(changed), git_status: changed ? changed.index_status.trim() || changed.worktree_status.trim() : "", additions: changed?.additions ?? 0, deletions: changed?.deletions ?? 0, binary: changed?.binary ?? false });
-  }, [props.openFilePath]);
+  }, [props.openFilePath, props.openFileToken]);
 
   const currentChange = props.gitChanges.find((item) => item.path === selected);
   const staged = Boolean(currentChange && currentChange.index_status !== " " && currentChange.index_status !== "?");

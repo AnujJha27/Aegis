@@ -59,6 +59,25 @@ describe("read-only review workspace", () => {
     expect(onGitChanged).toHaveBeenCalledOnce();
   });
 
+  it("reopens the same file when activity navigates to it again", async () => {
+    const other: FileEntry = { ...file, path: "src/other.cpp", name: "other.cpp" };
+    const changes = [change, { ...change, path: other.path }];
+    vi.spyOn(api, "files").mockImplementation(async (path = "") => ({
+      entries: path ? [file, other] : [{ ...file, path: "src", name: "src", kind: "directory", language: "", changed: true }],
+      truncated: false,
+    }));
+    const props = { events: [], gitChanges: changes, onGitChanged: vi.fn().mockResolvedValue(undefined), verificationRunning: false, onVerify: vi.fn(), openFilePath: file.path };
+    const view = render(<CodeWorkspace {...props} openFileToken={1} />);
+    expect((await screen.findByTestId("viewer")).textContent).toContain(file.path);
+
+    fireEvent.click(await screen.findByRole("button", { name: /src/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /other\.cpp/ }));
+    expect(screen.getByTestId("viewer").textContent).toContain(other.path);
+
+    view.rerender(<CodeWorkspace {...props} openFileToken={2} />);
+    expect(screen.getByTestId("viewer").textContent).toContain(file.path);
+  });
+
   it("identifies a copied file's source as a copy, not a rename", async () => {
     const copied: GitChange = { path: "copy.cpp", old_path: "source.cpp", index_status: "C", worktree_status: " ", additions: 0, deletions: 0, binary: false };
     render(<CodeWorkspace events={[]} gitChanges={[copied]} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);

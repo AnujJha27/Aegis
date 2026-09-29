@@ -19,7 +19,7 @@ export function App() {
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [drawer, setDrawer] = useState<"review" | "graphs" | "activity">("review");
-  const [openFilePath, setOpenFilePath] = useState("");
+  const [openFileRequest, setOpenFileRequest] = useState({ path: "", token: 0 });
   const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [daemonConnection, setDaemonConnection] = useState("connecting");
@@ -133,7 +133,7 @@ export function App() {
   }
 
   function openReviewFile(path: string) {
-    setOpenFilePath(path);
+    setOpenFileRequest((current) => ({ path, token: current.token + 1 }));
     setDrawer("review");
     setScreen("review");
   }
@@ -148,5 +148,5 @@ export function App() {
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
-    onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFilePath} onOpenFile={openReviewFile} />;
+    onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFileRequest.path} openFileToken={openFileRequest.token} onOpenFile={openReviewFile} />;
 }
