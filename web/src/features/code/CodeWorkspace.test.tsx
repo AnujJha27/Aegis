@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, type FileEntry, type GitChange, type GitCommit } from "../../app/api";
+import { api, type FileEntry, type GitChange, type GitCommit, type ReviewFinding } from "../../app/api";
 import { CodeWorkspace } from "./CodeWorkspace";
 
 vi.mock("./FileViewer", () => ({
@@ -57,5 +57,26 @@ describe("read-only review workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stage file" }));
     await waitFor(() => expect(stage).toHaveBeenCalledWith(file.path));
     expect(onGitChanged).toHaveBeenCalledOnce();
+  });
+
+  it("adds and resolves a task finding for the selected file and active run", async () => {
+    const finding: ReviewFinding = { id: "finding-1", task_id: "task-1", run_id: "run-1", file_path: file.path, start_line: 12, end_line: null, message: "Check this branch.", status: "open", created_at: 1, updated_at: 1 };
+    vi.spyOn(api, "files").mockImplementation(async (path = "") => ({ entries: path ? [file] : [{ ...file, path: "src", name: "src", kind: "directory", language: "" }], truncated: false }));
+    vi.spyOn(api, "findings").mockResolvedValue([]);
+    const create = vi.spyOn(api, "createFinding").mockResolvedValue(finding);
+    const update = vi.spyOn(api, "updateFindingStatus").mockResolvedValue(undefined);
+    render(<CodeWorkspace taskId="task-1" activeRunId="run-1" events={[]} gitChanges={[change]} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /src/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /agent\.cpp/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Finding note" }), { target: { value: finding.message } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Start line" }), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add finding" }));
+
+    await screen.findByText(finding.message);
+    expect(create).toHaveBeenCalledWith("task-1", { file_path: file.path, run_id: "run-1", start_line: 12, message: finding.message });
+    fireEvent.click(screen.getByRole("button", { name: "Resolve finding" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith("finding-1", "resolved"));
+    expect(screen.getByRole("button", { name: "Reopen finding" })).toBeTruthy();
   });
 });

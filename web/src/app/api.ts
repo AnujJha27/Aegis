@@ -74,6 +74,7 @@ export type HandoffContext = {
   findings: ReviewFinding[];
 };
 export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved"; created_at: number; updated_at: number };
+export type NewReviewFinding = { file_path: string; run_id?: string; start_line?: number; end_line?: number; message: string };
 
 export type GraphNode = { id: string; type: string; label: string };
 export type GraphEdge = { from: string; to: string };
@@ -125,6 +126,9 @@ export const api = {
   push: () => request<GitStatus>("/api/git/push", { method: "POST", body: "{}" }),
   runs: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/runs`)).map(run),
   verifications: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/verifications`)).map(verification),
+  findings: (taskId: string) => request<ReviewFinding[]>(`/api/tasks/${encodeURIComponent(taskId)}/findings`),
+  createFinding: (taskId: string, finding: NewReviewFinding) => request<ReviewFinding>(`/api/tasks/${encodeURIComponent(taskId)}/findings`, { method: "POST", body: JSON.stringify(finding) }),
+  updateFindingStatus: async (findingId: string, status: ReviewFinding["status"]) => { await request(`/api/findings/${encodeURIComponent(findingId)}`, { method: "PATCH", body: JSON.stringify({ status }) }); },
   handoff: async (taskId: string) => {
     const context = await request<Omit<HandoffContext, "recent_events"> & { recent_events: Record<string, unknown>[] }>(`/api/tasks/${taskId}/handoff`);
     return { ...context, recent_events: context.recent_events.map(agentEvent) };

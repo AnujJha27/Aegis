@@ -77,6 +77,7 @@ Its historical CLI utilities (`status`, `review`, `verify`, `analyze`, and other
 - Continue Codex prompts in the same provider conversation; interrupt a turn without discarding a resumable run.
 - Use xterm.js for interactive PTY sessions and CLI setup prompts.
 - Inspect changed or repository files, compare staged/unstaged changes, stage or unstage in context, and restore verification evidence after reload.
+- Add task-scoped review notes to a file or line range, resolve/reopen them, and carry bounded findings into handoff context.
 - Jump from a task's file-change activity directly to the read-only diff; use `Ctrl/Cmd+P` to quick-open a repository file.
 - Inspect bounded handoff context before switching agents.
 - Stage, unstage, commit, push, pull, and switch local branches through the Git view.

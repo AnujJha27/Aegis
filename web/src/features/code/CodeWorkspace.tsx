@@ -5,10 +5,11 @@ import { VerificationPanel } from "../verification/VerificationPanel";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { QuickOpen } from "./QuickOpen";
+import { ReviewFindings } from "./ReviewFindings";
 
 const FileViewer = lazy(() => import("./FileViewer").then((module) => ({ default: module.FileViewer })));
 
-type Props = { taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string };
+type Props = { taskId?: string; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string };
 type Range = "all" | "staged" | "unstaged";
 const commitFileChange = (file: GitCommitFile): GitChange => ({ path: file.path, old_path: file.old_path, index_status: file.status, worktree_status: " ", additions: 0, deletions: 0, binary: false });
 
@@ -107,6 +108,7 @@ export function CodeWorkspace(props: Props) {
       <section className="review-side-section"><span className="subheading">TASK CONTEXT</span><p className="task-context">{props.taskPrompt || "No task selected"}</p><small>Repository changes are not assumed to belong to this task.</small></section>
       {commitMode && selectedCommit && <section className="review-side-section"><span className="subheading">COMMIT</span><p className="task-context">{selectedCommit.subject}</p><small>{selectedCommit.author} · {new Date(selectedCommit.timestamp * 1000).toLocaleString()}</small><code className="side-file-path">{selectedCommit.id}</code></section>}
       {file && <section className="review-side-section"><span className="subheading">FILE</span><code className="side-file-path">{file.path}</code><div className="file-meta"><span>Status</span><strong>{file.git_status || (file.changed ? "Modified" : "Unchanged")}</strong>{file.size !== undefined && <><span>Size</span><strong>{file.size.toLocaleString()} bytes</strong></>}{file.old_path && <><span>Renamed from</span><strong>{file.old_path}</strong></>}</div>{!commitMode && currentChange && <div className="review-stage-actions">{unstaged && <button onClick={() => void stage(file.path, true)}>Stage file</button>}{staged && <button onClick={() => void stage(file.path, false)}>Unstage file</button>}</div>}{stageError && <p className="file-tree-error" role="alert">{stageError}</p>}</section>}
+      <ReviewFindings key={props.taskId ?? ""} taskId={props.taskId} activeRunId={props.activeRunId} filePath={file?.path} />
       {!commitMode && file?.changed && <section className="review-side-section"><span className="subheading">PROVENANCE</span><p className="muted">{props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path) ? `Changed during ${props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path)?.agent ?? "agent"} run ${(props.events.find((event) => event.type === "file.changed" && event.content.trim() === file.path)?.runId ?? "").slice(0, 8)}` : "Attribution unknown for this repository change."}</p></section>}
       <section className="review-side-section"><div className="side-section-heading"><span className="subheading">VERIFICATION</span></div><VerificationPanel run={props.verification} running={props.verificationRunning} onVerify={props.onVerify} /></section>
       <details className="review-git-details"><summary>Git operations</summary><GitPanel changes={props.gitChanges} status={props.gitStatus} onChanged={props.onGitChanged} showFiles={false} /></details>

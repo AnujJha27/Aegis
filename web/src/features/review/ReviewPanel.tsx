@@ -4,7 +4,7 @@ import { GraphView } from "./GraphView";
 import { HandoffPanel } from "./HandoffPanel";
 import { ProvenancePanel } from "./ProvenancePanel";
 
-type Props = { view: "review" | "graphs" | "activity"; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; openFilePath?: string; onOpenFile: (path: string) => void };
+type Props = { view: "review" | "graphs" | "activity"; taskId?: string; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; openFilePath?: string; onOpenFile: (path: string) => void };
 
 export function ReviewPanel(props: Props) {
   if (props.view === "graphs") return <section className="review-content"><div className="drawer-title"><span>Graphs</span><small>Task context map</small></div><GraphView graph={props.graph} /></section>;
@@ -16,5 +16,5 @@ export function ReviewPanel(props: Props) {
     <ProvenancePanel records={props.provenance} />
     <details className="activity-handoff"><summary>Handoff context</summary><HandoffPanel context={props.handoff} /></details>
   </section>;
-  return <CodeWorkspace taskPrompt={props.taskPrompt} events={props.events} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} verificationRunning={props.verificationRunning} onVerify={props.onVerify} handoff={props.handoff} openFilePath={props.openFilePath} />;
+  return <CodeWorkspace taskId={props.taskId} activeRunId={props.activeRunId} taskPrompt={props.taskPrompt} events={props.events} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} verificationRunning={props.verificationRunning} onVerify={props.onVerify} handoff={props.handoff} openFilePath={props.openFilePath} />;
 }
