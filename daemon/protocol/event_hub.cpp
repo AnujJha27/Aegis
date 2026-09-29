@@ -47,12 +47,16 @@ void EventHub::publish(const AgentEvent &event) {
             }
             subscription->events.push_back(std::move(marker));
             subscription->queuedBytes += markerBytes;
+            subscription->highWaterEvents = std::max(subscription->highWaterEvents, subscription->events.size());
+            subscription->highWaterBytes = std::max(subscription->highWaterBytes, subscription->queuedBytes);
             subscription->closed = true;
             subscription->condition.notify_one();
             return;
         }
         subscription->events.push_back(event);
         subscription->queuedBytes += bytes;
+        subscription->highWaterEvents = std::max(subscription->highWaterEvents, subscription->events.size());
+        subscription->highWaterBytes = std::max(subscription->highWaterBytes, subscription->queuedBytes);
         subscription->condition.notify_one();
     };
     std::erase_if(subscribers_, [&](const auto &weak) {
@@ -71,6 +75,12 @@ bool EventHub::wait(const Subscription &subscription, AgentEvent &event, std::ch
     subscription->queuedBytes -= eventBytes(event);
     subscription->events.pop_front();
     return true;
+}
+
+EventHub::HighWater EventHub::highWater(const Subscription &subscription) const {
+    if (!subscription) return {};
+    std::lock_guard lock(subscription->mutex);
+    return {subscription->highWaterEvents, subscription->highWaterBytes};
 }
 
 }

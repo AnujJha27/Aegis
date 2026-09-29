@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <poll.h>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
@@ -171,6 +172,20 @@ bool hasPath(const Json &entries, const std::string &path) {
     return std::any_of(entries.begin(), entries.end(), [&](const auto &entry) { return entry.at("path") == path; });
 }
 
+std::string processStartTime(pid_t pid) {
+    std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (!std::getline(stat, line)) return {};
+    const auto commandEnd = line.rfind(')');
+    if (commandEnd == std::string::npos) return {};
+    std::istringstream fields(line.substr(commandEnd + 2));
+    std::string field;
+    for (int index = 0; index <= 19; ++index) {
+        if (!(fields >> field)) return {};
+    }
+    return field;
+}
+
 }
 
 int main(int argc, char **argv) {
@@ -217,6 +232,7 @@ int main(int argc, char **argv) {
     const auto taskId = created.body.at("id").get<std::string>();
     asio::io_context eventIo;
     auto events = eventSocket(daemon.port(), eventIo);
+    auto delayedEvents = eventSocket(daemon.port(), eventIo);
     const auto started = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
     assert(started.status == http::status::created);
     const auto runId = started.body.at("id").get<std::string>();
@@ -247,6 +263,7 @@ int main(int argc, char **argv) {
     assert(staged.at("modified").at("content") == "int value = 1;\n");
     post(daemon.port(), "/api/runs/" + runId + "/messages", {{"message", "edit staged"}}, http::status::accepted);
     assert(nextEvent(events, "agent.message.completed").at("content") == "synthetic response");
+    assert(nextEvent(delayedEvents, "turn.completed").at("run_id") == runId);
     const auto unstaged = get(daemon.port(), "/api/files/compare?path=modify.cpp&base=index&target=worktree");
     assert(unstaged.at("original").at("content") == "int value = 1;\n");
     assert(unstaged.at("modified").at("content") == "int value = 2;\n");
@@ -322,10 +339,13 @@ int main(int argc, char **argv) {
     pid_t childPid = -1;
     childPidFile >> childPid;
     assert(childPid > 0);
+    const auto childStartTime = processStartTime(childPid);
+    assert(!childStartTime.empty());
     boost::system::error_code ignored;
     events.next_layer().close(ignored);
+    delayedEvents.next_layer().close(ignored);
     daemon.stop();
-    assert(kill(childPid, 0) != 0);
+    assert(processStartTime(childPid) != childStartTime);
 
     Daemon restarted(daemonExecutable, fixture.root());
     assert(get(restarted.port(), "/api/tasks").at(0).at("id") == taskId);

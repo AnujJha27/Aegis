@@ -119,7 +119,7 @@ add_test(NAME daemon_e2e_test COMMAND daemon_e2e_test $<TARGET_FILE:aegis_daemon
 set_tests_properties(daemon_e2e_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 90)
 
 add_executable(aegis_perf_bench tests/daemon_perf_bench.cpp)
-target_link_libraries(aegis_perf_bench PRIVATE aegis_daemon_services)
+target_link_libraries(aegis_perf_bench PRIVATE aegis_daemon_api)
 
 add_test(NAME aegis_launcher_help COMMAND aegis --help)
 add_test(NAME aegis_launcher_version COMMAND aegis --version)

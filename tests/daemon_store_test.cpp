@@ -200,6 +200,9 @@ int main() {
     }
     assert(sawResync);
     assert(slowEvents <= aegis::daemon::EventHub::maxQueuedEvents);
+    const auto eventHighWater = boundedHub.highWater(slow);
+    assert(eventHighWater.events == aegis::daemon::EventHub::maxQueuedEvents);
+    assert(eventHighWater.bytes <= aegis::daemon::EventHub::maxQueuedBytes);
     assert(!boundedHub.wait(slow, event, std::chrono::milliseconds(1)));
     boundedHub.unsubscribe(slow);
     boundedHub.unsubscribe(fast);
@@ -209,6 +212,9 @@ int main() {
     const std::string largeEvent(1024 * 1024, 'x');
     for (int index = 0; index < 5; ++index)
         byteBoundedHub.publish({"large-" + std::to_string(index), "task", "run", "user.message", "codex", largeEvent, index});
+    const auto byteHighWater = byteBoundedHub.highWater(byteSlow);
+    assert(byteHighWater.events < aegis::daemon::EventHub::maxQueuedEvents);
+    assert(byteHighWater.bytes <= aegis::daemon::EventHub::maxQueuedBytes);
     sawResync = false;
     while (byteBoundedHub.wait(byteSlow, event, std::chrono::milliseconds(1))) {
         if (event.type == "stream.resync_required") { sawResync = true; break; }

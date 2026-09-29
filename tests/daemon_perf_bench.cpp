@@ -1,5 +1,8 @@
 #include "daemon/process/process.h"
 #include "daemon/agents/pty_adapter.h"
+#include "daemon/agents/manager.h"
+#include "daemon/api/routes.h"
+#include "daemon/protocol/event_hub.h"
 #include "daemon/repository/files.h"
 #include "daemon/repository/git.h"
 #include "daemon/session/store.h"
@@ -16,6 +19,8 @@
 #include <vector>
 
 #include <sqlite3.h>
+#include <nlohmann/json.hpp>
+#include <sys/resource.h>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -41,12 +46,33 @@ long long peakRssKiB() {
     }
     return 0;
 }
+
+long long residentRssKiB() {
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (!line.starts_with("VmRSS:")) continue;
+        std::istringstream value(line.substr(6));
+        long long kib = 0;
+        value >> kib;
+        return kib;
+    }
+    return 0;
+}
+
+long long cpuMs() {
+    rusage usage{};
+    getrusage(RUSAGE_SELF, &usage);
+    return (usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000LL +
+        (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1000LL;
+}
 }
 
 int main() {
     const auto root = std::filesystem::temp_directory_path() /
         ("aegis-perf-" + std::to_string(Clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
+    const auto cpuStarted = cpuMs();
     const auto cleanup = [&] { std::error_code ignored; std::filesystem::remove_all(root, ignored); };
     try {
         const auto dbPath = root / "events.sqlite";
@@ -90,12 +116,73 @@ int main() {
                 if (events.size() != 20) throw std::runtime_error("latest history returned an unexpected event count");
                 recentMs.push_back(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - query).count());
             }
+            aegis::daemon::EventHub requestEvents;
+            aegis::daemon::api::Context context{&store, &requestEvents, nullptr, nullptr, nullptr, root, {}};
+            std::vector<long long> verifyMs;
+            std::vector<long long> handoffMs;
+            for (int cycle = 0; cycle < 50; ++cycle) {
+                const auto cycleTask = store.createTask("synthetic soak cycle " + std::to_string(cycle), root.string());
+                const auto cycleRun = store.startRun(cycleTask.id, "synthetic");
+                store.updateRunStatus(cycleRun.id, "running");
+                for (int event = 0; event < 20; ++event)
+                    store.appendEvent({"soak-" + std::to_string(cycle) + "-" + std::to_string(event), cycleTask.id, cycleRun.id,
+                        "agent.message.completed", "synthetic", "burst output", event});
+                store.updateRunStatus(cycleRun.id, "completed");
+                store.createFinding(cycleTask.id, cycleRun.id, "synthetic.cpp", 1, 1, "Synthetic soak finding.");
+
+                aegis::daemon::api::Request verify{boost::beast::http::verb::post, "/api/verify", 11};
+                verify.set(boost::beast::http::field::content_type, "application/json");
+                verify.body() = nlohmann::json{{"task_id", cycleTask.id}, {"run_id", cycleRun.id},
+                    {"command", {"/usr/bin/printf", "soak-evidence"}}}.dump();
+                verify.prepare_payload();
+                auto startedAt = Clock::now();
+                const auto verified = aegis::daemon::api::handle(verify, context);
+                verifyMs.push_back(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - startedAt).count());
+                if (verified.result() != boost::beast::http::status::ok || nlohmann::json::parse(verified.body()).at("output") != "soak-evidence")
+                    throw std::runtime_error("verification evidence was not retained");
+
+                aegis::daemon::api::Request handoff{boost::beast::http::verb::get, "/api/tasks/" + cycleTask.id + "/handoff", 11};
+                startedAt = Clock::now();
+                const auto handedOff = aegis::daemon::api::handle(handoff, context);
+                handoffMs.push_back(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - startedAt).count());
+                const auto contextJson = nlohmann::json::parse(handedOff.body());
+                if (handedOff.result() != boost::beast::http::status::ok || contextJson.at("verification").at("output") != "soak-evidence" || contextJson.at("findings").empty())
+                    throw std::runtime_error("handoff history omitted verification or findings");
+            }
             std::cout << "events=100000 transactional_fixture_seed_ms=" << insertMs
                       << " seed_per_s=" << (100000000LL / std::max(1LL, insertMs))
                       << " latest20_p50_us=" << percentile(recentMs, .50)
                       << " latest20_p95_us=" << percentile(recentMs, .95)
+                      << " soak_cycles=50 verify_p50_us=" << percentile(verifyMs, .50)
+                      << " verify_p95_us=" << percentile(verifyMs, .95)
+                      << " handoff_p50_us=" << percentile(handoffMs, .50)
+                      << " handoff_p95_us=" << percentile(handoffMs, .95)
                       << " sqlite_bytes=" << std::filesystem::file_size(dbPath) << '\n';
         }
+
+        aegis::daemon::EventHub hub;
+        const auto slow = hub.subscribe();
+        const auto fast = hub.subscribe();
+        aegis::daemon::AgentEvent delivered;
+        const std::string burst(8192, 'x');
+        std::size_t fastEvents = 0;
+        for (std::size_t index = 0; index < 700; ++index) {
+            hub.publish({"queue-" + std::to_string(index), "task", "run", "agent.message.completed", "synthetic", burst, static_cast<std::int64_t>(index)});
+            if (hub.wait(fast, delivered, std::chrono::milliseconds(1))) ++fastEvents;
+        }
+        std::size_t slowEvents = 0;
+        bool resync = false;
+        while (hub.wait(slow, delivered, std::chrono::milliseconds(1))) {
+            ++slowEvents;
+            if (delivered.type == "stream.resync_required") { resync = true; break; }
+        }
+        const auto queueHighWater = hub.highWater(slow);
+        if (!resync || fastEvents != 700 || queueHighWater.events > aegis::daemon::EventHub::maxQueuedEvents ||
+            queueHighWater.bytes > aegis::daemon::EventHub::maxQueuedBytes)
+            throw std::runtime_error("bounded slow-subscriber workload did not resynchronize");
+        std::cout << "event_subscribers=2 slow_subscriber_events_before_resync=" << slowEvents
+                  << " queue_high_water_events=" << queueHighWater.events
+                  << " queue_high_water_bytes=" << queueHighWater.bytes << '\n';
 
         std::mutex ptyMutex;
         std::condition_variable ptyChanged;
@@ -122,6 +209,28 @@ int main() {
         std::filesystem::create_directories(repository);
         const auto init = aegis::daemon::process::run({"git", "init", "-q"}, repository);
         if (init.exitCode != 0) throw std::runtime_error("git init failed: " + init.output);
+        {
+            aegis::daemon::Store store(dbPath);
+            aegis::daemon::EventHub events;
+            aegis::daemon::agents::Manager manager(repository, store, events);
+            std::vector<long long> cycleMs;
+            for (int cycle = 0; cycle < 8; ++cycle) {
+                const auto started = Clock::now();
+                const auto task = store.createTask("agent cycle " + std::to_string(cycle), repository.string());
+                const auto run = manager.launch(task.id, "shell");
+                if (!run || manager.send(run->id, "sleep 30") != aegis::daemon::agents::SendResult::accepted)
+                    throw std::runtime_error("synthetic agent cycle failed to start");
+                manager.interrupt(run->id);
+                manager.terminate(run->id);
+                const auto finished = store.run(run->id);
+                if (!finished || (finished->status != "interrupted" && finished->status != "terminated"))
+                    throw std::runtime_error("synthetic agent cycle did not reach a terminal state");
+                cycleMs.push_back(millis(started));
+            }
+            if (manager.hasRunningRuns()) throw std::runtime_error("agent cycles left a run active");
+            std::cout << "agent_cycles=8 interrupt_terminate_p50_ms=" << percentile(cycleMs, .50)
+                      << " interrupt_terminate_p95_ms=" << percentile(cycleMs, .95) << '\n';
+        }
         for (int index = 0; index < 10000; ++index) {
             const auto file = repository / ("dir-" + std::to_string(index / 100)) / ("file-" + std::to_string(index) + ".txt");
             std::filesystem::create_directories(file.parent_path());
@@ -140,10 +249,21 @@ int main() {
         const auto compareMs = millis(started);
         if (changes.size() != 10000 || listing.entries.empty() || !comparison.modified.exists)
             throw std::runtime_error("10k-file repository fixture returned incomplete data");
+        std::vector<long long> refreshMs;
+        for (int sample = 0; sample < 10; ++sample) {
+            const auto refresh = Clock::now();
+            if (git.changes(std::nullopt, true).size() != 10000) throw std::runtime_error("repository refresh lost fixture files");
+            refreshMs.push_back(millis(refresh));
+        }
         std::cout << "repo_files=10000 changes_ms=" << changesMs << " root_listing_ms=" << listingMs
-                  << " selected_compare_ms=" << compareMs << " listed_entries=" << listing.entries.size()
+                  << " selected_compare_ms=" << compareMs << " refresh10_p50_ms=" << percentile(refreshMs, .50)
+                  << " refresh10_p95_ms=" << percentile(refreshMs, .95) << " listed_entries=" << listing.entries.size()
                   << " benchmark_peak_rss_kib=" << peakRssKiB() << '\n';
+        const auto sqliteBytesAfterCycles = std::filesystem::file_size(dbPath);
         cleanup();
+        std::cout << "sqlite_bytes_after_cycles=" << sqliteBytesAfterCycles
+                  << " cpu_time_ms=" << cpuMs() - cpuStarted << " peak_rss_kib=" << peakRssKiB()
+                  << " post_cleanup_rss_kib=" << residentRssKiB() << " temp_files_removed=" << !std::filesystem::exists(root) << '\n';
     } catch (const std::exception &error) {
         cleanup();
         std::cerr << "benchmark failed: " << error.what() << '\n';

@@ -22,3 +22,23 @@ The read-only Monaco bundle keeps only the editor and JSON workers. TypeScript, 
 The shared Git snapshot reduces `/api/git/status` work from the prior duplicated pattern (status/numstat for both `state()` and `changes()`, plus independent current-branch and clean checks) to one status scan, one numstat scan, and one branch-list command. Calls within 250 ms reuse the versioned snapshot; explicit refresh and Aegis mutations invalidate it. The HTTP accept loop's idle poll changed from 5 ms to 250 ms (about 200 to 4 poll wakeups per second by interval, not a measured CPU benchmark).
 
 Not measured here: daemon idle RSS/CPU with a browser attached, slow-browser socket buffering, browser frame latency, long-session memory plateau, or before/after sanitizer memory. Those require a stable GUI-capable host and are not represented by synthetic fixture numbers above. No WAL/synchronous durability change or asynchronous SQLite writer was made; semantic writes remain synchronous and durable before publication.
+
+## Synthetic soak run
+
+On 2026-09-30, the expanded `aegis_perf_bench` ran 50 task/run/event cycles with verification evidence and handoff retrieval, 8 shell-agent interrupt/terminate cycles, a 128 KiB PTY burst, a 10,000-file repository with 10 forced refreshes, and two EventHub subscribers (one deliberately left unread until it hit the configured queue bound). It also seeded 100,000 events transactionally for the existing history-query measurement. This is a repeatable component soak, not a whole-application performance claim.
+
+| Measurement | Result |
+| --- | ---: |
+| CPU time | 3,748 ms |
+| Peak / post-cleanup RSS | 16,104 / 16,080 KiB |
+| SQLite size after cycles | 19,656,704 bytes |
+| Latest 20 events, p50 / p95 | 51 / 113 μs |
+| Verification request, p50 / p95 | 15,701 / 20,109 μs |
+| Handoff retrieval, p50 / p95 | 500 / 761 μs |
+| EventHub slow subscriber high-water | 502 events / 4,192,533 bytes; then `stream.resync_required` |
+| PTY output | 131,072 bytes in 2 chunks / 9 ms |
+| Agent interrupt/terminate cycles, p50 / p95 | 389 / 395 ms |
+| 10,000-file status / root listing / selected comparison | 55 / 45 / 21 ms |
+| Forced repository refresh, 10 samples p50 / p95 | 52 / 54 ms |
+
+The daemon end-to-end test separately uses multiple real loopback WebSocket clients, leaves one event reader delayed during task output, reconnects the PTY output stream, and confirms persisted replay. A controlled browser/slow-socket soak was not run because no browser automation runtime is available in this workspace. RSS after cleanup stayed near peak in this one process run; this alone does not establish a leak or a long-session plateau.
