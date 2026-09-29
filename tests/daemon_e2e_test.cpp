@@ -53,7 +53,7 @@ HttpResult request(std::uint16_t port, http::verb method, const std::string &tar
 
 class Daemon final {
 public:
-    Daemon(const std::string &executable, const std::filesystem::path &repository) : repository_(repository) {
+    Daemon(const std::string &executable, const std::filesystem::path &repository, bool managed = false) : repository_(repository) {
         int output[2];
         if (pipe(output) != 0) throw std::runtime_error("could not create daemon output pipe");
         pid_ = fork();
@@ -61,7 +61,10 @@ public:
             close(output[0]);
             dup2(output[1], STDOUT_FILENO);
             close(output[1]);
-            execl(executable.c_str(), executable.c_str(), "--repo", repository.c_str(), "--port", "0", nullptr);
+            if (managed)
+                execl(executable.c_str(), executable.c_str(), "--repo", repository.c_str(), "--port", "0", "--managed", nullptr);
+            else
+                execl(executable.c_str(), executable.c_str(), "--repo", repository.c_str(), "--port", "0", nullptr);
             _exit(127);
         }
         close(output[1]);
@@ -89,6 +92,17 @@ public:
 
     ~Daemon() { stop(); }
     std::uint16_t port() const { return port_; }
+
+    bool waitForExit(std::chrono::milliseconds timeout) {
+        if (pid_ <= 0) return true;
+        int status = 0;
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (waitpid(pid_, &status, WNOHANG) == pid_) { pid_ = -1; return true; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return false;
+    }
 
     void stop() {
         if (pid_ <= 0) return;
@@ -377,4 +391,10 @@ int main(int argc, char **argv) {
         return event.at("run_id") == retainedRunId && event.at("type") == "agent.message.completed";
     }));
     assert(get(restarted.port(), "/api/tasks/" + taskId + "/findings").at(0).at("status") == "resolved");
+
+    Daemon managed(daemonExecutable, fixture.root(), true);
+    asio::io_context managedIo;
+    auto managedEvents = eventSocket(managed.port(), managedIo);
+    managedEvents.next_layer().close(ignored);
+    assert(managed.waitForExit(std::chrono::seconds(5)));
 }

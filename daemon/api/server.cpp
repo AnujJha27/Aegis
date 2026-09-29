@@ -186,9 +186,19 @@ void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> 
         std::atomic_size_t &count;
         ~ClientCount() { count.fetch_sub(1); }
     } clientCount{eventClients_};
+    std::atomic_bool peerClosed = false;
+    std::thread reader([&] {
+        boost::beast::flat_buffer incoming;
+        boost::system::error_code readError;
+        while (running_ && !readError) {
+            websocket.read(incoming, readError);
+            incoming.consume(incoming.size());
+        }
+        peerClosed = true;
+    });
     const auto subscription = context_.events->subscribe();
     auto nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-    while (running_) {
+    while (running_ && !peerClosed) {
         AgentEvent event;
         if (context_.events->wait(subscription, event, std::chrono::seconds(1))) {
             websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
@@ -201,8 +211,9 @@ void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> 
             nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         }
     }
+    ::shutdown(socket->native_handle(), SHUT_RDWR);
+    if (reader.joinable()) reader.join();
     context_.events->unsubscribe(subscription);
-    websocket.close(boost::beast::websocket::close_code::normal, error);
 }
 
 void Server::servePtyWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request) {

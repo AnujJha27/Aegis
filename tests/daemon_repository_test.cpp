@@ -20,6 +20,12 @@ int main() {
     fixture.write("tracked-binary.dat", std::string("a\0b", 3));
     fixture.commit("base");
 
+    const auto linkedPath = std::filesystem::path(fixture.root().string() + "-linked-worktree");
+    fixture.git({"worktree", "add", "--quiet", "--detach", linkedPath.string()});
+    const aegis::daemon::repository::GitRepository linkedRepository(linkedPath);
+    assert(!linkedRepository.state().branch.empty());
+    fixture.git({"worktree", "remove", "--force", linkedPath.string()});
+
     fixture.write("staged.cpp", "int staged = 1;\n");
     fixture.git({"add", "--", "staged.cpp"});
     fixture.write("mixed.cpp", "int mixed = 1;\n");

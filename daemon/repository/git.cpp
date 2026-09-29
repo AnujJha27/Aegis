@@ -44,7 +44,10 @@ bool validGitEntry(const std::filesystem::path &root) {
     std::getline(input, line);
     constexpr std::string_view prefix = "gitdir:";
     if (!line.starts_with(prefix)) return false;
-    auto target = std::filesystem::path(line.substr(prefix.size()));
+    auto targetText = line.substr(prefix.size());
+    while (!targetText.empty() && std::isspace(static_cast<unsigned char>(targetText.front()))) targetText.erase(targetText.begin());
+    while (!targetText.empty() && std::isspace(static_cast<unsigned char>(targetText.back()))) targetText.pop_back();
+    auto target = std::filesystem::path(targetText);
     if (target.is_relative()) target = root / target;
     return gitDirectory(target.lexically_normal());
 }
