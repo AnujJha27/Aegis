@@ -8,6 +8,8 @@ export function useReviewData(taskId?: string) {
   const [provenance, setProvenance] = useState<ProvenanceRecord[]>([]);
   const [error, setError] = useState("");
   const refreshSequence = useRef(0);
+  const verificationSequence = useRef(0);
+  const verifyRequestSequence = useRef(0);
   const currentTaskId = useRef(taskId);
   currentTaskId.current = taskId;
 
@@ -15,6 +17,7 @@ export function useReviewData(taskId?: string) {
     if (!taskId) return;
     const requestedTaskId = taskId;
     const sequence = ++refreshSequence.current;
+    const currentVerificationSequence = verificationSequence.current;
     try {
       const [loadedHandoff, loadedGraph, loadedProvenance, verifications] = await Promise.all([
         api.handoff(requestedTaskId), api.graph(requestedTaskId), api.provenance(requestedTaskId), api.verifications(requestedTaskId),
@@ -23,7 +26,7 @@ export function useReviewData(taskId?: string) {
       setHandoff(loadedHandoff);
       setGraph(loadedGraph);
       setProvenance(loadedProvenance.records);
-      setVerification(verifications[0]);
+      if (currentVerificationSequence === verificationSequence.current) setVerification(verifications[0]);
       setError("");
     } catch (reason) {
       if (sequence === refreshSequence.current && requestedTaskId === currentTaskId.current)
@@ -34,6 +37,8 @@ export function useReviewData(taskId?: string) {
 
   useEffect(() => {
     ++refreshSequence.current;
+    ++verificationSequence.current;
+    ++verifyRequestSequence.current;
     setVerification(undefined);
     setHandoff(undefined);
     setGraph(undefined);
@@ -45,8 +50,12 @@ export function useReviewData(taskId?: string) {
   async function verify(runId?: string) {
     if (!taskId) return undefined;
     const requestedTaskId = taskId;
+    const requestSequence = ++verifyRequestSequence.current;
     const result = await api.verify(requestedTaskId, ["ctest", "--test-dir", "build"], runId);
-    if (requestedTaskId === currentTaskId.current) setVerification(result);
+    if (requestedTaskId === currentTaskId.current && requestSequence === verifyRequestSequence.current) {
+      ++verificationSequence.current;
+      setVerification(result);
+    }
     return result;
   }
 

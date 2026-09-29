@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, type HandoffContext } from "./api";
+import { api, type HandoffContext, type VerificationRun } from "./api";
 import { useReviewData } from "./useReviewData";
 
 function deferred<T>() {
@@ -39,5 +39,22 @@ describe("useReviewData task ownership", () => {
     await act(async () => { old.resolve(previous); await old.promise; });
 
     expect(result.current.handoff?.task_id).toBe("task-new");
+  });
+
+  it("does not let an older verification-history load erase a newly completed run", async () => {
+    const oldHistory = deferred<VerificationRun[]>();
+    vi.spyOn(api, "handoff").mockResolvedValue({ task_id: "task-1", prompt: "check", recent_events: [], diff: "", changed_files: [], changed_files_truncated: false, verification: null, findings: [] });
+    vi.spyOn(api, "graph").mockResolvedValue({ task_id: "task-1", nodes: [], edges: [] });
+    vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-1", records: [] });
+    vi.spyOn(api, "verifications").mockReturnValue(oldHistory.promise);
+    const latest: VerificationRun = { id: "verify-new", taskId: "task-1", runId: null, command: ["ctest"], exitCode: 0, output: "passed", startedAt: 10, finishedAt: 12 };
+    vi.spyOn(api, "verify").mockResolvedValue(latest);
+    const { result } = renderHook(() => useReviewData("task-1"));
+
+    await act(async () => { await result.current.verify(); });
+    expect(result.current.verification).toEqual(latest);
+
+    await act(async () => { oldHistory.resolve([]); await oldHistory.promise; });
+    expect(result.current.verification).toEqual(latest);
   });
 });
