@@ -70,7 +70,7 @@ Provider thread IDs are stored on the run and do not become display events. The 
 
 ## Handoff bounds
 
-`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events queried with SQL `LIMIT` (each content field capped at 4,000 bytes), a diff captured at no more than 24,000 bytes, up to 100 paths from Git status (including untracked and deleted files, with a truncation indicator), the latest verification with output capped at 8,000 bytes, and up to 20 review findings with each message capped at 2,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection.
+`GET /api/tasks/:id/handoff` includes the original prompt, up to 20 recent events queried with SQL `LIMIT` (each content field capped at 4,000 bytes), up to 16,000 bytes of tracked Git patch plus safely-read untracked text snippets within a 24,000-byte total diff cap (binary and files over 1 MiB are represented by omission markers), up to 100 paths from Git status (including untracked and deleted files, with a truncation indicator), the latest verification with output capped at 8,000 bytes, and up to 20 review findings with each message capped at 2,000 bytes. The prompt is capped at 8,000 bytes. This is a reviewable context preview, not an automatic prompt injection.
 
 ## HTTP and WebSocket API
 

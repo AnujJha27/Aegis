@@ -139,8 +139,14 @@ int main() {
     auto handoffJson = nlohmann::json::parse(handoffResponse.body());
     auto handoffFilesJson = handoffJson.at("changed_files").get<std::vector<std::string>>();
     assert(!handoffJson.at("changed_files_truncated").get<bool>());
+    assert(handoffJson.at("diff").get<std::string>().find("new\n") != std::string::npos);
     for (const auto *path : {"modified.cpp", "deleted.cpp", "untracked.cpp"})
         assert(std::find(handoffFilesJson.begin(), handoffFilesJson.end(), path) != handoffFilesJson.end());
+    handoffFixture.write("zz-large.txt", std::string(30000, 'x'));
+    handoffJson = nlohmann::json::parse(request(handoffContext, http::verb::get,
+        "/api/tasks/" + handoffTask.id + "/handoff").body());
+    assert(handoffJson.at("diff").get<std::string>().size() <= 24000);
+    assert(handoffJson.at("diff").get<std::string>().find("handoff content truncated") != std::string::npos);
     for (int index = 0; index < 105; ++index)
         handoffFixture.write("extra-" + std::to_string(index) + ".txt", "bounded\n");
     handoffJson = nlohmann::json::parse(request(handoffContext, http::verb::get,
@@ -148,6 +154,7 @@ int main() {
     handoffFilesJson = handoffJson.at("changed_files").get<std::vector<std::string>>();
     assert(handoffFilesJson.size() == 100);
     assert(handoffJson.at("changed_files_truncated").get<bool>());
+    assert(handoffJson.at("diff").get<std::string>().size() <= 24000);
 
     const auto created = request(context, http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);

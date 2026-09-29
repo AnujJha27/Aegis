@@ -2,6 +2,45 @@
 #include "daemon/api/route_helpers.h"
 
 namespace aegis::daemon::api::routes {
+namespace {
+
+constexpr std::size_t handoffDiffLimit = 24000;
+constexpr std::size_t handoffPatchLimit = 16000;
+
+void appendUntrackedFiles(std::string &diff, const std::vector<GitChange> &changes,
+                          const repository::Files *files) {
+    if (!files) return;
+    constexpr std::string_view truncatedMarker = "\n...[handoff content truncated]\n";
+    for (const auto &change : changes) {
+        if (change.indexStatus != "?" && change.worktreeStatus != "?") continue;
+        if (diff.size() >= handoffDiffLimit) break;
+        try {
+            const auto file = files->read(change.path, repository::FileSource::worktree);
+            if (!file.exists) continue;
+            const auto header = "\n\n--- Untracked file " + nlohmann::json(change.path).dump() + " ---\n";
+            const auto body = file.binary ? std::string("[binary content omitted]\n")
+                : file.truncated ? std::string("[file exceeds 1 MiB; content omitted]\n") : file.content;
+            const auto remaining = handoffDiffLimit - diff.size();
+            if (header.size() >= remaining) break;
+            diff += header;
+            const auto bodyLimit = handoffDiffLimit - diff.size();
+            if (body.size() > bodyLimit) {
+                if (bodyLimit > truncatedMarker.size()) {
+                    diff.append(body, 0, bodyLimit - truncatedMarker.size());
+                    diff += truncatedMarker;
+                } else {
+                    diff.append(truncatedMarker, 0, bodyLimit);
+                }
+                break;
+            }
+            diff += body;
+        } catch (const std::exception &) {
+            // An unsafe or unreadable worktree entry does not invalidate the handoff.
+        }
+    }
+}
+
+}
 
 std::optional<Response> review(const Request &request, const Context &context) {
     if (request.method() != boost::beast::http::verb::get) return std::nullopt;
@@ -11,7 +50,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
         auto events = context.store->events(*taskId, 20);
         for (auto &event : events) if (event.content.size() > 4000) event.content.resize(4000);
-        auto diff = context.git ? context.git->diff(24000) : std::string{};
+        auto diff = context.git ? context.git->diff(handoffPatchLimit) : std::string{};
         auto verificationHistory = context.store->verifications(*taskId, 1);
         std::optional<VerificationRun> verification;
         if (!verificationHistory.empty()) {
@@ -25,6 +64,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         auto changes = context.git ? context.git->changes(101) : std::vector<GitChange>{};
         const bool changedFilesTruncated = changes.size() > 100;
         if (changedFilesTruncated) changes.resize(100);
+        appendUntrackedFiles(diff, changes, context.files);
         std::vector<std::string> changedFiles;
         changedFiles.reserve(changes.size());
         for (auto &change : changes) changedFiles.push_back(std::move(change.path));
