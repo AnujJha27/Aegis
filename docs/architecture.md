@@ -64,6 +64,7 @@ Events describe observable history; persisted run rows remain the source of run 
 | `agent.message.delta` | Interactive PTY output bytes |
 | `command.started`, `command.completed` | Structured command activity when available |
 | `file.changed` | Git path changed relative to the run's starting snapshot |
+| `verification.started`, `verification.completed` | Local check lifecycle; completion contains only the exit code, never command arguments or output |
 
 Provider thread IDs are stored on the run and do not become display events. The event stream is for timeline/history, not for reconstructing all current domain state.
 

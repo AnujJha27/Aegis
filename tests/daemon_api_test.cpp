@@ -185,10 +185,18 @@ int main() {
     const auto noTaskVerification = request(context, http::verb::post, "/api/verify", R"({"command":["true"]})");
     assert(noTaskVerification.result() == http::status::bad_request);
 
+    const auto verificationSubscription = events.subscribe();
     const auto verification = request(context, http::verb::post, "/api/verify",
         nlohmann::json{{"task_id", taskId}, {"command", {"/usr/bin/printf", "verification-ok"}}}.dump());
     assert(verification.result() == http::status::ok);
     assert(nlohmann::json::parse(verification.body()).at("command").at(1) == "verification-ok");
+    aegis::daemon::AgentEvent verificationStarted;
+    aegis::daemon::AgentEvent verificationCompleted;
+    assert(events.wait(verificationSubscription, verificationStarted, std::chrono::milliseconds(100)));
+    assert(events.wait(verificationSubscription, verificationCompleted, std::chrono::milliseconds(100)));
+    assert(verificationStarted.type == "verification.started" && verificationStarted.taskId == taskId);
+    assert(verificationCompleted.type == "verification.completed" && verificationCompleted.content == "exit_code=0");
+    events.unsubscribe(verificationSubscription);
     const auto verificationHistory = request(context, http::verb::get, "/api/tasks/" + taskId + "/verifications");
     assert(verificationHistory.result() == http::status::ok);
     assert(nlohmann::json::parse(verificationHistory.body()).size() == 1);
@@ -239,7 +247,11 @@ int main() {
     const auto deleted = request(context, http::verb::delete_, "/api/runs/" + run.id);
     assert(deleted.result() == http::status::no_content);
     assert(store.runs(taskId).empty());
-    assert(store.events(taskId).empty());
+    const auto remainingEvents = store.events(taskId);
+    assert(remainingEvents.size() == 2);
+    assert(std::all_of(remainingEvents.begin(), remainingEvents.end(), [](const auto &event) {
+        return event.runId.empty() && event.type.starts_with("verification.");
+    }));
 
     using aegis::daemon::api::allowedWebSocketOrigin;
     using aegis::daemon::api::allowedLoopbackHost;

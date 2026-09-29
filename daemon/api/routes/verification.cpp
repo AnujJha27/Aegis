@@ -4,7 +4,34 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <utility>
+
 namespace aegis::daemon::api::routes {
+namespace {
+
+std::int64_t now() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::string nextEventId() {
+    static std::atomic<std::uint64_t> sequence{};
+    return "verification-event-" + std::to_string(now()) + "-" + std::to_string(++sequence);
+}
+
+void publishVerificationEvent(const Context &context, const std::string &taskId,
+                              const std::optional<std::string> &runId,
+                              std::string type, std::string content = {}) {
+    AgentEvent event{nextEventId(), taskId, runId.value_or(""), std::move(type), "verification", std::move(content), now()};
+    context.store->appendEvent(event);
+    context.events->publish(event);
+}
+
+}
 
 std::optional<Response> verification(const Request &request, const Context &context) {
     const auto target = std::string(request.target());
@@ -36,8 +63,10 @@ std::optional<Response> verification(const Request &request, const Context &cont
                 const auto run = context.store->run(*runId);
                 if (!run || run->taskId != taskId) return error(boost::beast::http::status::not_found, "run_not_found", "run not found for task");
             }
+            publishVerificationEvent(context, taskId, runId, "verification.started");
             auto result = aegis::daemon::verification::run(command, context.repository, taskId, runId);
             context.store->saveVerification(result);
+            publishVerificationEvent(context, taskId, runId, "verification.completed", "exit_code=" + std::to_string(result.exitCode));
             return jsonResponse(boost::beast::http::status::ok, protocol::toJson(result));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
