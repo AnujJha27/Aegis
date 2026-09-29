@@ -147,13 +147,17 @@ Json nextEvent(websocket::stream<asio::ip::tcp::socket> &socket, const std::stri
 Json nextTerminalOutput(websocket::stream<asio::ip::tcp::socket> &socket, const std::string &content) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     beast::flat_buffer buffer;
+    std::string received;
     while (std::chrono::steady_clock::now() < deadline) {
         pollfd ready{socket.next_layer().native_handle(), POLLIN, 0};
         if (poll(&ready, 1, 100) <= 0) continue;
         socket.read(buffer);
         auto event = Json::parse(beast::buffers_to_string(buffer.data()));
         buffer.consume(buffer.size());
-        if (event.value("type", std::string{}) == "terminal.output" && event.value("content", std::string{}).find(content) != std::string::npos) return event;
+        if (event.value("type", std::string{}) == "terminal.output") {
+            received += event.value("content", std::string{});
+            if (received.find(content) != std::string::npos) return event;
+        }
     }
     throw std::runtime_error("timed out waiting for terminal output " + content);
 }
@@ -172,7 +176,7 @@ bool hasPath(const Json &entries, const std::string &path) {
     return std::any_of(entries.begin(), entries.end(), [&](const auto &entry) { return entry.at("path") == path; });
 }
 
-std::string processStartTime(pid_t pid) {
+std::string processStartTime(pid_t pid, char *state = nullptr) {
     std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
     std::string line;
     if (!std::getline(stat, line)) return {};
@@ -180,7 +184,9 @@ std::string processStartTime(pid_t pid) {
     if (commandEnd == std::string::npos) return {};
     std::istringstream fields(line.substr(commandEnd + 2));
     std::string field;
-    for (int index = 0; index <= 19; ++index) {
+    if (!(fields >> field)) return {};
+    if (state) *state = field.front();
+    for (int index = 0; index <= 18; ++index) {
         if (!(fields >> field)) return {};
     }
     return field;
@@ -339,13 +345,21 @@ int main(int argc, char **argv) {
     pid_t childPid = -1;
     childPidFile >> childPid;
     assert(childPid > 0);
-    const auto childStartTime = processStartTime(childPid);
+    char childState = 0;
+    const auto childStartTime = processStartTime(childPid, &childState);
     assert(!childStartTime.empty());
+    assert(childState != 'Z');
     boost::system::error_code ignored;
     events.next_layer().close(ignored);
     delayedEvents.next_layer().close(ignored);
     daemon.stop();
-    assert(processStartTime(childPid) != childStartTime);
+    const auto childExitDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < childExitDeadline) {
+        const auto currentStartTime = processStartTime(childPid, &childState);
+        if (currentStartTime != childStartTime || childState == 'Z') break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    assert(processStartTime(childPid, &childState) != childStartTime || childState == 'Z');
 
     Daemon restarted(daemonExecutable, fixture.root());
     assert(get(restarted.port(), "/api/tasks").at(0).at("id") == taskId);
