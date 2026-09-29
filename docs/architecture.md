@@ -27,6 +27,8 @@ Task
 
 A task is the durable unit of work. Switching agents starts another run under the same task; it does not erase sibling-run history. A run is a logical adapter session, not a single prompt. Turns are represented by `turn.started`, `turn.completed`, and `turn.interrupted` events rather than by provider-specific frontend state.
 
+Task-scoped frontend snapshots are invalidated on task changes; late handoff, graph, provenance, verification, or verification-command responses cannot overwrite the currently selected task's state.
+
 Persisted run statuses are `starting`, `running`, `completed`, `failed`, `interrupted`, and `terminated`. `finished_at` is zero only while a run is active. A Codex turn may complete while its resumable Aegis run remains `running`. PTY runs normally complete when their process exits. Explicit stop uses `terminated`; process failure uses `failed`. Runs left `starting` or `running` when the daemon starts are marked `interrupted`, since their owning processes no longer exist.
 
 ## Agent adapters and process ownership
