@@ -6,6 +6,12 @@ import * as eventTransport from "./events";
 import type { EventConnection } from "./events";
 import { useAgentWorkspace } from "./useAgentWorkspace";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe("useAgentWorkspace run lifecycle", () => {
   let emit: (event: AgentEvent) => void;
   let updateConnection: (state: EventConnection, reconnected: boolean) => void;
@@ -53,6 +59,28 @@ describe("useAgentWorkspace run lifecycle", () => {
     await waitFor(() => expect(result.current.currentEvents).toContainEqual(liveEvent));
 
     await act(async () => { finishHistory([]); await Promise.resolve(); });
+
+    expect(result.current.currentEvents).toContainEqual(liveEvent);
+  });
+
+  it("ignores an older reconnect snapshot that completes after a newer one", async () => {
+    const older = deferred<AgentEvent[]>();
+    const newer = deferred<AgentEvent[]>();
+    vi.spyOn(api, "events").mockResolvedValueOnce([])
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+    const { result } = renderHook(() => useAgentWorkspace("task-1"));
+    await waitFor(() => expect(api.events).toHaveBeenCalledTimes(1));
+
+    act(() => { updateConnection("connected", true); updateConnection("connected", true); });
+    const liveEvent: AgentEvent = {
+      id: "event-live", taskId: "task-1", runId: "run-1", type: "agent.message.completed",
+      agent: "codex", content: "Latest output", timestamp: 30,
+    };
+    act(() => emit(liveEvent));
+    await waitFor(() => expect(api.events).toHaveBeenCalledTimes(3));
+    await act(async () => { newer.resolve([]); await Promise.resolve(); });
+    await act(async () => { older.resolve([]); await Promise.resolve(); });
 
     expect(result.current.currentEvents).toContainEqual(liveEvent);
   });
