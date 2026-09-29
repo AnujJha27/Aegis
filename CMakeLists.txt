@@ -112,6 +112,12 @@ add_executable(daemon_repository_test tests/daemon_repository_test.cpp)
 target_link_libraries(daemon_repository_test PRIVATE aegis_daemon_services)
 add_test(NAME daemon_repository_test COMMAND daemon_repository_test)
 
+add_executable(daemon_e2e_test tests/daemon_e2e_test.cpp)
+target_link_libraries(daemon_e2e_test PRIVATE aegis_daemon_services)
+add_dependencies(daemon_e2e_test aegis_daemon)
+add_test(NAME daemon_e2e_test COMMAND daemon_e2e_test $<TARGET_FILE:aegis_daemon>)
+set_tests_properties(daemon_e2e_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 90)
+
 add_executable(aegis_perf_bench tests/daemon_perf_bench.cpp)
 target_link_libraries(aegis_perf_bench PRIVATE aegis_daemon_services)
 
@@ -175,7 +181,7 @@ if(AEGIS_BUILD_LEGACY)
     install(TARGETS aegis_legacy RUNTIME DESTINATION bin)
 endif()
 
-set(AEGIS_QUALITY_TARGETS aegis_daemon_session aegis_daemon_services aegis_daemon_api aegis_daemon aegis daemon_store_test daemon_api_test daemon_services_test daemon_repository_test aegis_perf_bench)
+set(AEGIS_QUALITY_TARGETS aegis_daemon_session aegis_daemon_services aegis_daemon_api aegis_daemon aegis daemon_store_test daemon_api_test daemon_services_test daemon_repository_test daemon_e2e_test aegis_perf_bench)
 if(AEGIS_BUILD_LEGACY)
     list(APPEND AEGIS_QUALITY_TARGETS aegis_core aegis_analysis aegis_session aegis_terminal aegis_ui aegis_transcript aegis_legacy aegis_core_test aegis_analysis_test aegis_session_test aegis_terminal_test aegis_ui_test aegis_transcript_test)
 endif()
