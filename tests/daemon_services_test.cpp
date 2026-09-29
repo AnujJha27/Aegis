@@ -180,7 +180,7 @@ int main() {
     std::string ptyOutput;
     aegis::daemon::agents::PtyAdapter pty("shell", {"/bin/sh", "-c", "stty size; read line; stty size"},
         [&](aegis::daemon::AgentEvent event) {
-            if (event.type != "agent.message.delta") return;
+            if (event.type != "terminal.output") return;
             std::lock_guard lock(ptyMutex);
             ptyOutput += event.content;
             ptyOutputChanged.notify_all();
@@ -197,6 +197,36 @@ int main() {
         assert(ptyOutputChanged.wait_for(lock, std::chrono::seconds(2), [&] { return ptyOutput.find("40 120") != std::string::npos; }));
     }
     pty.terminate();
+
+    std::mutex burstMutex;
+    std::condition_variable burstChanged;
+    std::string burstOutput;
+    std::vector<std::size_t> burstSizes;
+    bool burstFinished = false;
+    aegis::daemon::agents::PtyAdapter burstPty("shell", {"/bin/sh", "-c", "dd if=/dev/zero bs=65536 count=2 2>/dev/null"},
+        [&](aegis::daemon::AgentEvent event) {
+            std::lock_guard lock(burstMutex);
+            if (event.type == "terminal.output") {
+                burstSizes.push_back(event.content.size());
+                burstOutput += event.content;
+            } else if (event.type == "run.completed" || event.type == "run.failed") {
+                burstFinished = true;
+            }
+            burstChanged.notify_all();
+        });
+    assert(burstPty.start({"task", "pty-burst", "shell", repository, std::nullopt}));
+    {
+        std::unique_lock lock(burstMutex);
+        assert(burstChanged.wait_for(lock, std::chrono::seconds(3), [&] { return burstFinished; }));
+    }
+    {
+        std::lock_guard lock(burstMutex);
+        assert(burstOutput.size() == 2 * 65536);
+        assert(std::all_of(burstOutput.begin(), burstOutput.end(), [](char byte) { return byte == '\0'; }));
+        assert(burstSizes.size() <= 4);
+        assert(std::all_of(burstSizes.begin(), burstSizes.end(), [](std::size_t size) { return size <= 64 * 1024; }));
+    }
+    burstPty.terminate();
 
     std::mutex ptyFailureMutex;
     std::condition_variable ptyFailureChanged;

@@ -13,6 +13,7 @@
 #include <system_error>
 #include <thread>
 #include <iostream>
+#include <poll.h>
 #include <sys/socket.h>
 
 namespace aegis::daemon::api {
@@ -68,13 +69,24 @@ std::uint16_t Server::port() const {
 
 void Server::acceptLoop() {
     while (running_) {
+        pollfd listener{acceptor_.native_handle(), POLLIN, 0};
+        const auto ready = poll(&listener, 1, 250);
+        if (ready == 0) continue;
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            if (running_) std::cerr << "aegis_daemon: listener poll failed: " << std::generic_category().message(errno) << '\n';
+            return;
+        }
+        if (!(listener.revents & POLLIN)) {
+            if (running_) std::cerr << "aegis_daemon: listener became unavailable\n";
+            return;
+        }
         boost::system::error_code error;
         auto socket = std::make_shared<boost::asio::ip::tcp::socket>(io_);
         acceptor_.accept(*socket, error);
         if (error) {
             if (!running_) return;
             if (error == boost::asio::error::would_block || error == boost::asio::error::try_again) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
             std::cerr << "aegis_daemon: accept failed: " << error.message() << '\n';
@@ -171,17 +183,18 @@ void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> 
         ~ClientCount() { count.fetch_sub(1); }
     } clientCount{eventClients_};
     const auto subscription = context_.events->subscribe();
-    auto nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    auto nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     while (running_) {
         AgentEvent event;
-        if (context_.events->wait(subscription, event, std::chrono::milliseconds(250))) {
+        if (context_.events->wait(subscription, event, std::chrono::seconds(1))) {
             websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
             if (error) break;
+            if (event.type == "stream.resync_required") break;
         }
         if (std::chrono::steady_clock::now() >= nextPing) {
             websocket.ping({}, error);
             if (error) break;
-            nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         }
     }
     context_.events->unsubscribe(subscription);

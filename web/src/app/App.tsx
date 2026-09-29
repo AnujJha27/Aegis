@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Agent, type GitChange, type GitStatus, type Repository, type Task } from "./api";
 import { Layout } from "../components/Layout";
 import { useAgentWorkspace } from "./useAgentWorkspace";
@@ -9,8 +9,10 @@ import { useTasks } from "./useTasks";
 export function App() {
   const taskState = useTasks();
   const { tasks, selectedTask, setSelectedTask } = taskState;
+  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity">("review");
+  const [screen, setScreen] = useState<"session" | "review">("session");
   const workspace = useAgentWorkspace(selectedTask?.id, onEvent, reconnectRefresh);
-  const review = useReviewData(selectedTask?.id);
+  const review = useReviewData(selectedTask?.id, screen === "review" ? drawer : undefined);
   const [repository, setRepository] = useState<Repository>();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
@@ -18,18 +20,34 @@ export function App() {
   const [selectedAgent, setSelectedAgent] = useState("shell");
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [drawer, setDrawer] = useState<"review" | "graphs" | "activity">("review");
   const [openFileRequest, setOpenFileRequest] = useState({ path: "", token: 0 });
-  const [screen, setScreen] = useState<"session" | "review">("session");
   const [busy, setBusy] = useState("Connecting to daemon…");
   const [daemonConnection, setDaemonConnection] = useState("connecting");
   const [error, setError] = useState("");
+  const gitRefreshTimer = useRef<number | undefined>(undefined);
   const currentRun = workspace.currentRun;
   const runFinished = workspace.runFinished;
   const interactive = Boolean(agents.find((agent) => agent.name === currentRun?.agent)?.interactive);
   const pty = usePtySession(currentRun, interactive, runFinished);
 
   useEffect(() => { if (review.error) setError(review.error); }, [review.error]);
+  useEffect(() => () => window.clearTimeout(gitRefreshTimer.current), []);
+
+  useEffect(() => {
+    if (screen !== "review") return;
+    let active = true;
+    const refresh = () => {
+      void api.gitStatus(true).then((git) => {
+        if (!active) return;
+        if (JSON.stringify(git.files) !== JSON.stringify(gitChanges)) setGitChanges(git.files);
+        if (JSON.stringify(git) !== JSON.stringify(gitStatus)) setGitStatus(git);
+        if (JSON.stringify(git.repository) !== JSON.stringify(repository)) setRepository(git.repository);
+      }).catch(() => {});
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [screen, gitChanges, gitStatus, repository]);
 
   useEffect(() => {
     let active = true;
@@ -65,16 +83,20 @@ export function App() {
   }, [taskState.refresh]);
 
   function onEvent(event: import("./api").AgentEvent) {
+    if (event.type === "terminal.output") window.dispatchEvent(new CustomEvent("aegis:terminal-output", { detail: event }));
     if (["run.completed", "run.failed", "run.interrupted", "run.terminated", "turn.completed", "turn.interrupted"].includes(event.type))
       setBusy(event.type === "run.failed" ? "Agent failed" : "Ready");
-    if (event.type === "file.changed") void refreshGit().catch((reason: Error) => setError(reason.message));
+    if (event.type === "file.changed") {
+      window.clearTimeout(gitRefreshTimer.current);
+      gitRefreshTimer.current = window.setTimeout(() => void refreshGit().catch((reason: Error) => setError(reason.message)), 100);
+    }
   }
 
   async function refreshGit() {
-    const git = await api.gitStatus();
-    setRepository(git.repository);
-    setGitChanges(git.files);
-    setGitStatus(git);
+    const git = await api.gitStatus(true);
+    if (JSON.stringify(git.repository) !== JSON.stringify(repository)) setRepository(git.repository);
+    if (JSON.stringify(git.files) !== JSON.stringify(gitChanges)) setGitChanges(git.files);
+    if (JSON.stringify(git) !== JSON.stringify(gitStatus)) setGitStatus(git);
     await review.refresh();
   }
 

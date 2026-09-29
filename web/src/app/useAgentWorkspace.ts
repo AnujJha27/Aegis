@@ -52,7 +52,7 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
         pending.push(event);
         if (pending.length > 500) pending.shift();
       }
-      if (snapshotLoaded) setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
+      if (snapshotLoaded && event.type !== "terminal.output") setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
     }, (state, reconnected) => {
       setConnection(state);
       if (reconnected) { void refreshSnapshot().then(() => onReconnectRef.current?.()); }

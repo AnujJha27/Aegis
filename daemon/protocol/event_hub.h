@@ -8,6 +8,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace aegis::daemon {
@@ -17,10 +18,14 @@ class EventHub final {
         std::mutex mutex;
         std::condition_variable condition;
         std::deque<AgentEvent> events;
+        std::size_t queuedBytes = 0;
         bool closed = false;
     };
 
 public:
+    static constexpr std::size_t maxQueuedEvents = 512;
+    static constexpr std::size_t maxQueuedBytes = 4 * 1024 * 1024;
+
     using Subscription = std::shared_ptr<Queue>;
 
     Subscription subscribe();

@@ -10,6 +10,8 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
+
 int main() {
     const auto fixtureDirectory = std::filesystem::temp_directory_path() /
         ("aegis-daemon-store-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -69,6 +71,18 @@ int main() {
         const auto recent = store.events(task.id, 3);
         assert(recent.size() == 3 && recent.front().id == "event-25" && recent.back().id == "event-27");
         assert(store.events(task.id, 0).empty());
+        const auto terminalRun = store.startRun(task.id, "shell");
+        for (int index = 0; index < 140; ++index)
+            store.appendEvent({"terminal-" + std::to_string(index), task.id, terminalRun.id, "terminal.output", "shell", "chunk", index});
+        store.appendEvent({"terminal-semantic", task.id, terminalRun.id, "run.completed", "shell", "", 141});
+        const auto terminalHistory = store.events(task.id);
+        const auto retainedTerminalChunks = std::count_if(terminalHistory.begin(), terminalHistory.end(), [&](const auto &item) {
+            return item.runId == terminalRun.id && item.type == "terminal.output";
+        });
+        assert(retainedTerminalChunks == 128);
+        assert(std::any_of(terminalHistory.begin(), terminalHistory.end(), [&](const auto &item) {
+            return item.runId == terminalRun.id && item.type == "run.completed";
+        }));
     }
 
     {
@@ -147,4 +161,40 @@ int main() {
     assert(!hub.wait(subscription, event, std::chrono::milliseconds(10)));
     hub.unsubscribe(subscription);
     assert(!hub.wait(subscription, event, std::chrono::milliseconds(1)));
+
+    aegis::daemon::EventHub boundedHub;
+    const auto slow = boundedHub.subscribe();
+    const auto fast = boundedHub.subscribe();
+    for (std::size_t index = 0; index < aegis::daemon::EventHub::maxQueuedEvents + 1; ++index) {
+        boundedHub.publish({"burst-" + std::to_string(index), "task", "run", "turn.started", "codex", "", static_cast<std::int64_t>(index)});
+        aegis::daemon::AgentEvent delivered;
+        assert(boundedHub.wait(fast, delivered, std::chrono::milliseconds(1)));
+        assert(delivered.id == "burst-" + std::to_string(index));
+    }
+    std::size_t slowEvents = 0;
+    bool sawResync = false;
+    while (boundedHub.wait(slow, event, std::chrono::milliseconds(1))) {
+        ++slowEvents;
+        if (event.type == "stream.resync_required") {
+            sawResync = true;
+            break;
+        }
+    }
+    assert(sawResync);
+    assert(slowEvents <= aegis::daemon::EventHub::maxQueuedEvents);
+    assert(!boundedHub.wait(slow, event, std::chrono::milliseconds(1)));
+    boundedHub.unsubscribe(slow);
+    boundedHub.unsubscribe(fast);
+
+    aegis::daemon::EventHub byteBoundedHub;
+    const auto byteSlow = byteBoundedHub.subscribe();
+    const std::string largeEvent(1024 * 1024, 'x');
+    for (int index = 0; index < 5; ++index)
+        byteBoundedHub.publish({"large-" + std::to_string(index), "task", "run", "user.message", "codex", largeEvent, index});
+    sawResync = false;
+    while (byteBoundedHub.wait(byteSlow, event, std::chrono::milliseconds(1))) {
+        if (event.type == "stream.resync_required") { sawResync = true; break; }
+    }
+    assert(sawResync);
+    byteBoundedHub.unsubscribe(byteSlow);
 }

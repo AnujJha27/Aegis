@@ -216,6 +216,17 @@ void Store::appendEvent(const AgentEvent &event) {
         check(sqlite3_bind_text(statement.get(), index + 1, values[index], -1, SQLITE_TRANSIENT), database_, "bind event");
     check(sqlite3_bind_int64(statement.get(), 7, event.timestamp), database_, "bind event timestamp");
     check(sqlite3_step(statement.get()), database_, "insert event");
+    const auto rowId = sqlite3_last_insert_rowid(database_);
+    const bool terminalRun = event.type == "run.completed" || event.type == "run.failed" ||
+        event.type == "run.interrupted" || event.type == "run.terminated";
+    if ((event.type == "terminal.output" && rowId % 32 == 0) || terminalRun) {
+        const auto retainCount = 128;
+        Statement retain(database_, "DELETE FROM events WHERE type = 'terminal.output' AND run_id = ? AND rowid NOT IN (SELECT rowid FROM events WHERE type = 'terminal.output' AND run_id = ? ORDER BY rowid DESC LIMIT ?)");
+        check(sqlite3_bind_text(retain.get(), 1, event.runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind terminal retention run");
+        check(sqlite3_bind_text(retain.get(), 2, event.runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind terminal retention run");
+        check(sqlite3_bind_int(retain.get(), 3, retainCount), database_, "bind terminal retention limit");
+        check(sqlite3_step(retain.get()), database_, "retain terminal output");
+    }
 }
 
 void Store::saveVerification(const VerificationRun &verification) {

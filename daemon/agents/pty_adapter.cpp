@@ -4,11 +4,14 @@
 #include <csignal>
 #include <cstring>
 #include <pty.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <chrono>
+#include <algorithm>
+#include <limits>
 
 namespace aegis::daemon::agents {
 namespace {
@@ -26,8 +29,12 @@ std::string eventId() {
 
 }
 
-PtyAdapter::PtyAdapter(std::string name, std::vector<std::string> command, EventSink sink)
-    : name_(std::move(name)), command_(std::move(command)), sink_(std::move(sink)) {}
+PtyAdapter::PtyAdapter(std::string name, std::vector<std::string> command, EventSink sink,
+                       PtyOutputBatching batching)
+    : name_(std::move(name)), command_(std::move(command)), sink_(std::move(sink)), batching_(batching) {
+    if (batching_.flushInterval.count() < 1) batching_.flushInterval = std::chrono::milliseconds(1);
+    batching_.maxBatchBytes = std::clamp<std::size_t>(batching_.maxBatchBytes, 1, 64 * 1024);
+}
 
 PtyAdapter::~PtyAdapter() {
     terminate();
@@ -130,16 +137,47 @@ void PtyAdapter::terminate() {
 }
 
 void PtyAdapter::readLoop(int master, int child) {
-    char buffer[8192];
+    std::string batch;
+    batch.reserve(batching_.maxBatchBytes);
+    auto deadline = std::chrono::steady_clock::time_point{};
+    const auto flush = [&] {
+        if (batch.empty()) return;
+        publish("terminal.output", std::move(batch));
+        batch.clear();
+        batch.reserve(batching_.maxBatchBytes);
+    };
     while (running_) {
-        const auto count = read(master, buffer, sizeof(buffer));
-        if (count > 0) {
-            publish("agent.message.delta", std::string(buffer, static_cast<std::size_t>(count)));
+        pollfd descriptor{master, POLLIN, 0};
+        int timeout = -1;
+        if (!batch.empty()) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            timeout = static_cast<int>(std::clamp<std::int64_t>(remaining, 0, std::numeric_limits<int>::max()));
+        }
+        const auto ready = poll(&descriptor, 1, timeout);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (ready == 0) {
+            flush();
             continue;
         }
-        if (count < 0 && errno == EINTR) continue;
-        break;
+        if (descriptor.revents & POLLIN) {
+            char buffer[8192];
+            const auto capacity = std::min(sizeof(buffer), batching_.maxBatchBytes - batch.size());
+            const auto count = read(master, buffer, capacity);
+            if (count > 0) {
+                if (batch.empty()) deadline = std::chrono::steady_clock::now() + batching_.flushInterval;
+                batch.append(buffer, static_cast<std::size_t>(count));
+                if (batch.size() >= batching_.maxBatchBytes) flush();
+                continue;
+            }
+            if (count < 0 && errno == EINTR) continue;
+            if (count < 0 && errno != EIO) break;
+        }
+        if (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
     }
+    flush();
     int status = 0;
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
     {

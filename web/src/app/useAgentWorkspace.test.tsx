@@ -63,6 +63,22 @@ describe("useAgentWorkspace run lifecycle", () => {
     expect(result.current.currentEvents).toContainEqual(liveEvent);
   });
 
+  it("keeps terminal history for initial replay but excludes live PTY chunks from React state", async () => {
+    const historical: AgentEvent = {
+      id: "pty-history", taskId: "task-1", runId: "run-1", type: "terminal.output",
+      agent: "claude", content: "history", timestamp: 15,
+    };
+    vi.spyOn(api, "events").mockResolvedValue([historical]);
+    const onEvent = vi.fn();
+    const { result } = renderHook(() => useAgentWorkspace("task-1", onEvent));
+    await waitFor(() => expect(result.current.currentEvents).toContainEqual(historical));
+
+    const live: AgentEvent = { ...historical, id: "pty-live", content: "live", timestamp: 20 };
+    act(() => emit(live));
+    expect(onEvent).toHaveBeenCalledWith(live);
+    expect(result.current.currentEvents).not.toContainEqual(live);
+  });
+
   it("ignores an older reconnect snapshot that completes after a newer one", async () => {
     const older = deferred<AgentEvent[]>();
     const newer = deferred<AgentEvent[]>();

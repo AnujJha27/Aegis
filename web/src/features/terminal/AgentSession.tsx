@@ -23,7 +23,7 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
 
   useEffect(() => {
     if (!terminalHost.current) return;
-    const next = new Terminal({ convertEol: true, cursorBlink: false, fontFamily: "SFMono-Regular, Consolas, monospace", fontSize: 12, theme: { background: "#151a21", foreground: "#d5deea", cursor: "#91a9c4" } });
+    const next = new Terminal({ convertEol: true, cursorBlink: false, scrollback: 3000, fontFamily: "SFMono-Regular, Consolas, monospace", fontSize: 12, theme: { background: "#151a21", foreground: "#d5deea", cursor: "#91a9c4" } });
     const addon = new FitAddon();
     next.loadAddon(addon);
     next.open(terminalHost.current);
@@ -42,6 +42,18 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
   }, []);
 
   useEffect(() => {
+    const receive = (message: Event) => {
+      const event = (message as CustomEvent<AgentEvent>).detail;
+      if (!terminal.current || event.type !== "terminal.output" || event.runId !== activeRun.current || rendered.current.has(event.id)) return;
+      terminal.current.write(event.content);
+      rendered.current.add(event.id);
+      if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
+    };
+    window.addEventListener("aegis:terminal-output", receive);
+    return () => window.removeEventListener("aegis:terminal-output", receive);
+  }, []);
+
+  useEffect(() => {
     if (!terminal.current) return;
     if (activeRun.current !== (run?.id ?? "")) {
       activeRun.current = run?.id ?? "";
@@ -50,9 +62,10 @@ export function AgentSession({ task, run, runs, runFinished, interactive, ptyCon
       if (interactive && run && !runFinished) terminal.current.focus();
     }
     for (const event of events) {
-      if (event.runId !== run?.id || event.type !== "agent.message.delta" || rendered.current.has(event.id)) continue;
+      if (event.runId !== run?.id || event.type !== "terminal.output" || rendered.current.has(event.id)) continue;
       terminal.current.write(event.content);
       rendered.current.add(event.id);
+      if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
     }
   }, [events, run?.id, interactive, runFinished]);
 
