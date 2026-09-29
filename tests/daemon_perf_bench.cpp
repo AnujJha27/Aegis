@@ -2,12 +2,14 @@
 #include "daemon/agents/pty_adapter.h"
 #include "daemon/agents/manager.h"
 #include "daemon/api/routes.h"
+#include "daemon/api/server.h"
 #include "daemon/protocol/event_hub.h"
 #include "daemon/repository/files.h"
 #include "daemon/repository/git.h"
 #include "daemon/session/store.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,11 +18,17 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include <boost/asio.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/websocket.hpp>
 #include <sqlite3.h>
 #include <nlohmann/json.hpp>
+#include <poll.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -65,6 +73,103 @@ long long cpuMs() {
     getrusage(RUSAGE_SELF, &usage);
     return (usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000LL +
         (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1000LL;
+}
+
+void websocketSoak(const std::filesystem::path &root) {
+    namespace asio = boost::asio;
+    namespace websocket = boost::beast::websocket;
+    using Tcp = asio::ip::tcp;
+
+    aegis::daemon::Store store(root / "websocket.sqlite");
+    aegis::daemon::EventHub events;
+    aegis::daemon::api::Context context{&store, &events, nullptr, nullptr, nullptr, root, {}};
+    aegis::daemon::api::Server server(context);
+    if (!server.start()) throw std::runtime_error("WebSocket soak server failed to start");
+
+    asio::io_context io;
+    websocket::stream<Tcp::socket> fast(io);
+    websocket::stream<Tcp::socket> slow(io);
+    auto connect = [&](auto &socket, bool limitReadBuffer) {
+        socket.next_layer().open(Tcp::v4());
+        if (limitReadBuffer) socket.next_layer().set_option(asio::socket_base::receive_buffer_size(1024));
+        socket.next_layer().connect({asio::ip::make_address("127.0.0.1"), server.port()});
+        socket.handshake("127.0.0.1:" + std::to_string(server.port()), "/ws/events");
+    };
+    connect(fast, false);
+    connect(slow, true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    constexpr std::size_t eventCount = 1200;
+    std::atomic_size_t fastEvents = 0;
+    std::atomic_bool fastResync = false;
+    std::mutex fastMutex;
+    std::condition_variable fastChanged;
+    bool fastDone = false;
+    std::thread fastReader([&] {
+        boost::beast::flat_buffer buffer;
+        for (std::size_t index = 0; index < eventCount; ++index) {
+            boost::system::error_code error;
+            fast.read(buffer, error);
+            if (error) break;
+            const auto event = nlohmann::json::parse(boost::beast::buffers_to_string(buffer.data()));
+            buffer.consume(buffer.size());
+            if (event.value("type", std::string{}) == "stream.resync_required") {
+                fastResync = true;
+                break;
+            }
+            ++fastEvents;
+        }
+        {
+            std::lock_guard lock(fastMutex);
+            fastDone = true;
+        }
+        fastChanged.notify_one();
+    });
+
+    const std::string burst(8192, 'x');
+    const auto started = Clock::now();
+    for (std::size_t index = 0; index < eventCount; ++index) {
+        events.publish({"ws-" + std::to_string(index), "task", "run", "agent.message.completed", "synthetic", burst,
+            static_cast<std::int64_t>(index)});
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    {
+        std::unique_lock lock(fastMutex);
+        if (!fastChanged.wait_for(lock, std::chrono::seconds(15), [&] { return fastDone; })) {
+            ::shutdown(fast.next_layer().native_handle(), SHUT_RDWR);
+            fastReader.join();
+            server.stop();
+            throw std::runtime_error("fast WebSocket reader did not receive its event burst");
+        }
+    }
+
+    bool slowResync = false;
+    std::size_t slowEvents = 0;
+    boost::beast::flat_buffer buffer;
+    const auto deadline = Clock::now() + std::chrono::seconds(15);
+    while (Clock::now() < deadline && !slowResync) {
+        pollfd ready{slow.next_layer().native_handle(), POLLIN, 0};
+        if (poll(&ready, 1, 100) <= 0) continue;
+        boost::system::error_code error;
+        slow.read(buffer, error);
+        if (error) break;
+        const auto event = nlohmann::json::parse(boost::beast::buffers_to_string(buffer.data()));
+        buffer.consume(buffer.size());
+        ++slowEvents;
+        slowResync = event.value("type", std::string{}) == "stream.resync_required";
+    }
+    boost::system::error_code ignored;
+    fast.next_layer().close(ignored);
+    slow.next_layer().close(ignored);
+    fastReader.join();
+    server.stop();
+    if (!slowResync || fastResync || fastEvents != eventCount)
+        throw std::runtime_error("WebSocket soak failed: fast_events=" + std::to_string(fastEvents) +
+            " fast_resync=" + std::to_string(fastResync) + " slow_events=" + std::to_string(slowEvents) +
+            " slow_resync=" + std::to_string(slowResync));
+    std::cout << "websocket_clients=2 fast_events=" << fastEvents << " slow_events_before_resync=" << slowEvents
+              << " flood_and_recovery_ms=" << millis(started) << '\n';
 }
 }
 
@@ -183,6 +288,7 @@ int main() {
         std::cout << "event_subscribers=2 slow_subscriber_events_before_resync=" << slowEvents
                   << " queue_high_water_events=" << queueHighWater.events
                   << " queue_high_water_bytes=" << queueHighWater.bytes << '\n';
+        websocketSoak(root);
 
         std::mutex ptyMutex;
         std::condition_variable ptyChanged;
