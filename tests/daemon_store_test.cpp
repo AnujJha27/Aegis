@@ -4,15 +4,19 @@
 #include <cassert>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <stdexcept>
 #include <string>
 
 #include <sqlite3.h>
 
 int main() {
-    const auto path = std::filesystem::temp_directory_path() / "aegis-daemon-store-test.sqlite";
-    const auto legacyPath = std::filesystem::temp_directory_path() / "aegis-daemon-store-legacy-test.sqlite";
-    std::filesystem::remove(path);
-    std::filesystem::remove(legacyPath);
+    const auto fixtureDirectory = std::filesystem::temp_directory_path() /
+        ("aegis-daemon-store-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    assert(std::filesystem::create_directory(fixtureDirectory));
+    const auto path = fixtureDirectory / "store.sqlite";
+    const auto legacyPath = fixtureDirectory / "legacy.sqlite";
+    const auto corruptPath = fixtureDirectory / "corrupt.sqlite";
 
     {
         aegis::daemon::Store store(path);
@@ -108,8 +112,22 @@ int main() {
     sqlite3_finalize(version);
     sqlite3_close(legacy);
 
-    std::filesystem::remove(path);
-    std::filesystem::remove(legacyPath);
+    const std::string corruptContents = "preserve this invalid database";
+    {
+        std::ofstream corrupt(corruptPath, std::ios::binary);
+        corrupt << corruptContents;
+    }
+    bool reportedPath = false;
+    try {
+        aegis::daemon::Store corrupt(corruptPath);
+    } catch (const std::runtime_error &error) {
+        reportedPath = std::string(error.what()).find(corruptPath.string()) != std::string::npos;
+    }
+    assert(reportedPath);
+    std::ifstream preserved(corruptPath, std::ios::binary);
+    assert(std::string(std::istreambuf_iterator<char>(preserved), {}) == corruptContents);
+
+    std::filesystem::remove_all(fixtureDirectory);
 
     aegis::daemon::EventHub hub;
     const auto subscription = hub.subscribe();
