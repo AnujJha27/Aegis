@@ -36,9 +36,24 @@ endfunction()
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
+if(TARGET SQLite3::SQLite3)
+    set(AEGIS_SQLITE_TARGET SQLite3::SQLite3)
+elseif(TARGET SQLite::SQLite3)
+    set(AEGIS_SQLITE_TARGET SQLite::SQLite3)
+else()
+    if(NOT SQLite3_LIBRARIES)
+        message(FATAL_ERROR "FindSQLite3 provided neither an imported target nor SQLite3_LIBRARIES")
+    endif()
+    set(AEGIS_SQLITE_TARGET ${SQLite3_LIBRARIES})
+    set(AEGIS_SQLITE_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
+endif()
+
 add_library(aegis_daemon_session daemon/session/store.cpp daemon/protocol/event_hub.cpp)
 target_include_directories(aegis_daemon_session PUBLIC .)
-target_link_libraries(aegis_daemon_session PUBLIC SQLite3::SQLite3)
+if(AEGIS_SQLITE_INCLUDE_DIRS)
+    target_include_directories(aegis_daemon_session PUBLIC ${AEGIS_SQLITE_INCLUDE_DIRS})
+endif()
+target_link_libraries(aegis_daemon_session PUBLIC ${AEGIS_SQLITE_TARGET})
 
 add_library(aegis_daemon_services
     daemon/process/process.cpp
