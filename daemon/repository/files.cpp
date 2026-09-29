@@ -345,7 +345,7 @@ FileComparison Files::compare(const std::string &path, FileSource base, FileSour
         result.oldPath = change->oldPath;
         result.status = statusFor(*change);
     }
-    const auto originalPath = result.oldPath.value_or(result.path);
+    const auto originalPath = base == FileSource::head ? result.oldPath.value_or(result.path) : result.path;
     result.original = read(originalPath, base, loadLarge);
     result.modified = read(result.path, target, loadLarge);
     result.binary = result.original.binary || result.modified.binary;

@@ -29,6 +29,7 @@ int main() {
     fixture.write("space name.cpp", "int spaced = 1;\n");
     std::filesystem::remove(fixture.root() / "deleted.cpp");
     fixture.git({"mv", "--", "old name.cpp", "new name.cpp"});
+    fixture.write("new name.cpp", "int renamed = 1;\n");
     fixture.write("nested/new file.cpp", "int fresh = 1;\n");
     fixture.write("tracked-binary.dat", std::string("c\0d", 3));
 
@@ -86,7 +87,15 @@ int main() {
     const auto renamedFile = files.compare("new name.cpp");
     assert(renamedFile.oldPath == "old name.cpp");
     assert(renamedFile.original.content == "int renamed = 0;\n");
-    assert(renamedFile.modified.content == "int renamed = 0;\n");
+    assert(renamedFile.modified.content == "int renamed = 1;\n");
+    const auto stagedRename = files.compare("new name.cpp", aegis::daemon::repository::FileSource::head,
+                                            aegis::daemon::repository::FileSource::index);
+    assert(stagedRename.original.content == "int renamed = 0;\n");
+    assert(stagedRename.modified.content == "int renamed = 0;\n");
+    const auto unstagedRename = files.compare("new name.cpp", aegis::daemon::repository::FileSource::index,
+                                              aegis::daemon::repository::FileSource::worktree);
+    assert(unstagedRename.original.content == "int renamed = 0;\n");
+    assert(unstagedRename.modified.content == "int renamed = 1;\n");
 
     const auto binary = files.read("binary.dat", aegis::daemon::repository::FileSource::worktree);
     assert(binary.binary && binary.content.empty());
