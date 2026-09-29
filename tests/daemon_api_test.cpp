@@ -72,6 +72,12 @@ int main() {
     assert(!nlohmann::json::parse(listing.body()).at("entries").empty());
     const auto invalidFileOptions = request(context, http::verb::get, "/api/files?scope=all&include_changes=maybe");
     assert(invalidFileOptions.result() == http::status::bad_request);
+    const auto invalidRecursive = request(context, http::verb::get, "/api/files?scope=all&recursive=maybe");
+    assert(invalidRecursive.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(invalidRecursive.body()).at("error").at("code") == "invalid_recursive");
+    const auto invalidLarge = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&load_large=maybe");
+    assert(invalidLarge.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(invalidLarge.body()).at("error").at("code") == "invalid_load_large");
     const auto escapedFile = request(context, http::verb::get, "/api/files/content?path=%2e%2e%2fsecret");
     assert(escapedFile.result() == http::status::bad_request);
 

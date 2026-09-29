@@ -23,6 +23,10 @@ std::optional<Response> files(const Request &request, const Context &context) {
     const auto commitText = queryValue(target, "commit", validQuery);
     const auto largeText = queryValue(target, "load_large", validQuery);
     if (!validQuery) return error(boost::beast::http::status::bad_request, "invalid_query", "query parameters must be valid and unique");
+    if (recursiveText && *recursiveText != "0" && *recursiveText != "1" && *recursiveText != "false" && *recursiveText != "true")
+        return error(boost::beast::http::status::bad_request, "invalid_recursive", "recursive must be a boolean");
+    if (largeText && *largeText != "0" && *largeText != "1" && *largeText != "false" && *largeText != "true")
+        return error(boost::beast::http::status::bad_request, "invalid_load_large", "load_large must be a boolean");
     const bool loadLarge = largeText && (*largeText == "1" || *largeText == "true");
     try {
         if (path == "/api/files") {
