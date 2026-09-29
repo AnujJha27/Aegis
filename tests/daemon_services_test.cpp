@@ -49,8 +49,15 @@ int main() {
     aegis::daemon::repository::GitRepository git(repository);
     assert(!git.state().path.empty());
     assert(!git.state().branch.empty());
-    auto ownBranch = aegis::daemon::process::run(
-        {"git", "--git-dir=" + (repository / ".aegis-git").string(), "--work-tree=" + repository.string(), "branch", "--show-current"}, repository).output;
+    std::vector<std::string> branchCommand{"git"};
+    if (std::filesystem::is_directory(repository / ".aegis-git")) {
+        branchCommand.insert(branchCommand.end(), {"--git-dir=" + (repository / ".aegis-git").string(),
+            "--work-tree=" + repository.string()});
+    } else branchCommand.insert(branchCommand.end(), {"-C", repository.string()});
+    branchCommand.insert(branchCommand.end(), {"branch", "--show-current"});
+    const auto branchResult = aegis::daemon::process::run(branchCommand, repository);
+    assert(branchResult.exitCode == 0);
+    auto ownBranch = branchResult.output;
     if (!ownBranch.empty() && ownBranch.back() == '\n') ownBranch.pop_back();
     assert(git.currentBranch() == ownBranch);
 
