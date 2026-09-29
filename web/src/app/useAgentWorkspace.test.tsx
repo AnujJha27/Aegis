@@ -29,6 +29,15 @@ describe("useAgentWorkspace run lifecycle", () => {
     });
   });
 
+  it("keeps the managed-browser presence socket connected with no selected task", async () => {
+    const { result } = renderHook(() => useAgentWorkspace());
+    expect(eventTransport.connectEvents).toHaveBeenCalledTimes(1);
+    expect(api.events).not.toHaveBeenCalled();
+    expect(api.runs).not.toHaveBeenCalled();
+    act(() => updateConnection("connected", false));
+    expect(result.current.connection).toBe("connected");
+  });
+
   it("maps run.started to the persisted running status", async () => {
     const { result } = renderHook(() => useAgentWorkspace("task-1"));
     await waitFor(() => expect(result.current.runs[0]?.status).toBe("starting"));

@@ -16,14 +16,14 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
     setRuns([]);
     setEvents([]);
     setSelectedRunId("");
-    if (!taskId) return;
     let active = true;
-    let snapshotLoaded = false;
+    let snapshotLoaded = !taskId;
     let snapshotsInFlight = 0;
     let snapshotSequence = 0;
     let appliedSnapshot = 0;
     const pending: AgentEvent[] = [];
     const refreshSnapshot = async () => {
+      if (!taskId) return;
       const sequence = ++snapshotSequence;
       snapshotsInFlight++;
       try {
@@ -55,7 +55,7 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
       if (snapshotLoaded && event.type !== "terminal.output") setEvents((current) => current.some((item) => item.id === event.id) ? current : [...current.slice(-499), event]);
     }, (state, reconnected) => {
       setConnection(state);
-      if (reconnected) { void refreshSnapshot().then(() => onReconnectRef.current?.()); }
+      if (reconnected && taskId) { void refreshSnapshot().then(() => onReconnectRef.current?.()); }
     });
     void refreshSnapshot();
     return () => { active = false; disconnect(); };
