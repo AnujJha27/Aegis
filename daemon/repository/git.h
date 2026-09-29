@@ -51,6 +51,7 @@ public:
 private:
     friend class Files;
     std::vector<std::string> command(std::vector<std::string> arguments) const;
+    std::optional<GitChange> change(const std::string &path) const;
 
     std::filesystem::path path_;
     std::filesystem::path gitDirectory_;

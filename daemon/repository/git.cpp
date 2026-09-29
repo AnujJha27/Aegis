@@ -58,6 +58,36 @@ void requireComplete(const process::Result &result, std::string_view operation) 
     if (result.outputTruncated) throw std::runtime_error(std::string(operation) + " output exceeded the 16 MiB capture limit");
 }
 
+std::vector<GitChange> parseChanges(std::string_view output, std::optional<std::size_t> limit = std::nullopt,
+                                    bool *truncated = nullptr) {
+    std::vector<GitChange> result;
+    for (std::size_t offset = 0; offset + 3 <= output.size();) {
+        const auto index = output[offset];
+        const auto worktree = output[offset + 1];
+        const auto pathStart = offset + 3;
+        const auto pathEnd = output.find('\0', pathStart);
+        if (pathEnd == std::string_view::npos) break;
+        GitChange change;
+        change.path = output.substr(pathStart, pathEnd - pathStart);
+        change.indexStatus = std::string(1, index);
+        change.worktreeStatus = std::string(1, worktree);
+        offset = pathEnd + 1;
+        if ((index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') && offset < output.size()) {
+            const auto originalEnd = output.find('\0', offset);
+            if (originalEnd == std::string_view::npos) break;
+            change.oldPath = output.substr(offset, originalEnd - offset);
+            offset = originalEnd + 1;
+        }
+        result.push_back(std::move(change));
+        if (limit && result.size() > *limit) {
+            result.resize(*limit);
+            if (truncated) *truncated = true;
+            break;
+        }
+    }
+    return result;
+}
+
 std::optional<CommitSummary> parseCommitSummary(const std::string &line) {
     std::array<std::string_view, 5> fields;
     std::size_t start = 0;
@@ -153,31 +183,9 @@ std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit) 
     if (!validRepository_) return {};
     const auto status = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
     requireComplete(status, "git status");
-    const auto &output = status.output;
-    std::vector<GitChange> result;
-    for (std::size_t offset = 0; offset + 3 <= output.size();) {
-        const auto index = output[offset];
-        const auto worktree = output[offset + 1];
-        const auto pathStart = offset + 3;
-        const auto pathEnd = output.find('\0', pathStart);
-        if (pathEnd == std::string::npos) break;
-        GitChange change;
-        change.path = output.substr(pathStart, pathEnd - pathStart);
-        change.indexStatus = std::string(1, index);
-        change.worktreeStatus = std::string(1, worktree);
-        offset = pathEnd + 1;
-        if ((index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') && offset < output.size()) {
-            const auto originalEnd = output.find('\0', offset);
-            if (originalEnd == std::string::npos) break;
-            change.oldPath = output.substr(offset, originalEnd - offset);
-            offset = originalEnd + 1;
-        }
-        result.push_back(std::move(change));
-        if (limit && result.size() > *limit) {
-            result.resize(*limit);
-            return result;
-        }
-    }
+    bool truncated = false;
+    auto result = parseChanges(status.output, limit, &truncated);
+    if (truncated) return result;
 
     std::map<std::string, std::size_t> indexes;
     for (std::size_t index = 0; index < result.size(); ++index) indexes.emplace(result[index].path, index);
@@ -215,6 +223,27 @@ std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit) 
         change.binary = change.binary || addedField == "-" || removedField == "-";
     }
     return result;
+}
+
+std::optional<GitChange> GitRepository::change(const std::string &path) const {
+    if (!validRepository_) return std::nullopt;
+    std::string error;
+    if (!validPath(path, error)) throw std::invalid_argument(error);
+    const auto status = process::run(command({"--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", path}), path_);
+    requireComplete(status, "git status");
+    if (status.exitCode != 0) throw std::runtime_error("git status failed: " + status.output);
+    auto matches = parseChanges(status.output, 1);
+    if (matches.empty()) return std::nullopt;
+    if (!matches.front().oldPath && (matches.front().indexStatus == "A" || matches.front().worktreeStatus == "A")) {
+        // A pathspec makes Git report a staged rename as an add, so recover its source from full status only here.
+        const auto allStatus = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
+        requireComplete(allStatus, "git status");
+        if (allStatus.exitCode != 0) throw std::runtime_error("git status failed: " + allStatus.output);
+        auto allChanges = parseChanges(allStatus.output);
+        const auto change = std::find_if(allChanges.begin(), allChanges.end(), [&](const auto &item) { return item.path == path; });
+        if (change != allChanges.end()) return std::move(*change);
+    }
+    return std::move(matches.front());
 }
 
 std::vector<CommitSummary> GitRepository::commits(std::size_t limit) const {

@@ -340,9 +340,8 @@ FileComparison Files::compare(const std::string &path, FileSource base, FileSour
     const auto relative = relativePath(path);
     FileComparison result;
     result.path = relative.generic_string();
-    const auto changes = git_.changes();
-    const auto change = std::find_if(changes.begin(), changes.end(), [&](const auto &item) { return item.path == result.path; });
-    if (change != changes.end()) {
+    const auto change = git_.change(result.path);
+    if (change) {
         result.oldPath = change->oldPath;
         result.status = statusFor(*change);
     }
