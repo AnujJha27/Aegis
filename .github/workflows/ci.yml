@@ -15,7 +15,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ libboost-dev libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libboost-dev libsqlite3-dev nlohmann-json3-dev
       - name: Frontend checks
         working-directory: web
         run: |
@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ libboost-dev libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libboost-dev libsqlite3-dev nlohmann-json3-dev
       - name: Build and test with ASan/UBSan
         run: |
           cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DAEGIS_ENABLE_SANITIZERS=ON

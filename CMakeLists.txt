@@ -34,6 +34,7 @@ function(aegis_quality target)
 endfunction()
 
 find_package(SQLite3 REQUIRED)
+find_package(nlohmann_json 3.2.0 REQUIRED)
 find_package(Threads REQUIRED)
 
 if(TARGET SQLite3::SQLite3)
@@ -53,7 +54,7 @@ target_include_directories(aegis_daemon_session PUBLIC .)
 if(AEGIS_SQLITE_INCLUDE_DIRS)
     target_include_directories(aegis_daemon_session PUBLIC ${AEGIS_SQLITE_INCLUDE_DIRS})
 endif()
-target_link_libraries(aegis_daemon_session PUBLIC ${AEGIS_SQLITE_TARGET})
+target_link_libraries(aegis_daemon_session PUBLIC ${AEGIS_SQLITE_TARGET} nlohmann_json::nlohmann_json)
 
 add_library(aegis_daemon_services
     daemon/process/process.cpp
