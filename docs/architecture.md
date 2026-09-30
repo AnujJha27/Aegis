@@ -47,7 +47,7 @@ Agent event and provider-session callbacks are exception-contained at adapter th
 
 ## Persistence and migrations
 
-Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, version 2 adds persisted review findings, and version 3 indexes task/timestamp event queries. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
+Each repository stores data in `.aegis/aegis.sqlite`. SQLite access is serialized by the store mutex. `PRAGMA user_version` is the schema version; version 1 adds `runs.external_session_id` and the `verifications` table, version 2 adds persisted review findings, version 3 indexes task/timestamp event queries, and version 4 adds stable event sequence numbers and pagination. Migrations are explicit in `daemon/session/store.cpp`; databases newer than the binary's schema are rejected rather than downgraded.
 
 Verification records contain task ID, optional run ID, the command as a JSON argv array, exit code, output, and start/finish timestamps. Commands are executed as argument arrays, never converted to a shell string. Deleting a run removes its events; associated verification records retain task history and have their run association cleared by the SQLite foreign key.
 
@@ -101,7 +101,7 @@ The API uses structured errors:
 | PATCH | `/api/findings/:id` | Set finding status to `open` or `resolved` |
 | GET | `/api/version` | Build version, Git revision when available, and SQLite schema version |
 
-`/ws/events` streams normalized semantic events and batched terminal output. Each subscriber is capped at 512 queued events and 4 MiB. If a subscriber exceeds either bound, the daemon replaces its backlog with `stream.resync_required`, closes that stream, and the client reconnects and reloads persisted history. The PTY reader preserves byte order and does not wait for browser consumers. `/ws/pty/:run_id` is the separate interactive input channel; resize frames are JSON control messages, while terminal text frames are written directly to the PTY. Raw PTY keystrokes are never persisted. SQLite retains at most 160 recent output chunks per active run (about 10 MiB at the 64 KiB chunk ceiling), trimming to 128 when a run ends; semantic events are not subject to that retention.
+`/ws/events` streams normalized semantic events. `/ws/terminal/:run_id` streams persisted and live terminal output for one run. Each subscriber is capped at 512 queued events and 4 MiB. If a subscriber exceeds either bound, the daemon replaces its backlog with `stream.resync_required`, closes that stream, and the client reconnects and reloads persisted history. The PTY reader preserves byte order and does not wait for browser consumers. `/ws/pty/:run_id` is the separate interactive input channel; resize frames are JSON control messages, while terminal text frames are written directly to the PTY. Raw PTY keystrokes are never persisted. SQLite retains at most 160 recent output chunks per run (about 10 MiB at the 64 KiB chunk ceiling), trimming to 128 when the limit is reached or a run ends; semantic events are not subject to that retention.
 
 ## Read-only file review
 

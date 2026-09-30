@@ -70,7 +70,7 @@ This is a local, synthetic benchmark (not a CI gate); compare runs on the same f
 
 ## Requirements and build options
 
-The default build does **not** require Qt. It uses a C++23 compiler, CMake, SQLite, Boost headers, POSIX PTY support, and Threads. Node.js/npm are required to build the web bundle.
+The default build does **not** require Qt. It uses a C++23 compiler, CMake, SQLite, Boost headers, nlohmann-json development headers, POSIX PTY support, and Threads. Node.js/npm are required to build the web bundle.
 
 The old Qt prototype remains optional:
 

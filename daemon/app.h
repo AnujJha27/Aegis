@@ -19,6 +19,7 @@ public:
     void stop();
     std::uint16_t port() const;
     std::size_t activeEventClients() const { return server_.activeEventClients(); }
+    bool hasHadEventClient() const { return server_.hasHadEventClient(); }
 
 private:
     std::filesystem::path repository_;

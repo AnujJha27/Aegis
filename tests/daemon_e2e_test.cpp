@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <poll.h>
 #include <sstream>
 #include <stdexcept>
@@ -144,18 +145,40 @@ websocket::stream<asio::ip::tcp::socket> ptySocket(std::uint16_t port, asio::io_
     return socket;
 }
 
+bool readBefore(websocket::stream<asio::ip::tcp::socket> &socket, beast::flat_buffer &buffer,
+                std::chrono::steady_clock::time_point deadline) {
+    auto &io = static_cast<asio::io_context &>(socket.get_executor().context());
+    boost::system::error_code error;
+    bool complete = false;
+    socket.async_read(buffer, [&](boost::system::error_code readError, std::size_t) {
+        error = readError;
+        complete = true;
+    });
+    io.restart();
+    io.run_for(std::max(deadline - std::chrono::steady_clock::now(), std::chrono::steady_clock::duration::zero()));
+    if (!complete) {
+        boost::system::error_code ignored;
+        socket.next_layer().cancel(ignored);
+        io.run();
+        return false;
+    }
+    if (error) throw std::runtime_error("WebSocket read failed: " + error.message());
+    return true;
+}
+
 Json nextEvent(websocket::stream<asio::ip::tcp::socket> &socket, const std::string &type) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     beast::flat_buffer buffer;
+    std::string seen;
     while (std::chrono::steady_clock::now() < deadline) {
-        pollfd ready{socket.next_layer().native_handle(), POLLIN, 0};
-        if (poll(&ready, 1, 100) <= 0) continue;
-        socket.read(buffer);
+        if (!readBefore(socket, buffer, deadline)) break;
         auto event = Json::parse(beast::buffers_to_string(buffer.data()));
         buffer.consume(buffer.size());
+        if (!seen.empty()) seen += ", ";
+        seen += event.value("type", std::string{"unknown"});
         if (event.value("type", std::string{}) == type) return event;
     }
-    throw std::runtime_error("timed out waiting for event " + type);
+    throw std::runtime_error("timed out waiting for event " + type + "; saw " + seen);
 }
 
 Json nextTerminalOutput(websocket::stream<asio::ip::tcp::socket> &socket, const std::string &content) {
@@ -163,9 +186,7 @@ Json nextTerminalOutput(websocket::stream<asio::ip::tcp::socket> &socket, const 
     beast::flat_buffer buffer;
     std::string received;
     while (std::chrono::steady_clock::now() < deadline) {
-        pollfd ready{socket.next_layer().native_handle(), POLLIN, 0};
-        if (poll(&ready, 1, 100) <= 0) continue;
-        socket.read(buffer);
+        if (!readBefore(socket, buffer, deadline)) break;
         auto event = Json::parse(beast::buffers_to_string(buffer.data()));
         buffer.consume(buffer.size());
         if (event.value("type", std::string{}) == "terminal.output") {
@@ -173,7 +194,7 @@ Json nextTerminalOutput(websocket::stream<asio::ip::tcp::socket> &socket, const 
             if (received.find(content) != std::string::npos) return event;
         }
     }
-    throw std::runtime_error("timed out waiting for terminal output " + content);
+    throw std::runtime_error("timed out waiting for terminal output " + content + "; received " + received);
 }
 
 Json get(std::uint16_t port, const std::string &target) {
@@ -208,7 +229,7 @@ std::string processStartTime(pid_t pid, char *state = nullptr) {
 
 }
 
-int main(int argc, char **argv) {
+int runE2e(int argc, char **argv) {
     assert(argc == 2);
     RepositoryFixture fixture;
     fixture.write("modify.cpp", "int value = 0;\n");
@@ -397,4 +418,14 @@ int main(int argc, char **argv) {
     auto managedEvents = eventSocket(managed.port(), managedIo);
     managedEvents.next_layer().close(ignored);
     assert(managed.waitForExit(std::chrono::seconds(5)));
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    try {
+        return runE2e(argc, argv);
+    } catch (const std::exception &error) {
+        std::cerr << "daemon E2E failed: " << error.what() << '\n';
+        return 1;
+    }
 }

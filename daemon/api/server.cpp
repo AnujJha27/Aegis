@@ -82,6 +82,7 @@ void Server::acceptLoop() {
             return;
         }
         boost::system::error_code error;
+        auto connection = std::make_shared<Connection>();
         auto socket = std::make_shared<boost::asio::ip::tcp::socket>(io_);
         acceptor_.accept(*socket, error);
         if (error) {
@@ -92,7 +93,6 @@ void Server::acceptLoop() {
             std::cerr << "aegis_daemon: accept failed: " << error.message() << '\n';
             return;
         }
-        auto connection = std::make_shared<Connection>();
         connection->socket = std::move(socket);
         connection->worker = std::thread([this, connection] {
             try { serve(connection->socket); }
@@ -178,41 +178,39 @@ void Server::serve(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket) 
 
 void Server::serveWebSocket(const std::shared_ptr<boost::asio::ip::tcp::socket> &socket, const Request &request) {
     boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
+    const auto subscription = context_.events->subscribe();
     boost::system::error_code error;
     websocket.accept(request, error);
-    if (error) { std::cerr << "aegis_daemon: event WebSocket handshake failed: " << error.message() << '\n'; return; }
+    if (error) {
+        context_.events->unsubscribe(subscription);
+        std::cerr << "aegis_daemon: event WebSocket handshake failed: " << error.message() << '\n';
+        return;
+    }
     eventClients_.fetch_add(1);
+    hadEventClient_ = true;
     struct ClientCount final {
         std::atomic_size_t &count;
         ~ClientCount() { count.fetch_sub(1); }
     } clientCount{eventClients_};
-    std::atomic_bool peerClosed = false;
-    std::thread reader([&] {
-        boost::beast::flat_buffer incoming;
-        boost::system::error_code readError;
-        while (running_ && !readError) {
-            websocket.read(incoming, readError);
-            incoming.consume(incoming.size());
-        }
-        peerClosed = true;
-    });
-    const auto subscription = context_.events->subscribe();
-    auto nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-    while (running_ && !peerClosed) {
+    boost::beast::flat_buffer incoming;
+    while (running_) {
         AgentEvent event;
-        if (context_.events->wait(subscription, event, std::chrono::seconds(1))) {
+        if (context_.events->wait(subscription, event, std::chrono::milliseconds(0))) {
             websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
-            if (error) break;
-            if (event.type == "stream.resync_required") break;
+            if (error || event.type == "stream.resync_required") break;
+            continue;
         }
-        if (std::chrono::steady_clock::now() >= nextPing) {
-            websocket.ping({}, error);
+        pollfd ready{socket->native_handle(), POLLIN, 0};
+        const auto pollResult = poll(&ready, 1, 50);
+        if (pollResult < 0 && errno != EINTR) break;
+        if (pollResult > 0 && ready.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
+        if (pollResult > 0 && ready.revents & POLLIN) {
+            websocket.read(incoming, error);
+            incoming.consume(incoming.size());
             if (error) break;
-            nextPing = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         }
     }
     ::shutdown(socket->native_handle(), SHUT_RDWR);
-    if (reader.joinable()) reader.join();
     context_.events->unsubscribe(subscription);
 }
 
@@ -261,10 +259,14 @@ void Server::serveTerminalWebSocket(const std::shared_ptr<boost::asio::ip::tcp::
         return;
     }
     boost::beast::websocket::stream<boost::asio::ip::tcp::socket &> websocket(*socket);
+    const auto subscription = context_.agentManager->terminalEvents().subscribe(runId);
     boost::system::error_code error;
     websocket.accept(request, error);
-    if (error) { std::cerr << "aegis_daemon: terminal WebSocket handshake failed: " << error.message() << '\n'; return; }
-    const auto subscription = context_.agentManager->terminalEvents().subscribe(runId);
+    if (error) {
+        context_.agentManager->terminalEvents().unsubscribe(subscription);
+        std::cerr << "aegis_daemon: terminal WebSocket handshake failed: " << error.message() << '\n';
+        return;
+    }
     const auto history = context_.store->terminalOutput(runId);
     if (history.size() == 128) {
         const auto marker = AgentEvent{"terminal-history-truncated-" + runId, history.back().taskId, runId,
@@ -273,15 +275,27 @@ void Server::serveTerminalWebSocket(const std::shared_ptr<boost::asio::ip::tcp::
             history.back().timestamp, history.back().sequence};
         websocket.write(boost::asio::buffer(protocol::toJson(marker).dump()), error);
     }
+    boost::beast::flat_buffer incoming;
     for (const auto &event : history) {
         if (error) break;
         websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
     }
     while (!error && running_) {
         AgentEvent event;
-        if (!context_.agentManager->terminalEvents().wait(subscription, event, std::chrono::seconds(1))) continue;
-        websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
-        if (event.type == "stream.resync_required") break;
+        if (context_.agentManager->terminalEvents().wait(subscription, event, std::chrono::milliseconds(0))) {
+            websocket.write(boost::asio::buffer(protocol::toJson(event).dump()), error);
+            if (error || event.type == "stream.resync_required") break;
+            continue;
+        }
+        pollfd ready{socket->native_handle(), POLLIN, 0};
+        const auto pollResult = poll(&ready, 1, 50);
+        if (pollResult < 0 && errno != EINTR) break;
+        if (pollResult > 0 && ready.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
+        if (pollResult > 0 && ready.revents & POLLIN) {
+            websocket.read(incoming, error);
+            incoming.consume(incoming.size());
+            if (error) break;
+        }
     }
     context_.agentManager->terminalEvents().unsubscribe(subscription);
     if (!error) websocket.close(boost::beast::websocket::close_code::normal, error);

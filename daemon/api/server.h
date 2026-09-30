@@ -25,6 +25,7 @@ public:
     void stop();
     std::uint16_t port() const;
     std::size_t activeEventClients() const { return eventClients_.load(); }
+    bool hasHadEventClient() const { return hadEventClient_.load(); }
 
 private:
     struct Connection {
@@ -46,6 +47,7 @@ private:
     std::mutex connectionsMutex_;
     std::vector<std::shared_ptr<Connection>> connections_;
     std::atomic_size_t eventClients_ = 0;
+    std::atomic_bool hadEventClient_ = false;
 };
 
 }
