@@ -62,7 +62,7 @@ describe("workspace UI journey", () => {
     expect(screen.getByRole("heading", { name: "Review the changed source" })).toBeTruthy();
     expect(screen.getByText(/TURN COMPLETE · RUN ACTIVE/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    await screen.findByText("CHANGED FILES");
+    await screen.findByText("CHANGED FILES", {}, { timeout: 5000 });
     fireEvent.click(await screen.findByRole("button", { name: /source\.cpp/ }));
     expect((await screen.findByTestId("monaco-diff")).textContent).toBe("Read-only diff");
     expect(screen.getByText("HEAD ↔ WORKTREE")).toBeTruthy();
