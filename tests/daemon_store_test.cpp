@@ -77,24 +77,8 @@ int main() {
         assert(secondPage.events.size() == 2 && secondPage.events.front().id == "event-21");
         assert(store.events(task.id, 0).empty());
         const auto terminalRun = store.startRun(task.id, "shell");
-        const auto interleavedTerminalRun = store.startRun(task.id, "shell");
-        const auto beforeInterleaved = store.events(task.id).size();
-        const auto align = (1 + 32 - ((beforeInterleaved + 32) % 32)) % 32;
-        for (std::size_t filler = 0; filler < align; ++filler)
-            store.appendEvent({"interleaved-align-" + std::to_string(filler), task.id, interleavedTerminalRun.id, "terminal.output", "shell", "chunk", 0});
-        for (int index = 0; index < 200; ++index) {
-            for (int filler = 0; filler < 31; ++filler)
-                store.appendEvent({"interleaved-terminal-" + std::to_string(index * 31 + filler), task.id, interleavedTerminalRun.id, "terminal.output", "shell", "chunk", index});
+        for (int index = 0; index < 140; ++index)
             store.appendEvent({"terminal-" + std::to_string(index), task.id, terminalRun.id, "terminal.output", "shell", "chunk", index});
-        }
-        const auto retainedWhileActive = store.events(task.id);
-        const auto countTerminal = [&](const std::string &runId) {
-            return std::count_if(retainedWhileActive.begin(), retainedWhileActive.end(), [&](const auto &event) {
-                return event.runId == runId && event.type == "terminal.output";
-            });
-        };
-        assert(countTerminal(terminalRun.id) <= 159 && countTerminal(terminalRun.id) >= 128);
-        assert(countTerminal(interleavedTerminalRun.id) <= 159 && countTerminal(interleavedTerminalRun.id) >= 128);
         store.appendEvent({"terminal-semantic", task.id, terminalRun.id, "run.completed", "shell", "", 141});
         const auto terminalHistory = store.events(task.id);
         const auto retainedTerminalChunks = std::count_if(terminalHistory.begin(), terminalHistory.end(), [&](const auto &item) {
@@ -105,6 +89,29 @@ int main() {
         assert(std::any_of(terminalHistory.begin(), terminalHistory.end(), [&](const auto &item) {
             return item.runId == terminalRun.id && item.type == "run.completed";
         }));
+    }
+
+    {
+        aegis::daemon::Store store(":memory:");
+        const auto task = store.createTask("interleaved terminal retention", "/repo");
+        const auto targetRun = store.startRun(task.id, "shell");
+        const auto otherRun = store.startRun(task.id, "shell");
+        const auto align = std::size_t{1};
+        for (std::size_t filler = 0; filler < align; ++filler)
+            store.appendEvent({"align-" + std::to_string(filler), task.id, otherRun.id, "terminal.output", "shell", "chunk", 0});
+        for (int index = 0; index < 200; ++index) {
+            for (int filler = 0; filler < 31; ++filler)
+                store.appendEvent({"other-" + std::to_string(index * 31 + filler), task.id, otherRun.id, "terminal.output", "shell", "chunk", index});
+            store.appendEvent({"target-" + std::to_string(index), task.id, targetRun.id, "terminal.output", "shell", "chunk", index});
+        }
+        const auto retainedWhileActive = store.events(task.id);
+        const auto countTerminal = [&](const std::string &runId) {
+            return std::count_if(retainedWhileActive.begin(), retainedWhileActive.end(), [&](const auto &event) {
+                return event.runId == runId && event.type == "terminal.output";
+            });
+        };
+        assert(countTerminal(targetRun.id) >= 128 && countTerminal(targetRun.id) < 160);
+        assert(countTerminal(otherRun.id) >= 128 && countTerminal(otherRun.id) < 160);
     }
 
     {
