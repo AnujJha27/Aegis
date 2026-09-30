@@ -96,6 +96,8 @@ void websocketSoak(const std::filesystem::path &root) {
     aegis::daemon::Store store(root / "websocket.sqlite");
     aegis::daemon::EventHub events;
     aegis::daemon::api::Context context{&store, &events, nullptr, nullptr, nullptr, root, {}};
+    const auto task = store.createTask("slow websocket recovery", root.string());
+    const auto run = store.startRun(task.id, "synthetic");
     aegis::daemon::api::Server server(context);
     if (!server.start()) throw std::runtime_error("WebSocket soak server failed to start");
 
@@ -142,8 +144,10 @@ void websocketSoak(const std::filesystem::path &root) {
     const std::string burst(8192, 'x');
     const auto started = Clock::now();
     for (std::size_t index = 0; index < eventCount; ++index) {
-        events.publish({"ws-" + std::to_string(index), "task", "run", "agent.message.completed", "synthetic", burst,
-            static_cast<std::int64_t>(index)});
+        const aegis::daemon::AgentEvent event{"ws-" + std::to_string(index), task.id, run.id,
+            "agent.message.completed", "synthetic", burst, static_cast<std::int64_t>(index)};
+        store.appendEvent(event);
+        events.publish(event);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
@@ -172,16 +176,26 @@ void websocketSoak(const std::filesystem::path &root) {
         ++slowEvents;
         slowResync = event.value("type", std::string{}) == "stream.resync_required";
     }
+    boost::system::error_code disconnectError;
+    slow.read(buffer, disconnectError);
+    aegis::daemon::api::Request historyRequest{boost::beast::http::verb::get,
+        "/api/events?task_id=" + task.id, 11};
+    const auto historyResponse = aegis::daemon::api::handle(historyRequest, context);
+    const auto recoveredHistory = nlohmann::json::parse(historyResponse.body());
     boost::system::error_code ignored;
     fast.next_layer().close(ignored);
     slow.next_layer().close(ignored);
     fastReader.join();
     server.stop();
-    if (!slowResync || fastResync || fastEvents != eventCount)
+    if (!slowResync || !disconnectError || fastResync || fastEvents != eventCount ||
+        historyResponse.result() != boost::beast::http::status::ok || recoveredHistory.size() != 500 ||
+        recoveredHistory.back().at("id") != "ws-" + std::to_string(eventCount - 1))
         throw std::runtime_error("WebSocket soak failed: fast_events=" + std::to_string(fastEvents) +
             " fast_resync=" + std::to_string(fastResync) + " slow_events=" + std::to_string(slowEvents) +
-            " slow_resync=" + std::to_string(slowResync));
+            " slow_resync=" + std::to_string(slowResync) + " recovery_history=" + std::to_string(recoveredHistory.size()) +
+            " disconnect=" + std::to_string(static_cast<bool>(disconnectError)));
     std::cout << "websocket_clients=2 fast_events=" << fastEvents << " slow_events_before_resync=" << slowEvents
+              << " recovery_history_events=" << recoveredHistory.size()
               << " flood_and_recovery_ms=" << millis(started) << '\n';
 }
 }

@@ -345,18 +345,21 @@ int runE2e(int argc, char **argv) {
     assert(get(daemon.port(), "/api/tasks/" + taskId + "/runs").empty());
     assert(get(daemon.port(), "/api/tasks/" + taskId + "/verifications").at(0).at("output") == "verification-evidence");
 
+    boost::system::error_code eventClose;
+    events.next_layer().close(eventClose);
+    auto reconnectedEvents = eventSocket(daemon.port(), eventIo);
     const auto retained = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
     assert(retained.status == http::status::created);
     const auto retainedRunId = retained.body.at("id").get<std::string>();
     post(daemon.port(), "/api/runs/" + retainedRunId + "/messages", {{"message", "persist history"}}, http::status::accepted);
-    assert(nextEvent(events, "agent.message.completed").at("run_id") == retainedRunId);
+    assert(nextEvent(reconnectedEvents, "agent.message.completed").at("run_id") == retainedRunId);
 
     const auto startup = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
     const auto startupRunId = startup.body.at("id").get<std::string>();
     post(daemon.port(), "/api/runs/" + startupRunId + "/messages", {{"message", "interrupt startup"}}, http::status::accepted);
-    assert(nextEvent(events, "turn.started").at("run_id") == startupRunId);
+    assert(nextEvent(reconnectedEvents, "turn.started").at("run_id") == startupRunId);
     post(daemon.port(), "/api/runs/" + startupRunId + "/interrupt", Json::object(), http::status::accepted);
-    assert(nextEvent(events, "run.interrupted").at("run_id") == startupRunId);
+    assert(nextEvent(reconnectedEvents, "run.interrupted").at("run_id") == startupRunId);
 
     const auto ptyRun = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "shell"}});
     const auto ptyRunId = ptyRun.body.at("id").get<std::string>();
@@ -365,9 +368,11 @@ int runE2e(int argc, char **argv) {
     auto pty = ptySocket(daemon.port(), ptyIo, ptyRunId);
     pty.write(asio::buffer(std::string("printf 'first-pty-marker\\n'\n")));
     const auto firstPtyOutput = nextTerminalOutput(terminal, "first-pty-marker");
-    pty.write(asio::buffer(std::string("printf 'reconnected-pty-marker\\n'\n")));
-    const auto disconnectedPtyOutput = nextTerminalOutput(terminal, "reconnected-pty-marker");
     boost::system::error_code closeError;
+    pty.next_layer().close(closeError);
+    auto reconnectedPty = ptySocket(daemon.port(), ptyIo, ptyRunId);
+    reconnectedPty.write(asio::buffer(std::string("printf 'reconnected-pty-marker\\n'\n")));
+    const auto disconnectedPtyOutput = nextTerminalOutput(terminal, "reconnected-pty-marker");
     terminal.next_layer().close(closeError);
     auto reconnectedTerminal = terminalSocket(daemon.port(), ptyIo, ptyRunId);
     const auto replayedPtyOutput = nextTerminalOutput(reconnectedTerminal, "reconnected-pty-marker");
@@ -375,13 +380,14 @@ int runE2e(int argc, char **argv) {
         replayedPtyOutput.at("run_id") == ptyRunId);
     boost::system::error_code ignoredPty;
     reconnectedTerminal.next_layer().close(ignoredPty);
+    reconnectedPty.next_layer().close(ignoredPty);
     pty.next_layer().close(ignoredPty);
     post(daemon.port(), "/api/runs/" + ptyRunId + "/terminate", Json::object(), http::status::accepted);
 
     const auto active = request(daemon.port(), http::verb::post, "/api/tasks/" + taskId + "/runs", {{"agent", "codex"}});
     const auto activeRunId = active.body.at("id").get<std::string>();
     post(daemon.port(), "/api/runs/" + activeRunId + "/messages", {{"message", "wait forever"}}, http::status::accepted);
-    assert(nextEvent(events, "turn.started").at("run_id") == activeRunId);
+    assert(nextEvent(reconnectedEvents, "turn.started").at("run_id") == activeRunId);
     for (int index = 0; index < 100 && !std::filesystem::exists(fakePid); ++index)
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     assert(std::filesystem::exists(fakePid));
@@ -394,7 +400,7 @@ int runE2e(int argc, char **argv) {
     assert(!childStartTime.empty());
     assert(childState != 'Z');
     boost::system::error_code ignored;
-    events.next_layer().close(ignored);
+    reconnectedEvents.next_layer().close(ignored);
     delayedEvents.next_layer().close(ignored);
     daemon.stop();
     const auto childExitDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
