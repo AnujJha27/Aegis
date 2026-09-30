@@ -68,6 +68,19 @@ long long residentRssKiB() {
     return 0;
 }
 
+long long threadCount() {
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (!line.starts_with("Threads:")) continue;
+        std::istringstream value(line.substr(8));
+        long long count = 0;
+        value >> count;
+        return count;
+    }
+    return 0;
+}
+
 long long cpuMs() {
     rusage usage{};
     getrusage(RUSAGE_SELF, &usage);
@@ -178,6 +191,7 @@ int main() {
         ("aegis-perf-" + std::to_string(Clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
     const auto cpuStarted = cpuMs();
+    const auto threadsBefore = threadCount();
     const auto cleanup = [&] { std::error_code ignored; std::filesystem::remove_all(root, ignored); };
     try {
         const auto dbPath = root / "events.sqlite";
@@ -366,10 +380,13 @@ int main() {
                   << " refresh10_p95_ms=" << percentile(refreshMs, .95) << " listed_entries=" << listing.entries.size()
                   << " benchmark_peak_rss_kib=" << peakRssKiB() << '\n';
         const auto sqliteBytesAfterCycles = std::filesystem::file_size(dbPath);
+        const auto threadsAfter = threadCount();
         cleanup();
         std::cout << "sqlite_bytes_after_cycles=" << sqliteBytesAfterCycles
+                  << " thread_count_before_after=" << threadsBefore << '/' << threadsAfter
                   << " cpu_time_ms=" << cpuMs() - cpuStarted << " peak_rss_kib=" << peakRssKiB()
                   << " post_cleanup_rss_kib=" << residentRssKiB() << " temp_files_removed=" << !std::filesystem::exists(root) << '\n';
+        if (threadsAfter > threadsBefore) throw std::runtime_error("synthetic workload left worker threads active");
     } catch (const std::exception &error) {
         cleanup();
         std::cerr << "benchmark failed: " << error.what() << '\n';

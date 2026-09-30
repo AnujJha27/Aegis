@@ -290,7 +290,15 @@ int runE2e(int argc, char **argv) {
     assert(get(daemon.port(), "/api/tasks/" + taskId + "/runs").at(0).at("status") == "running");
 
     auto changed = get(daemon.port(), "/api/files?scope=changed").at("entries");
-    assert(hasPath(changed, "modify.cpp") && hasPath(changed, "added.cpp") && hasPath(changed, "renamed.cpp"));
+    assert(hasPath(changed, "modify.cpp") && hasPath(changed, "added.cpp") &&
+        hasPath(changed, "renamed.cpp") && hasPath(changed, "delete.cpp"));
+    const auto deleted = std::find_if(changed.begin(), changed.end(), [](const auto &entry) { return entry.at("path") == "delete.cpp"; });
+    assert(deleted != changed.end() && deleted->at("git_status") == "D");
+    post(daemon.port(), "/api/git/stage", {{"path", "rename-old.cpp"}}, http::status::ok);
+    post(daemon.port(), "/api/git/stage", {{"path", "renamed.cpp"}}, http::status::ok);
+    changed = get(daemon.port(), "/api/files?scope=changed").at("entries");
+    const auto renamed = std::find_if(changed.begin(), changed.end(), [](const auto &entry) { return entry.at("path") == "renamed.cpp"; });
+    assert(renamed != changed.end() && renamed->at("old_path") == "rename-old.cpp");
     const auto content = get(daemon.port(), "/api/files/content?path=modify.cpp&source=worktree");
     assert(content.at("content") == "int value = 1;\n");
     const auto deletedHead = get(daemon.port(), "/api/files/content?path=delete.cpp&source=head");

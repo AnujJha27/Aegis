@@ -36,4 +36,14 @@ describe("read-only file size limits", () => {
     expect(read).toHaveBeenCalledWith(file.path, "worktree", true);
     expect(screen.queryByTestId("monaco-editor")).toBeNull();
   });
+
+  it("keeps binary file contents out of the read-only code editor", async () => {
+    vi.spyOn(api, "fileContent").mockResolvedValue({
+      source: "worktree", size: 3, exists: true, binary: true, truncated: false, content: "",
+    });
+    render(<FileViewer file={file} mode="file" range="all" inline={false} />);
+
+    expect(await screen.findByText("Binary file")).toBeTruthy();
+    expect(screen.queryByTestId("monaco-editor")).toBeNull();
+  });
 });
