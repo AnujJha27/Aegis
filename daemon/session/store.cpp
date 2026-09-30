@@ -120,6 +120,7 @@ Store::Store(const std::filesystem::path &path) {
             execute("PRAGMA user_version = 4;");
             execute("COMMIT;");
         }
+        execute("CREATE INDEX IF NOT EXISTS events_run_type_sequence ON events(run_id, type, sequence DESC);");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -229,10 +230,16 @@ void Store::appendEvent(const AgentEvent &event) {
         check(sqlite3_bind_text(statement.get(), index + 1, values[index], -1, SQLITE_TRANSIENT), database_, "bind event");
     check(sqlite3_bind_int64(statement.get(), 7, event.timestamp), database_, "bind event timestamp");
     check(sqlite3_step(statement.get()), database_, "insert event");
-    const auto rowId = sqlite3_last_insert_rowid(database_);
     const bool terminalRun = event.type == "run.completed" || event.type == "run.failed" ||
         event.type == "run.interrupted" || event.type == "run.terminated";
-    if ((event.type == "terminal.output" && rowId % 32 == 0) || terminalRun) {
+    bool pruneTerminalOutput = false;
+    if (event.type == "terminal.output") {
+        Statement count(database_, "SELECT COUNT(*) FROM events WHERE type = 'terminal.output' AND run_id = ?");
+        check(sqlite3_bind_text(count.get(), 1, event.runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind terminal count run");
+        check(sqlite3_step(count.get()), database_, "count terminal output");
+        pruneTerminalOutput = sqlite3_column_int(count.get(), 0) >= 160;
+    }
+    if (pruneTerminalOutput || terminalRun) {
         const auto retainCount = 128;
         Statement retain(database_, "DELETE FROM events WHERE type = 'terminal.output' AND run_id = ? AND rowid NOT IN (SELECT rowid FROM events WHERE type = 'terminal.output' AND run_id = ? ORDER BY rowid DESC LIMIT ?)");
         check(sqlite3_bind_text(retain.get(), 1, event.runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind terminal retention run");
