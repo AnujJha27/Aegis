@@ -60,6 +60,13 @@ describe("useAgentWorkspace run lifecycle", () => {
     expect(result.current.currentRunEvents.map((event) => event.id)).toContain("turn-live");
   });
 
+  it("restores turn state from the run snapshot after the event window has rolled over", async () => {
+    vi.spyOn(api, "runs").mockResolvedValue([{ id: "run-1", taskId: "task-1", agent: "codex", status: "running", startedAt: 10, finishedAt: 0, turnStatus: "turn.started" }]);
+    const { result } = renderHook(() => useAgentWorkspace("task-1"));
+    await waitFor(() => expect(result.current.currentRun?.turnStatus).toBe("turn.started"));
+    expect(result.current.turnBusy).toBe(true);
+  });
+
   it("keeps a completed turn resumable inside its still-running run", async () => {
     const { result } = renderHook(() => useAgentWorkspace("task-1"));
     await waitFor(() => expect(result.current.runs[0]?.status).toBe("starting"));

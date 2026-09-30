@@ -48,6 +48,8 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
         const status = lifecycle === "started" ? "running" : lifecycle;
         setRuns((current) => current.map((run) => run.id === event.runId ? { ...run, status, finishedAt: lifecycle === "started" ? 0 : event.timestamp } : run));
       }
+      if (["turn.started", "turn.completed", "turn.interrupted"].includes(event.type))
+        setRuns((current) => current.map((run) => run.id === event.runId ? { ...run, turnStatus: event.type as AgentRun["turnStatus"] } : run));
       if (!snapshotLoaded || snapshotsInFlight > 0) {
         pending.push(event);
         if (pending.length > 500) pending.shift();
@@ -65,9 +67,10 @@ export function useAgentWorkspace(taskId?: string, onEvent?: (event: AgentEvent)
   const currentEvents = useMemo(() => taskId ? events.filter((event) => event.taskId === taskId) : [], [events, taskId]);
   const currentRunEvents = useMemo(() => currentRun ? currentEvents.filter((event) => event.runId === currentRun.id) : [], [currentEvents, currentRun]);
   const lastTurn = [...currentRunEvents].reverse().find((event) => ["turn.started", "turn.completed", "turn.interrupted"].includes(event.type));
-  const turnBusy = lastTurn?.type === "turn.started";
-  const turnCompleted = lastTurn?.type === "turn.completed";
-  const turnInterrupted = lastTurn?.type === "turn.interrupted";
+  const turnStatus = currentRun?.turnStatus ?? lastTurn?.type;
+  const turnBusy = turnStatus === "turn.started";
+  const turnCompleted = turnStatus === "turn.completed";
+  const turnInterrupted = turnStatus === "turn.interrupted";
   const runFinished = currentRun ? ["completed", "failed", "interrupted", "terminated"].includes(currentRun.status) : false;
 
   return { runs, setRuns, selectedRunId, setSelectedRunId, events, setEvents, currentRun, currentEvents, currentRunEvents, runFinished, turnBusy, turnCompleted, turnInterrupted, connection };

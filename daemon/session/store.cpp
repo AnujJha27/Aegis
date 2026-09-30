@@ -336,6 +336,16 @@ std::vector<AgentRun> Store::runs(const std::string &taskId) const {
     return result;
 }
 
+std::optional<AgentEvent> Store::latestTurnEvent(const std::string &runId) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT id, task_id, run_id, type, agent, content, timestamp, sequence FROM events WHERE run_id = ? AND type IN ('turn.started', 'turn.completed', 'turn.interrupted') ORDER BY sequence DESC LIMIT 1");
+    check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind turn run");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    return AgentEvent{columnText(statement.get(), 0), columnText(statement.get(), 1), columnText(statement.get(), 2),
+                      columnText(statement.get(), 3), columnText(statement.get(), 4), columnText(statement.get(), 5),
+                      sqlite3_column_int64(statement.get(), 6), sqlite3_column_int64(statement.get(), 7)};
+}
+
 std::vector<VerificationRun> Store::verifications(const std::string &taskId, std::size_t limit) const {
     std::lock_guard lock(mutex_);
     Statement statement(database_, "SELECT id, task_id, run_id, command_json, exit_code, output, started_at, finished_at FROM verifications WHERE task_id = ? ORDER BY finished_at DESC LIMIT ?");

@@ -36,6 +36,7 @@ public:
     bool updateFindingStatus(const std::string &findingId, const std::string &status);
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;
+    std::optional<AgentEvent> latestTurnEvent(const std::string &runId) const;
     std::vector<Task> tasks() const;
     std::vector<AgentEvent> events(const std::string &taskId, std::optional<std::size_t> limit = std::nullopt,
                                    bool includeTerminalOutput = true) const;

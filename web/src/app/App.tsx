@@ -22,6 +22,7 @@ export function App() {
   const [taskPrompt, setTaskPrompt] = useState("");
   const [openFileRequest, setOpenFileRequest] = useState({ path: "", token: 0 });
   const [busy, setBusy] = useState("Connecting to daemon…");
+  const [sendingRunId, setSendingRunId] = useState("");
   const [daemonConnection, setDaemonConnection] = useState("connecting");
   const [error, setError] = useState("");
   const gitRefreshTimer = useRef<number | undefined>(undefined);
@@ -89,12 +90,12 @@ export function App() {
 
   function onEvent(event: import("./api").AgentEvent) {
     if (event.type === "terminal.output") window.dispatchEvent(new CustomEvent("aegis:terminal-output", { detail: event }));
-    if (event.type === "turn.started") setBusy("Agent working…");
-    else if (event.type === "turn.completed") setBusy("Ready for next prompt");
-    else if (event.type === "turn.interrupted" || event.type === "run.interrupted") setBusy("Agent interrupted");
-    else if (event.type === "run.completed") setBusy("Run complete");
-    else if (event.type === "run.failed") setBusy("Agent failed");
-    else if (event.type === "run.terminated") setBusy("Agent stopped");
+    if (event.runId === currentRunIdRef.current && event.type === "turn.started") setBusy("Agent working…");
+    else if (event.runId === currentRunIdRef.current && event.type === "turn.completed") setBusy("Ready for next prompt");
+    else if (event.runId === currentRunIdRef.current && (event.type === "turn.interrupted" || event.type === "run.interrupted")) setBusy("Agent interrupted");
+    else if (event.runId === currentRunIdRef.current && event.type === "run.completed") setBusy("Run complete");
+    else if (event.runId === currentRunIdRef.current && event.type === "run.failed") setBusy("Agent failed");
+    else if (event.runId === currentRunIdRef.current && event.type === "run.terminated") setBusy("Agent stopped");
     if (event.type === "file.changed") {
       window.clearTimeout(gitRefreshTimer.current);
       gitRefreshTimer.current = window.setTimeout(() => void refreshGit().catch((reason: Error) => setError(reason.message)), 100);
@@ -145,16 +146,18 @@ export function App() {
     const taskId = currentRun.taskId;
     const runId = currentRun.id;
     const message = prompt.trim();
+    setSendingRunId(runId);
     setBusy("Agent working…");
     try {
       await api.send(runId, message);
       if (selectedTaskIdRef.current !== taskId || currentRunIdRef.current !== runId) return;
       setPrompt("");
-      setBusy("Agent working…");
     } catch (reason) {
       if (selectedTaskIdRef.current !== taskId || currentRunIdRef.current !== runId) return;
       setError(reason instanceof Error ? reason.message : "Could not send prompt");
       setBusy("Send failed");
+    } finally {
+      setSendingRunId((current) => current === runId ? "" : current);
     }
   }
 
@@ -211,7 +214,7 @@ export function App() {
     agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch} canLaunch={Boolean(selectedTask && agents.some((agent) => agent.name === selectedAgent && agent.available))}
     run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} onInterruptRun={interruptRun} onTerminateRun={terminateRun} actionsBusy={busy === "Interrupting turn…" || busy === "Stopping agent…"} runFinished={runFinished} turnBusy={workspace.turnBusy} turnCompleted={workspace.turnCompleted} turnInterrupted={workspace.turnInterrupted} resumable={Boolean(currentAgent?.resumable)}
     onPtyInput={pty.send} onPtyResize={pty.resize} ptyConnection={pty.connection} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
-    prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy}
+    prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy} sending={sendingRunId === currentRun?.id}
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}

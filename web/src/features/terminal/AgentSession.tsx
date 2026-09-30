@@ -8,7 +8,7 @@ import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
 import { AegisMark } from "../../components/AegisMark";
 
-export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, turnInterrupted, resumable, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, children }: { task?: Task; run?: AgentRun; runFinished: boolean; turnBusy: boolean; turnCompleted: boolean; turnInterrupted: boolean; resumable: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; children: ReactNode }) {
+export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, turnInterrupted, resumable, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, sending, children }: { task?: Task; run?: AgentRun; runFinished: boolean; turnBusy: boolean; turnCompleted: boolean; turnInterrupted: boolean; resumable: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; sending: boolean; children: ReactNode }) {
   const terminalHost = useRef<HTMLDivElement>(null);
   const promptInput = useRef<HTMLTextAreaElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
@@ -75,7 +75,7 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
   const showEmpty = run ? !interactive && !hasRunOutput : !cards.length;
   const stateLabel = !run ? "IDLE" : run.status === "failed" ? "FAILED" : run.status === "interrupted" ? "INTERRUPTED" : run.status === "terminated" ? "TERMINATED" : run.status === "completed" ? "COMPLETE" : run.status === "starting" ? "STARTING" : turnBusy ? "TURN BUSY · RUN ACTIVE" : turnInterrupted ? "TURN INTERRUPTED · RUN ACTIVE" : turnCompleted ? "TURN COMPLETE · RUN ACTIVE" : "RUN ACTIVE";
   const stateClass = !run ? "idle" : runFinished ? run.status : turnBusy ? "busy" : turnInterrupted ? "interrupted" : "running";
-  const waitingForTurn = turnBusy || busy === "Agent working…";
+  const waitingForTurn = turnBusy || sending;
   return <section className="session">
     <div className="session-heading">
       <div><span className="eyebrow">ACTIVE TASK</span><h1>{task?.prompt ?? "Choose a task to begin"}</h1></div>

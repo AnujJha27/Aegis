@@ -13,7 +13,11 @@ std::optional<Response> runs(const Request &request, const Context &context) {
         if (const auto taskId = pathId(target, "/runs")) {
             if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
             nlohmann::json result = nlohmann::json::array();
-            for (const auto &run : context.store->runs(*taskId)) result.push_back(protocol::toJson(run));
+            for (const auto &run : context.store->runs(*taskId)) {
+                auto item = protocol::toJson(run);
+                if (const auto turn = context.store->latestTurnEvent(run.id)) item["turn_status"] = turn->type;
+                result.push_back(std::move(item));
+            }
             return jsonResponse(boost::beast::http::status::ok, result);
         }
     }

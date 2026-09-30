@@ -94,6 +94,9 @@ int main() {
     const auto olderPage = nlohmann::json::parse(olderHistory.body());
     assert(olderPage.at("events").size() == 1 && olderPage.at("events")[0].at("id") == "history-1");
     assert(!olderPage.at("has_more").get<bool>());
+    store.appendEvent({"history-turn", historyTask.id, historyRun.id, "turn.started", "shell", "", 4});
+    const auto runSnapshot = request(context, http::verb::get, "/api/tasks/" + historyTask.id + "/runs");
+    assert(nlohmann::json::parse(runSnapshot.body()).at(0).at("turn_status") == "turn.started");
 
     const auto file = request(context, http::verb::get, "/api/files/content?path=CMakeLists.txt&source=worktree");
     assert(file.result() == http::status::ok);
