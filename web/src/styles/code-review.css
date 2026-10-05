@@ -60,3 +60,16 @@ body { min-width: 0; }
 .renderer-choice { position: absolute; right: 12px; bottom: 5px; z-index: 3; padding: 4px 7px; background: #131c21; color: #a8c0c9; border: 1px solid var(--line); font: 9px var(--mono); }
 .file-tree { display: flex; flex-direction: column; }
 .file-tree .virtual-viewport { contain: strict; }
+.markdown-preview { height: 100%; overflow: auto; padding: 24px; color: #cbd6dc; font: 14px/1.65 system-ui; }
+.markdown-preview pre { overflow: auto; padding: 12px; background: #10191e; white-space: pre; }
+.markdown-preview a { color: var(--blue); }.markdown-preview table { border-collapse: collapse; }.markdown-preview td, .markdown-preview th { border: 1px solid var(--line); padding: 8px; }
+.mermaid-diagram { margin: 20px 0; border: 1px solid var(--line); background: #11191f; }
+.diagram-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; font: 11px var(--mono); }
+.diagram-controls button { padding: 5px 8px; border: 1px solid var(--line); color: #cbd6dc; background: #17232c; }
+.diagram-canvas { min-height: 140px; height: 420px; overflow: hidden; position: relative; }
+.diagram-svg { transform-origin: center; width: 100%; height: 100%; display: grid; place-items: center; }
+.diagram-svg svg { width: 100%; max-width: 100% !important; max-height: 100%; height: auto; }
+.mermaid-diagram details { padding: 8px; }.mermaid-diagram pre { max-height: 220px; }
+.diagram-fullscreen { position: fixed; z-index: 100; inset: 0; margin: 0; padding: 12px; display: flex; flex-direction: column; }.diagram-fullscreen .diagram-canvas { flex: 1; height: auto; }.diagram-fullscreen:fullscreen { background: #11191f; }
+
+.markdown-choice { right: 170px; }

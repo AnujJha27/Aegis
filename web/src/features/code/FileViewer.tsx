@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { VirtualCodeView } from "./VirtualCodeView";
 import { VirtualDiffView } from "./VirtualDiffView";
+const MarkdownPreview = lazy(() => import("../markdown/MarkdownPreview"));
 const AdvancedViewer = lazy(() => import("./AdvancedViewer"));
 import type { FileComparison, FileContent, FileEntry } from "../../app/api";
 import { api } from "../../app/api";
@@ -25,6 +26,7 @@ export function FileViewer({ file, mode, range, inline, commitId, refreshKey, st
     window.addEventListener("aegis:repository", changed); window.addEventListener("aegis:resync", resync);
     return () => { window.removeEventListener("aegis:repository", changed); window.removeEventListener("aegis:resync", resync); };
   }, [file.path, commitId]);
+  const [preview, setPreview] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [content, setContent] = useState<FileContent>();
   const [comparison, setComparison] = useState<FileComparison>();
@@ -60,7 +62,7 @@ export function FileViewer({ file, mode, range, inline, commitId, refreshKey, st
   const loadFull = () => setLargePath(file.path);
   const choice = <button className="renderer-choice" onClick={() => setAdvanced((old) => !old)}>{advanced ? "Fast viewer" : "Advanced viewer (Monaco)"}</button>;
   function render(source: string, original?: string) {
-    return <>{choice}{advanced ? <Suspense fallback={<div className="code-state">Loading advanced viewer…</div>}><AdvancedViewer source={source} original={original} language={file.language} inline={inline} /></Suspense>
+    return <>{choice}{original === undefined && file.language === "markdown" && <button className="renderer-choice markdown-choice" onClick={() => setPreview((old) => !old)}>{preview ? "Source" : "Markdown preview"}</button>}{preview && original === undefined && file.language === "markdown" ? <Suspense fallback={<div className="code-state">Loading Markdown preview…</div>}><MarkdownPreview source={source} /></Suspense> : advanced ? <Suspense fallback={<div className="code-state">Loading advanced viewer…</div>}><AdvancedViewer source={source} original={original} language={file.language} inline={inline} /></Suspense>
       : original === undefined ? <VirtualCodeView source={source} language={file.language} identity={`${file.path}:${commitId ?? "worktree"}`} />
         : <VirtualDiffView original={original} modified={source} language={file.language} identity={`${file.path}:${commitId ?? range}`} inline={inline} startedAt={requestStarted.current} />}</>;
   }
