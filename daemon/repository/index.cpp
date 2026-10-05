@@ -79,7 +79,33 @@ void RepositoryIndex::rebuild() {
     const auto started = Clock::now();
     auto next = std::make_shared<Snapshot>();
     next->version = snapshot()->version + 1;
-    std::map<std::string, FileEntry> root;
+    auto rootListing = [&](const std::string &output) {
+        std::map<std::string, FileEntry> root;
+        for (std::size_t start = 0; start < output.size();) {
+            const auto end = output.find('\0', start);
+            if (end == std::string::npos) break;
+            const auto path = output.substr(start, end - start);
+            start = end + 1;
+            if (excluded(path)) continue;
+            const auto slash = path.find('/');
+            auto name = path.substr(0, slash);
+            FileEntry entry;
+            entry.path = entry.name = name;
+            entry.kind = slash == std::string::npos ? "file" : "directory";
+            entry.language = entry.kind == "file" ? fileLanguage(path) : "";
+            root.try_emplace(name, std::move(entry));
+        }
+        for (auto &[_, entry] : root) next->children[""].push_back(std::move(entry));
+    };
+    if (snapshot()->version == 0 && git_.validRepository_) {
+        // Bootstrap only: Git collapses wholly-untracked directories without enumerating their contents.
+        const auto roots = process::run(git_.command({"ls-files", "--cached", "--others", "--exclude-standard", "--directory", "--no-empty-directory", "-z"}), git_.path());
+        if (roots.exitCode != 0) throw std::runtime_error("repository root enumeration failed");
+        rootListing(roots.output);
+        next->rootMicros = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count();
+        snapshot_.store(std::make_shared<Snapshot>(*next));
+        next->children.clear();
+    }
     std::vector<std::string> paths;
     if (git_.validRepository_) {
         auto result = process::run(git_.command({"ls-files", "--cached", "--others", "--exclude-standard", "-z"}), git_.path());
@@ -97,19 +123,6 @@ void RepositoryIndex::rebuild() {
     }
     std::sort(paths.begin(), paths.end());
     paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
-    for (const auto &path : paths) {
-        const auto slash = path.find('/');
-        auto name = path.substr(0, slash);
-        FileEntry entry;
-        entry.path = entry.name = name;
-        entry.kind = slash == std::string::npos ? "file" : "directory";
-        entry.language = entry.kind == "file" ? fileLanguage(path) : "";
-        root.try_emplace(name, std::move(entry));
-    }
-    for (auto &[_, entry] : root) next->children[""].push_back(std::move(entry));
-    next->rootMicros = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count();
-    if (snapshot()->version == 0) snapshot_.store(std::make_shared<Snapshot>(*next)); // Publish root before per-file stat work.
-    next->children.clear();
     next->files.reserve(paths.size());
     std::map<std::string, FileEntry> directories;
     for (auto &path : paths) {
