@@ -24,7 +24,7 @@ describe("read-only file size limits", () => {
 
     view.rerender(<FileViewer file={file} mode="file" range="all" inline={false} refreshKey={{}} />);
 
-    await waitFor(() => expect(screen.getByTestId("monaco-editor").textContent).toBe("new"));
+    await waitFor(() => expect(screen.getByText("new").textContent).toBe("new"));
     expect(read).toHaveBeenCalledTimes(2);
   });
 
@@ -33,7 +33,7 @@ describe("read-only file size limits", () => {
     render(<FileViewer file={file} mode="file" range="all" inline={false} />);
     fireEvent.click(await screen.findByRole("button", { name: "Load up to 8 MB" }));
     await screen.findByText(/exceeds the 8 MB display limit/i);
-    expect(read).toHaveBeenCalledWith(file.path, "worktree", true);
+    expect(read).toHaveBeenCalledWith(file.path, "worktree", true, expect.any(AbortSignal));
     expect(screen.queryByTestId("monaco-editor")).toBeNull();
   });
 
@@ -46,4 +46,31 @@ describe("read-only file size limits", () => {
     expect(await screen.findByText("Binary file")).toBeTruthy();
     expect(screen.queryByTestId("monaco-editor")).toBeNull();
   });
+});
+
+it("aborts explicit large-file loads when the selected file changes", async () => {
+  let finish!: (value: FileContent) => void;
+  const read = vi.spyOn(api, "fileContent").mockResolvedValueOnce(capped)
+    .mockImplementationOnce(() => new Promise((done) => { finish = done; }))
+    .mockResolvedValue({ ...capped, truncated: false, content: "selected new file" });
+  const view = render(<FileViewer file={file} mode="file" range="all" inline={false} />);
+  fireEvent.click(await screen.findByText("Load up to 8 MB"));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  const signal = read.mock.calls[1][3]!;
+  view.rerender(<FileViewer file={{ ...file, path: "other.cpp" }} mode="file" range="all" inline={false} />);
+  await screen.findByText("selected new file");
+  expect(signal.aborted).toBe(true);
+  finish({ ...capped, truncated: false, content: "stale large file" });
+  await waitFor(() => expect(screen.queryByText("stale large file")).toBeNull());
+});
+
+it("rejects old repository events and reloads only the affected file", async () => {
+  const read = vi.spyOn(api, "fileContent").mockResolvedValue({ ...capped, truncated: false, content: "content" });
+  render(<FileViewer file={file} mode="file" range="all" inline={false} />);
+  await screen.findByText("content");
+  const event = (version: number, path: string) => window.dispatchEvent(new CustomEvent("aegis:repository", { detail: { version, paths: [path] } }));
+  event(2, "unrelated.cpp"); event(1, file.path);
+  expect(read).toHaveBeenCalledTimes(1);
+  event(3, file.path);
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
 });

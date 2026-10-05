@@ -64,7 +64,9 @@ describe("workspace UI journey", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     await screen.findByText("CHANGED FILES", {}, { timeout: 5000 });
     fireEvent.click(await screen.findByRole("button", { name: /source\.cpp/ }));
-    expect((await screen.findByTestId("monaco-diff")).textContent).toBe("Read-only diff");
+    expect(await screen.findByText("before", {}, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByText("after", {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Advanced viewer (Monaco)" })).toBeTruthy();
     expect(screen.getByText("HEAD ↔ WORKTREE")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Run check" }));

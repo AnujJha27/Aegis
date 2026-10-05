@@ -44,3 +44,19 @@ body { min-width: 0; }
 @media (max-width: 820px) { .code-workspace { grid-template-columns: 185px minmax(0, 1fr); }.review-sidebar { display: none; }.code-toolbar { align-items: flex-start; flex-direction: column; }.code-controls { width: 100%; }.code-controls select { flex: 1; max-width: none; }.code-status { gap: 8px; }.topbar { gap: 9px; padding: 0 10px; }.brand small, .repo-path { display: none; } }
 @media (max-width: 1100px) { body { min-width: 760px; }.workspace { grid-template-columns: 220px minmax(0, 1fr); }.output-surface, .composer, .drawer { padding-left: 5%; padding-right: 5%; }.repo-path { display: none; } }
 
+.virtual-code { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.viewer-tools { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px var(--mono); }
+.viewer-tools input, .viewer-tools button { border: 1px solid var(--line); background: #11191d; color: #cbd6da; padding: 4px; font: inherit; }
+.viewer-tools input[type=number] { width: 75px; }
+.virtual-viewport { flex: 1; min-height: 0; overflow: auto; outline-offset: -2px; font: 13px/22px var(--mono); color: #c8d2d8; contain: strict; }
+.virtual-row { display: flex; white-space: pre; tab-size: 4; }
+.virtual-row.current { background: #172027; }
+.virtual-row code { font: inherit; }
+.line-number { user-select: none; display: inline-block; flex: 0 0 64px; padding-right: 12px; color: #637481; text-align: right; }
+.line-number.changed { border-left: 3px solid var(--accent); }
+.token-comment { color: #6e8990; }.token-string { color: #b8cc92; }.token-number { color: #ccb888; }.token-keyword { color: #88b9d0; }
+.diff-cell { flex: 1; min-width: 0; display: flex; overflow: hidden; }
+.diff-cell.add { background: #14312688; }.diff-cell.delete { background: #401e2588; }
+.renderer-choice { position: absolute; right: 12px; bottom: 5px; z-index: 3; padding: 4px 7px; background: #131c21; color: #a8c0c9; border: 1px solid var(--line); font: 9px var(--mono); }
+.file-tree { display: flex; flex-direction: column; }
+.file-tree .virtual-viewport { contain: strict; }

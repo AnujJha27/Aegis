@@ -14,6 +14,7 @@ type Range = "all" | "staged" | "unstaged";
 const commitFileChange = (file: GitCommitFile): GitChange => ({ path: file.path, old_path: file.old_path, index_status: file.status, worktree_status: " ", additions: 0, deletions: 0, binary: false });
 
 export function CodeWorkspace(props: Props) {
+  const [openedAt, setOpenedAt] = useState(0);
   const [scope, setScope] = useState<"changed" | "all" | "commits">("changed");
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [commitId, setCommitId] = useState("");
@@ -56,6 +57,7 @@ export function CodeWorkspace(props: Props) {
   }, [scope, commitId]);
 
   const openFile = useCallback((entry: FileEntry) => {
+    setOpenedAt(performance.now());
     setSelected(entry.path);
     setMode(entry.changed ? "diff" : "file");
     setTabs((current) => [entry, ...current.filter((item) => item.path !== entry.path)].slice(0, 6));
@@ -94,13 +96,13 @@ export function CodeWorkspace(props: Props) {
     </aside>
 
     <section className="code-main" aria-label="Read-only code review">
-      <FileTabs files={tabs} selected={selected} onSelect={setSelected} onClose={(path) => { const next = tabs.filter((item) => item.path !== path); setTabs(next); if (selected === path) setSelected(next[0]?.path ?? ""); }} />
+      <FileTabs files={tabs} selected={selected} onSelect={(path) => { setOpenedAt(performance.now()); setSelected(path); }} onClose={(path) => { const next = tabs.filter((item) => item.path !== path); setTabs(next); if (selected === path) setSelected(next[0]?.path ?? ""); }} />
       {file ? <>
         <header className="code-toolbar"><div className="code-path"><span>{file.changed ? file.git_status || "M" : "FILE"}</span><code>{file.path}</code></div><div className="code-controls">
-          <div className="code-segment" role="group" aria-label="File view"><button aria-pressed={mode === "file"} className={mode === "file" ? "active" : ""} onClick={() => setMode("file")}>File</button><button aria-pressed={mode === "diff"} className={mode === "diff" ? "active" : ""} onClick={() => setMode("diff")}>Diff</button></div>
+          <div className="code-segment" role="group" aria-label="File view"><button aria-pressed={mode === "file"} className={mode === "file" ? "active" : ""} onClick={() => { setOpenedAt(performance.now()); setMode("file"); }}>File</button><button aria-pressed={mode === "diff"} className={mode === "diff" ? "active" : ""} onClick={() => { setOpenedAt(performance.now()); setMode("diff"); }}>Diff</button></div>
           {mode === "diff" && <>{!commitMode && <select aria-label="Diff source" value={range} onChange={(event) => setRange(event.target.value as Range)}><option value="all">All changes</option><option value="staged">Staged</option><option value="unstaged">Unstaged</option></select>}<div className="code-segment" role="group" aria-label="Diff layout"><button aria-pressed={!inline} className={!inline ? "active" : ""} onClick={() => setInline(false)}>Split</button><button aria-pressed={inline} className={inline ? "active" : ""} onClick={() => setInline(true)}>Inline</button></div></>}
         </div></header>
-        <div className="code-editor"><Suspense fallback={<div className="code-state">Loading local code renderer…</div>}><FileViewer key={`${file.path}:${mode}:${range}:${commitMode ? commitId : ""}`} file={file} mode={mode} range={range} inline={inline} commitId={commitMode ? commitId : undefined} refreshKey={props.gitChanges} /></Suspense></div>
+        <div className="code-editor"><Suspense fallback={<div className="code-state">Loading local code renderer…</div>}><FileViewer startedAt={openedAt} key={`${file.path}:${mode}:${range}:${commitMode ? commitId : ""}`} file={file} mode={mode} range={range} inline={inline} commitId={commitMode ? commitId : undefined} refreshKey={currentChange ? `${currentChange.index_status}:${currentChange.worktree_status}:${currentChange.old_path ?? ""}` : ""} /></Suspense></div>
         <footer className="code-status"><span>{file.language || "text"}</span><span>UTF-8</span><span>{commitMode ? `${selectedCommit?.parent_id?.slice(0, 7) ?? "EMPTY"} ↔ ${commitId.slice(0, 7)}` : mode === "file" ? "WORKTREE" : `${range === "all" ? "HEAD ↔ WORKTREE" : range === "staged" ? "HEAD ↔ INDEX" : "INDEX ↔ WORKTREE"}`}</span><span>READ ONLY</span></footer>
       </> : <div className="code-empty"><span>SELECT A FILE TO INSPECT</span><p>Agent output → changed files → review evidence</p><small>Ctrl/Cmd+P quick open</small></div>}
     </section>

@@ -25,6 +25,8 @@ export function App() {
   const [sendingRunId, setSendingRunId] = useState("");
   const [daemonConnection, setDaemonConnection] = useState("connecting");
   const [error, setError] = useState("");
+  const gitSequence = useRef(0);
+  const repositoryVersion = useRef(0);
   const gitRefreshTimer = useRef<number | undefined>(undefined);
   const currentRun = workspace.currentRun;
   const selectedTaskIdRef = useRef(selectedTask?.id);
@@ -36,24 +38,9 @@ export function App() {
   const interactive = Boolean(currentAgent?.interactive);
   const pty = usePtySession(currentRun, interactive, runFinished);
 
+  useEffect(() => { if (pty.error) setError(pty.error); }, [pty.error]);
   useEffect(() => { if (review.error) setError(review.error); }, [review.error]);
-  useEffect(() => () => window.clearTimeout(gitRefreshTimer.current), []);
-
-  useEffect(() => {
-    if (screen !== "review") return;
-    let active = true;
-    const refresh = () => {
-      void api.gitStatus(true).then((git) => {
-        if (!active) return;
-        if (JSON.stringify(git.files) !== JSON.stringify(gitChanges)) setGitChanges(git.files);
-        if (JSON.stringify(git) !== JSON.stringify(gitStatus)) setGitStatus(git);
-        if (JSON.stringify(git.repository) !== JSON.stringify(repository)) setRepository(git.repository);
-      }).catch(() => {});
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 5000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [screen, gitChanges, gitStatus, repository]);
+  useEffect(() => () => { ++gitSequence.current; window.clearTimeout(gitRefreshTimer.current); }, []);
 
   useEffect(() => {
     let active = true;
@@ -96,14 +83,25 @@ export function App() {
     else if (event.runId === currentRunIdRef.current && event.type === "run.completed") setBusy("Run complete");
     else if (event.runId === currentRunIdRef.current && event.type === "run.failed") setBusy("Agent failed");
     else if (event.runId === currentRunIdRef.current && event.type === "run.terminated") setBusy("Agent stopped");
-    if (event.type === "file.changed") {
+    if (event.type === "file.changed" || event.type === "repository.changed") {
+      if (event.type === "repository.changed") {
+        try {
+          const update = JSON.parse(event.content) as { version: number; index_version: number };
+          if (update.version <= repositoryVersion.current) return;
+          repositoryVersion.current = update.version;
+          window.dispatchEvent(new CustomEvent("aegis:repository", { detail: update }));
+        } catch { return; }
+      }
       window.clearTimeout(gitRefreshTimer.current);
       gitRefreshTimer.current = window.setTimeout(() => void refreshGit().catch((reason: Error) => setError(reason.message)), 100);
     }
   }
 
   async function refreshGit() {
-    const git = await api.gitStatus(true);
+    const sequence = ++gitSequence.current;
+    const version = repositoryVersion.current;
+    const git = await api.gitStatus();
+    if (sequence !== gitSequence.current || version !== repositoryVersion.current) return;
     if (JSON.stringify(git.repository) !== JSON.stringify(repository)) setRepository(git.repository);
     if (JSON.stringify(git.files) !== JSON.stringify(gitChanges)) setGitChanges(git.files);
     if (JSON.stringify(git) !== JSON.stringify(gitStatus)) setGitStatus(git);
@@ -111,6 +109,8 @@ export function App() {
   }
 
   async function reconnectRefresh() {
+    repositoryVersion.current = 0;
+    window.dispatchEvent(new Event("aegis:resync"));
     try { await refreshGit(); setDaemonConnection("connected"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not refresh repository state"); setDaemonConnection("unavailable"); }
   }

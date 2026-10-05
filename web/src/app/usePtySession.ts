@@ -9,6 +9,7 @@ export function usePtySession(run?: AgentRun, interactive = false, finished = fa
   const pending = useRef<string[]>([]);
   const firstConnection = useRef(true);
   const size = useRef({ cols: 100, rows: 30 });
+  const [error, setError] = useState("");
   const [connection, setConnection] = useState<PtyConnection>("idle");
 
   useEffect(() => {
@@ -35,8 +36,10 @@ export function usePtySession(run?: AgentRun, interactive = false, finished = fa
         retryTimer = window.setTimeout(connect, Math.min(500 * 2 ** retries++, 8000));
       };
     };
+    const replay = () => { if (!active) return; window.clearTimeout(retryTimer); terminal?.close(); connect(); };
+    window.addEventListener("aegis:terminal-ready", replay);
     connect();
-    return () => { active = false; window.clearTimeout(retryTimer); terminal?.close(); };
+    return () => { active = false; window.removeEventListener("aegis:terminal-ready", replay); window.clearTimeout(retryTimer); terminal?.close(); };
   }, [run?.id, interactive]);
 
   useEffect(() => {
@@ -90,7 +93,12 @@ export function usePtySession(run?: AgentRun, interactive = false, finished = fa
 
   function send(input: string) {
     if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(input);
-    else if (firstConnection.current && socket.current?.readyState === WebSocket.CONNECTING) pending.current.push(input);
+    else if (firstConnection.current && socket.current?.readyState === WebSocket.CONNECTING) {
+      if (pending.current.length >= 128 || pending.current.reduce((sum, chunk) => sum + chunk.length, 0) + input.length > 16384) {
+        setError("Terminal input queue is full while connecting. Wait for the terminal and retry the last input."); return;
+      }
+      pending.current.push(input);
+    }
   }
 
   function resize(cols: number, rows: number) {
@@ -98,5 +106,5 @@ export function usePtySession(run?: AgentRun, interactive = false, finished = fa
     if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "resize", cols, rows }));
   }
 
-  return { send, resize, connection };
+  return { send, resize, connection, error };
 }

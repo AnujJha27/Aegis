@@ -11,7 +11,7 @@ export function connectEvents(onEvent: (event: AgentEvent) => void, onState: (st
   let retries = 0;
   let connectedOnce = false;
   const connect = () => {
-    if (closed) return;
+    if (closed || document.visibilityState === "hidden") return;
     onState(retries > 4 ? "unavailable" : connectedOnce ? "reconnecting" : "connecting", false);
     socket = new WebSocket(`${protocol}//${window.location.host}/ws/events`);
     socket.onopen = () => {
@@ -26,14 +26,19 @@ export function connectEvents(onEvent: (event: AgentEvent) => void, onState: (st
     };
     socket.onerror = () => socket?.close();
     socket.onclose = () => {
-      if (closed) return;
+      if (closed || document.visibilityState === "hidden") return;
       const delay = Math.min(500 * 2 ** retries++, 8000);
       onState(retries > 4 ? "unavailable" : "reconnecting", false);
       retryTimer = window.setTimeout(connect, delay);
     };
   };
+  const visibility = () => {
+    window.clearTimeout(retryTimer);
+    if (document.visibilityState === "hidden") socket?.close(); else connect();
+  };
+  document.addEventListener("visibilitychange", visibility);
   connect();
-  return () => { closed = true; window.clearTimeout(retryTimer); socket?.close(); };
+  return () => { closed = true; document.removeEventListener("visibilitychange", visibility); window.clearTimeout(retryTimer); socket?.close(); };
 }
 
 export function connectPty(runId: string): WebSocket {

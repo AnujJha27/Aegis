@@ -55,3 +55,15 @@ describe("file tree", () => {
     expect(screen.getByRole("button", { name: /copy\.cpp/ }).textContent).toContain("C");
   });
 });
+
+it("paginates large directories without mounting every row", async () => {
+  const first = Array.from({ length: 500 }, (_, i) => entry(`file-${i}.txt`));
+  const files = vi.spyOn(api, "files").mockResolvedValueOnce({ entries: first, truncated: true, next_offset: 500 }).mockResolvedValueOnce({ entries: [entry("last.txt")], truncated: false, next_offset: null });
+  const view = render(<FileTree scope="all" changes={[]} refreshKey="" selectedPath="" onSelect={vi.fn()} />);
+  await screen.findByRole("button", { name: /file-0\.txt/ });
+  expect(view.container.querySelectorAll(".file-row").length).toBeLessThan(100);
+  fireEvent.scroll(screen.getByLabelText("Read-only code"), { target: { scrollTop: 500 * 22 } });
+  fireEvent.click(await screen.findByRole("button", { name: "Load more…" }));
+  await waitFor(() => expect(files).toHaveBeenLastCalledWith("", "all", false, false, 500));
+  await screen.findByRole("button", { name: /last\.txt/ });
+});

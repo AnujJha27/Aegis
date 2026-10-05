@@ -1,75 +1,13 @@
-import { useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
+import { lazy, Suspense, useRef } from "react";
 import type { AgentEvent, AgentRun, Task } from "../../app/api";
 import { readable } from "../../app/events";
 import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
 import { AegisMark } from "../../components/AegisMark";
+const AgentTerminal = lazy(() => import("./AgentTerminal"));
 
 export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, turnInterrupted, resumable, interactive, ptyConnection, onPtyInput, onPtyResize, events, prompt, onPrompt, onSend, busy, sending, children }: { task?: Task; run?: AgentRun; runFinished: boolean; turnBusy: boolean; turnCompleted: boolean; turnInterrupted: boolean; resumable: boolean; interactive: boolean; ptyConnection: PtyConnection; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; events: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; sending: boolean; children: ReactNode }) {
-  const terminalHost = useRef<HTMLDivElement>(null);
   const promptInput = useRef<HTMLTextAreaElement>(null);
-  const terminal = useRef<Terminal | undefined>(undefined);
-  const fit = useRef<FitAddon | undefined>(undefined);
-  const rendered = useRef(new Set<string>());
-  const activeRun = useRef("");
-  const inputHandler = useRef(onPtyInput);
-  const resizeHandler = useRef(onPtyResize);
-  const writable = useRef(!runFinished);
-  inputHandler.current = onPtyInput;
-  resizeHandler.current = onPtyResize;
-  writable.current = !runFinished;
-
-  useEffect(() => {
-    if (!terminalHost.current) return;
-    const next = new Terminal({ convertEol: true, cursorBlink: false, scrollback: 3000, fontFamily: "SFMono-Regular, Consolas, monospace", fontSize: 12, theme: { background: "#151a21", foreground: "#d5deea", cursor: "#91a9c4" } });
-    const addon = new FitAddon();
-    next.loadAddon(addon);
-    next.open(terminalHost.current);
-    const fitTerminal = () => {
-      addon.fit();
-      const dimensions = addon.proposeDimensions();
-      if (dimensions) resizeHandler.current(dimensions.cols, dimensions.rows);
-    };
-    fitTerminal();
-    next.onData((data) => { if (writable.current) inputHandler.current(data); });
-    terminal.current = next;
-    fit.current = addon;
-    const observer = new ResizeObserver(fitTerminal);
-    observer.observe(terminalHost.current);
-    return () => { observer.disconnect(); next.dispose(); terminal.current = undefined; fit.current = undefined; };
-  }, []);
-
-  useEffect(() => {
-    const receive = (message: Event) => {
-      const event = (message as CustomEvent<AgentEvent>).detail;
-      if (!terminal.current || !["terminal.output", "terminal.replay_truncated", "stream.resync_required"].includes(event.type) || event.runId !== activeRun.current || rendered.current.has(event.id)) return;
-      terminal.current.write(event.type === "terminal.output" ? event.content : `\r\n[aegis: ${event.content}]\r\n`);
-      rendered.current.add(event.id);
-      if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
-    };
-    window.addEventListener("aegis:terminal-output", receive);
-    return () => window.removeEventListener("aegis:terminal-output", receive);
-  }, []);
-
-  useEffect(() => {
-    if (!terminal.current) return;
-    if (activeRun.current !== (run?.id ?? "")) {
-      activeRun.current = run?.id ?? "";
-      rendered.current.clear();
-      terminal.current.clear();
-      if (interactive && run && !runFinished) terminal.current.focus();
-    }
-    for (const event of events) {
-      if (event.runId !== run?.id || !["terminal.output", "terminal.replay_truncated", "stream.resync_required"].includes(event.type) || rendered.current.has(event.id)) continue;
-      terminal.current.write(event.type === "terminal.output" ? event.content : `\r\n[aegis: ${event.content}]\r\n`);
-      rendered.current.add(event.id);
-      if (rendered.current.size > 4096) rendered.current.delete(rendered.current.values().next().value!);
-    }
-  }, [events, run?.id, interactive, runFinished]);
-
   const cards = events.filter((event) => ["user.message", "agent.message.completed", "run.failed"].includes(event.type) && readable(event.content).trim());
   const hasRunOutput = Boolean(run && events.some((event) => event.runId === run.id && readable(event.content).trim()));
   const showEmpty = run ? !interactive && !hasRunOutput : !cards.length;
@@ -84,7 +22,7 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
     <div className="output-surface">
       <div className={`terminal-wrap ${run && interactive ? "" : "terminal-hidden"}`}>
         <div className="terminal-label">LIVE PTY OUTPUT <span>{run?.agent ?? "terminal"}</span></div>
-        <div className="xterm-host" ref={terminalHost} onClick={() => terminal.current?.focus()} />
+        {run && interactive && <Suspense fallback={<div className="code-state">Loading terminal…</div>}><AgentTerminal run={run} runFinished={runFinished} events={events} onPtyInput={onPtyInput} onPtyResize={onPtyResize} /></Suspense>}
       </div>
       {showEmpty && <div className="empty-output"><div className="empty-icon"><AegisMark /></div><h2>{run ? `${run.agent} is ready` : task ? "Ready for direction" : "Your workspace is ready"}</h2><p>{run ? interactive ? "The terminal is ready. Type directly into it to answer setup prompts or interact with the CLI." : "Send a prompt below to start the agent." : task ? "Launch an agent, then send a prompt from the dock below." : "Create a task on the left to start an agent run."}</p></div>}
       {cards.map((event) => <article className={`event-card ${event.type.includes("failed") ? "failed" : ""}`} key={event.id}><div className="event-meta"><span className={`event-dot ${event.type.includes("completed") || event.type.includes("finished") ? "done" : ""}`} /><span>{event.agent || "system"}</span><span>{event.type.replaceAll(".", " / ")}</span><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><pre>{readable(event.content)}</pre></article>)}
