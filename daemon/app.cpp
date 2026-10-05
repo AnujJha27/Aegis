@@ -12,7 +12,7 @@ App::App(std::filesystem::path repository, std::filesystem::path webRoot)
           return repository_ / ".aegis" / "aegis.sqlite";
       }()),
       git_(repository_),
-      files_(git_),
+      files_(git_, true),
       agents_(repository_, store_, events_),
       server_({&store_, &events_, &agents_, &git_, &files_, repository_, webRoot_}) {}
 
@@ -21,10 +21,13 @@ App::~App() {
 }
 
 bool App::start(std::uint16_t port) {
-    return server_.start(port);
+    if (!server_.start(port)) return false;
+    watcher_ = std::make_unique<repository::RepositoryWatcher>(git_, files_, events_, [this] { return server_.activeEventClients() > 0; });
+    return true;
 }
 
 void App::stop() {
+    watcher_.reset();
     server_.stop();
 }
 

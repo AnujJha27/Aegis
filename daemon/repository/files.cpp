@@ -1,4 +1,5 @@
 #include "daemon/repository/files.h"
+#include "daemon/repository/index.h"
 
 #include "daemon/process/process.h"
 
@@ -20,7 +21,6 @@ namespace {
 
 constexpr std::size_t normalFileLimit = 1024 * 1024;
 constexpr std::size_t explicitFileLimit = 8 * 1024 * 1024;
-constexpr std::size_t gitOutputLimit = 16 * 1024 * 1024;
 
 std::filesystem::path relativePath(const std::string &value, bool allowRoot = false) {
     if (value.empty() && allowRoot) return ".";
@@ -89,31 +89,10 @@ std::string objectIdFromOutput(std::string output) {
 
 }
 
-Files::Files(const GitRepository &git) : git_(git) {}
+std::string fileLanguage(const std::filesystem::path &path) { return languageFor(path); }
 
-std::vector<std::string> Files::gitPaths(const std::string &prefix, bool &truncated) const {
-    auto arguments = std::vector<std::string>{"--literal-pathspecs", "ls-files", "--cached", "--others", "--exclude-standard", "-z"};
-    if (!prefix.empty()) arguments.insert(arguments.end(), {"--", prefix});
-    process::ChildProcess child;
-    if (!child.start(git_.command(std::move(arguments)), git_.path())) throw std::runtime_error("could not start git ls-files");
-    std::string output;
-    const auto result = child.wait(std::chrono::seconds(30), [&](std::string_view chunk) {
-        if (output.size() < gitOutputLimit) {
-            const auto remaining = gitOutputLimit - output.size();
-            output.append(chunk.substr(0, remaining));
-            if (chunk.size() > remaining) truncated = true;
-        } else truncated = true;
-    }, false);
-    if (result.exitCode != 0) throw std::runtime_error("git ls-files failed: " + result.output);
-    std::vector<std::string> paths;
-    for (std::size_t start = 0; start < output.size();) {
-        const auto end = output.find('\0', start);
-        if (end == std::string::npos) break;
-        paths.push_back(output.substr(start, end - start));
-        start = end + 1;
-    }
-    return paths;
-}
+Files::Files(const GitRepository &git, bool backgroundIndex) : git_(git), index_(std::make_unique<RepositoryIndex>(git, backgroundIndex)) {}
+Files::~Files() = default;
 
 std::string fileSourceName(FileSource source) {
     switch (source) {
@@ -133,7 +112,7 @@ std::optional<FileSource> parseFileSource(const std::string &source) {
 }
 
 FileListing Files::list(const std::string &path, FileScope scope, std::size_t limit,
-                       bool recursive, bool includeChanges) const {
+                       bool recursive, bool includeChanges, std::size_t offset) const {
     const auto relative = relativePath(path, true);
     const auto prefix = relative == "." ? std::string{} : relative.generic_string() + "/";
     if (!git_.validRepository_ && scope == FileScope::all) return {};
@@ -141,11 +120,46 @@ FileListing Files::list(const std::string &path, FileScope scope, std::size_t li
     if (scope == FileScope::changed || includeChanges)
         for (const auto &change : git_.changes()) changes.emplace(change.path, change);
 
+    if (scope == FileScope::all) {
+        const auto snapshot = index_->snapshot();
+        FileListing result;
+        auto append = [&](FileEntry entry) {
+            if (includeChanges) {
+                if (entry.kind == "directory") {
+                    for (const auto &[file, change] : changes) if (file.starts_with(entry.path + "/")) {
+                        entry.changed = true; entry.gitStatus = statusFor(change); break;
+                    }
+                } else if (const auto found = changes.find(entry.path); found != changes.end()) {
+                    const auto &change = found->second;
+                    entry.changed = true; entry.gitStatus = statusFor(change); entry.oldPath = change.oldPath;
+                    entry.additions = change.additions; entry.deletions = change.deletions; entry.binary = change.binary;
+                }
+            }
+            result.entries.push_back(std::move(entry));
+        };
+        std::size_t skipped = 0;
+        if (recursive) {
+            for (const auto &entry : snapshot->files) {
+                if (!entry.file.path.starts_with(prefix)) continue;
+                if (skipped++ < offset) continue;
+                if (result.entries.size() == limit) { result.truncated = true; result.nextOffset = offset + result.entries.size(); break; }
+                append(entry.file);
+            }
+        } else if (const auto found = snapshot->children.find(relative == "." ? "" : relative.generic_string()); found != snapshot->children.end()) {
+            for (const auto &entry : found->second) {
+                if (skipped++ < offset) continue;
+                if (result.entries.size() == limit) { result.truncated = true; result.nextOffset = offset + result.entries.size(); break; }
+                append(entry);
+            }
+        }
+        result.truncated = result.truncated || snapshot->truncated;
+        return result;
+    }
     bool truncated = false;
     std::vector<std::string> paths;
     if (scope == FileScope::changed) {
         for (const auto &[file, change] : changes) if (!internalPath(file)) paths.push_back(file);
-    } else paths = gitPaths(recursive ? std::string{} : prefix, truncated);
+    }
 
     std::map<std::string, FileEntry> entries;
     for (const auto &file : paths) {
@@ -188,14 +202,16 @@ FileListing Files::list(const std::string &path, FileScope scope, std::size_t li
                 if (where->second.gitStatus.empty()) where->second.gitStatus = statusFor(change->second);
             }
         }
-        if (entries.size() > limit) { truncated = true; break; }
+        if (entries.size() > limit + offset) { truncated = true; break; }
     }
 
     FileListing result;
     result.truncated = truncated || entries.size() > limit;
     result.entries.reserve(std::min(entries.size(), limit));
+    std::size_t skipped = 0;
     for (auto &[_, entry] : entries) {
-        if (result.entries.size() == limit) break;
+        if (skipped++ < offset) continue;
+        if (result.entries.size() == limit) { result.nextOffset = offset + result.entries.size(); break; }
         result.entries.push_back(std::move(entry));
     }
     return result;
@@ -203,6 +219,8 @@ FileListing Files::list(const std::string &path, FileScope scope, std::size_t li
 
 std::string Files::objectId(const std::string &path, FileSource source) const {
     if (source == FileSource::worktree || !git_.validRepository_) return {};
+    const auto key = git_.metadataKey() + ":" + fileSourceName(source) + ":" + path;
+    if (const auto cached = objects_.get(key)) return *cached;
     std::vector<std::string> arguments;
     if (source == FileSource::head)
         arguments = {"--literal-pathspecs", "ls-tree", "-z", "--format=%(objectname)", "HEAD", "--", path};
@@ -213,14 +231,20 @@ std::string Files::objectId(const std::string &path, FileSource source) const {
         if (source == FileSource::head && process::run(git_.command({"rev-parse", "--verify", "HEAD"}), git_.path()).exitCode != 0) return {};
         throw std::runtime_error("could not inspect Git file object: " + result.output);
     }
-    return objectIdFromOutput(result.output);
+    auto oid = objectIdFromOutput(result.output);
+    objects_.put(key, oid, oid.size());
+    return oid;
 }
 
 std::string Files::objectIdAt(const std::string &path, const std::string &revision) const {
+    const auto key = revision + ":" + path;
+    if (const auto cached = objects_.get(key)) return *cached;
     const auto result = process::run(git_.command({"--literal-pathspecs", "ls-tree", "-z", "--format=%(objectname)",
                                                    revision, "--", path}), git_.path());
     if (result.exitCode != 0) throw std::runtime_error("could not inspect commit file: " + result.output);
-    return objectIdFromOutput(result.output);
+    auto oid = objectIdFromOutput(result.output);
+    objects_.put(key, oid, oid.size());
+    return oid;
 }
 
 FileContent Files::read(const std::string &path, FileSource source, bool loadLarge) const {
@@ -262,6 +286,11 @@ FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
     struct stat info{};
     if (fstat(descriptor, &info) != 0) { const auto saved = errno; close(descriptor); throw std::system_error(saved, std::generic_category(), "stat repository file"); }
     if (!S_ISREG(info.st_mode)) { close(descriptor); throw std::invalid_argument("path is not a regular file"); }
+    const auto key = "worktree:" + path + ":" + std::to_string(info.st_dev) + ":" + std::to_string(info.st_ino) + ":" +
+        std::to_string(info.st_size) + ":" + std::to_string(info.st_mtim.tv_sec) + ":" + std::to_string(info.st_mtim.tv_nsec) + ":" +
+        std::to_string(info.st_ctim.tv_sec) + ":" + std::to_string(info.st_ctim.tv_nsec) + ":" + std::to_string(loadLarge);
+    if (const auto cached = contents_.get(key)) { close(descriptor); return *cached; }
+    result.cacheIdentity = key;
     result.exists = true;
     result.size = static_cast<std::uint64_t>(info.st_size);
     const auto limit = loadLarge ? explicitFileLimit : normalFileLimit;
@@ -280,6 +309,8 @@ FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
         if (count == 0) break;
         result.content.append(buffer.data(), static_cast<std::size_t>(count));
     }
+    struct stat after{};
+    const bool stable = fstat(descriptor, &after) == 0 && after.st_size == info.st_size && after.st_mtim.tv_sec == info.st_mtim.tv_sec && after.st_mtim.tv_nsec == info.st_mtim.tv_nsec && after.st_ctim.tv_sec == info.st_ctim.tv_sec && after.st_ctim.tv_nsec == info.st_ctim.tv_nsec;
     close(descriptor);
     if (result.content.size() > limit) {
         result.content.clear();
@@ -288,6 +319,8 @@ FileContent Files::readWorktree(const std::string &path, bool loadLarge) const {
         result.content.clear();
         result.binary = true;
     }
+    if (!stable) result.cacheIdentity.clear();
+    if (stable) contents_.put(key, result, result.content.size());
     return result;
 }
 
@@ -308,8 +341,11 @@ FileContent Files::readCommitObject(const std::string &path, const std::optional
 FileContent Files::readBlob(const std::string &oid, FileSource source, std::optional<std::string> revision, bool loadLarge) const {
     FileContent result;
     result.source = source;
-    result.revision = std::move(revision);
+    result.revision = revision;
     if (oid.empty()) return result;
+    const auto key = "blob:" + oid + ":" + std::to_string(loadLarge);
+    if (const auto cached = contents_.get(key)) { result = *cached; result.source = source; result.revision = std::move(revision); return result; }
+    result.cacheIdentity = key;
     const auto sizeResult = process::run(git_.command({"cat-file", "-s", oid}), git_.path());
     if (sizeResult.exitCode != 0) throw std::runtime_error("could not inspect Git blob size: " + sizeResult.output);
     const auto parsedSize = std::stoull(sizeResult.output);
@@ -333,6 +369,7 @@ FileContent Files::readBlob(const std::string &oid, FileSource source, std::opti
         result.content.clear();
         result.binary = true;
     }
+    contents_.put(key, result, result.content.size());
     return result;
 }
 
@@ -340,6 +377,11 @@ FileComparison Files::compare(const std::string &path, FileSource base, FileSour
     const auto relative = relativePath(path);
     FileComparison result;
     result.path = relative.generic_string();
+    const auto metadata = git_.metadataKey();
+    result.modified = read(result.path, target, loadLarge);
+    const auto key = metadata + ":" + fileSourceName(base) + ":" + fileSourceName(target) + ":" + result.path + ":" + result.modified.cacheIdentity;
+    const bool cacheable = base != FileSource::worktree && !result.modified.cacheIdentity.empty();
+    if (cacheable) if (const auto cached = comparisons_.get(key)) return *cached;
     const auto change = git_.change(result.path);
     if (change) {
         result.oldPath = change->oldPath;
@@ -347,14 +389,16 @@ FileComparison Files::compare(const std::string &path, FileSource base, FileSour
     }
     const auto originalPath = base == FileSource::head ? result.oldPath.value_or(result.path) : result.path;
     result.original = read(originalPath, base, loadLarge);
-    result.modified = read(result.path, target, loadLarge);
     result.binary = result.original.binary || result.modified.binary;
     result.truncated = result.original.truncated || result.modified.truncated;
+    if (cacheable && metadata == git_.metadataKey()) comparisons_.put(key, result, result.original.content.size() + result.modified.content.size());
     return result;
 }
 
 FileComparison Files::compareCommit(const std::string &commitId, const std::string &path, bool loadLarge) const {
     const auto relative = relativePath(path);
+    const auto key = "commit:" + commitId + ":" + relative.generic_string() + ":" + std::to_string(loadLarge);
+    if (const auto cached = comparisons_.get(key)) return *cached;
     const auto commit = git_.findCommit(commitId);
     if (!commit) throw std::invalid_argument("commit was not found");
     const auto files = git_.commitFiles(commit->id);
@@ -371,6 +415,7 @@ FileComparison Files::compareCommit(const std::string &commitId, const std::stri
     result.modified = readCommitObject(changed->path, commit->id, loadLarge);
     result.binary = result.original.binary || result.modified.binary;
     result.truncated = result.original.truncated || result.modified.truncated;
+    comparisons_.put(key, result, result.original.content.size() + result.modified.content.size());
     return result;
 }
 

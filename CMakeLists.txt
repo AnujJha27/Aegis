@@ -60,6 +60,8 @@ add_library(aegis_daemon_services
     daemon/process/process.cpp
     daemon/repository/git.cpp
     daemon/repository/files.cpp
+    daemon/repository/index.cpp
+    daemon/repository/watcher.cpp
     daemon/verification/runner.cpp
     daemon/agents/pty_adapter.cpp
     daemon/agents/codex_adapter.cpp
@@ -117,6 +119,16 @@ target_link_libraries(daemon_e2e_test PRIVATE aegis_daemon_services)
 add_dependencies(daemon_e2e_test aegis_daemon)
 add_test(NAME daemon_e2e_test COMMAND daemon_e2e_test $<TARGET_FILE:aegis_daemon>)
 set_tests_properties(daemon_e2e_test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 90)
+
+add_executable(daemon_cache_test tests/daemon_cache_test.cpp)
+target_link_libraries(daemon_cache_test PRIVATE aegis_daemon_services)
+aegis_quality(daemon_cache_test)
+add_test(NAME daemon_cache_test COMMAND daemon_cache_test)
+
+add_executable(daemon_index_test tests/daemon_index_test.cpp)
+target_link_libraries(daemon_index_test PRIVATE aegis_daemon_services)
+aegis_quality(daemon_index_test)
+add_test(NAME daemon_index_test COMMAND daemon_index_test)
 
 add_executable(aegis_perf_bench tests/daemon_perf_bench.cpp)
 target_link_libraries(aegis_perf_bench PRIVATE aegis_daemon_api)

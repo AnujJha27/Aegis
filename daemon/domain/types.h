@@ -48,6 +48,7 @@ struct RepositoryState {
     int files = 0;
     int insertions = 0;
     int deletions = 0;
+    bool operator==(const RepositoryState &) const = default;
 };
 
 struct GitChange {
@@ -58,6 +59,7 @@ struct GitChange {
     int additions = 0;
     int deletions = 0;
     bool binary = false;
+    bool operator==(const GitChange &) const = default;
 };
 
 struct VerificationRun {

@@ -8,6 +8,7 @@
 #include <optional>
 #include <mutex>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -50,6 +51,8 @@ public:
     std::vector<std::string> branches() const;
     std::string currentBranch() const;
     bool clean() const;
+    std::string metadataKey() const;
+    void invalidateSnapshot() const;
     std::string diff(std::size_t maxOutputBytes = 1024 * 1024) const;
     bool stage(const std::string &path, std::string &error) const;
     bool unstage(const std::string &path, std::string &error) const;
@@ -61,18 +64,24 @@ public:
 
 private:
     friend class Files;
+    friend class RepositoryIndex;
     std::vector<std::string> command(std::vector<std::string> arguments) const;
     std::optional<GitChange> change(const std::string &path) const;
-    void invalidateSnapshot() const;
 
     std::filesystem::path path_;
     std::filesystem::path gitDirectory_;
+    std::filesystem::path metadataDirectory_;
+    std::filesystem::path commonDirectory_;
     bool validRepository_ = false;
     mutable std::mutex snapshotMutex_;
+    mutable std::condition_variable snapshotReady_;
+    mutable bool scanning_ = false;
     mutable Snapshot cachedSnapshot_;
     mutable std::chrono::steady_clock::time_point snapshotAt_{};
     mutable bool snapshotValid_ = false;
     mutable std::uint64_t snapshotVersion_ = 0;
+    mutable std::uint64_t invalidation_ = 0;
+    mutable std::uint64_t scanSequence_ = 0;
 };
 
 }

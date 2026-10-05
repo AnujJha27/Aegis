@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <sys/stat.h>
 
 namespace aegis::daemon::repository {
 namespace {
@@ -125,12 +126,23 @@ GitRepository::GitRepository(std::filesystem::path path)
         if (validGitEntry(candidate)) {
             path_ = candidate;
             validRepository_ = true;
+            metadataDirectory_ = candidate / ".git";
+            if (std::filesystem::is_regular_file(metadataDirectory_)) {
+                std::ifstream file(metadataDirectory_); std::string line; std::getline(file, line);
+                auto text = line.substr(7); text.erase(0, text.find_first_not_of(" "));
+                metadataDirectory_ = std::filesystem::path(text);
+                if (metadataDirectory_.is_relative()) metadataDirectory_ = candidate / metadataDirectory_;
+            }
+            commonDirectory_ = metadataDirectory_;
+            std::ifstream common(metadataDirectory_ / "commondir"); std::string line;
+            if (std::getline(common, line)) commonDirectory_ = (metadataDirectory_ / line).lexically_normal();
             return;
         }
         const auto aegisDirectory = candidate / ".aegis-git";
         if (gitDirectory(aegisDirectory)) {
             path_ = candidate;
             gitDirectory_ = aegisDirectory;
+            metadataDirectory_ = commonDirectory_ = aegisDirectory;
             validRepository_ = true;
             return;
         }
@@ -157,12 +169,24 @@ RepositoryState GitRepository::state() const {
 }
 
 GitRepository::Snapshot GitRepository::snapshot(bool refresh) const {
-    std::lock_guard lock(snapshotMutex_);
+    std::unique_lock lock(snapshotMutex_);
     if (!refresh && snapshotValid_ && std::chrono::steady_clock::now() - snapshotAt_ < std::chrono::milliseconds(250)) return cachedSnapshot_;
+    if (scanning_) {
+        snapshotReady_.wait(lock, [this] { return !scanning_; });
+        if (snapshotValid_) return cachedSnapshot_;
+    }
+    scanning_ = true;
+    const auto generation = invalidation_;
+    const auto sequence = ++scanSequence_;
+    lock.unlock();
+    struct Finish {
+        std::mutex &mutex; std::condition_variable &ready; bool &running;
+        ~Finish() { std::lock_guard guard(mutex); running = false; ready.notify_all(); }
+    } finish{snapshotMutex_, snapshotReady_, scanning_};
     Snapshot result;
     result.state.path = path_.string();
     if (!validRepository_) return result;
-    const auto status = process::run(command({"status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all"}), path_);
+    const auto status = process::run(command({"--no-optional-locks", "status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all"}), path_);
     requireComplete(status, "git status");
     if (status.exitCode != 0) throw std::runtime_error("git status failed: " + status.output);
     const auto branchEnd = status.output.find('\0');
@@ -215,10 +239,34 @@ GitRepository::Snapshot GitRepository::snapshot(bool refresh) const {
         result.state.insertions += change.additions;
         result.state.deletions += change.deletions;
     }
-    result.version = ++snapshotVersion_;
-    cachedSnapshot_ = result;
-    snapshotAt_ = std::chrono::steady_clock::now();
-    snapshotValid_ = true;
+    lock.lock();
+    result.version = cachedSnapshot_.state == result.state && cachedSnapshot_.changes == result.changes ? cachedSnapshot_.version : ++snapshotVersion_;
+    if (generation != invalidation_ || sequence != scanSequence_) result = cachedSnapshot_;
+    else {
+        cachedSnapshot_ = result;
+        snapshotAt_ = std::chrono::steady_clock::now();
+        snapshotValid_ = true;
+    }
+    lock.unlock();
+    return result;
+}
+
+std::string GitRepository::metadataKey() const {
+    std::string result;
+    auto stamp = [&](const std::filesystem::path &path) {
+        struct stat info{};
+        if (stat(path.c_str(), &info) != 0) { result += ":missing"; return; }
+        result += ":" + std::to_string(info.st_ino) + ":" + std::to_string(info.st_size) + ":" +
+            std::to_string(info.st_mtim.tv_sec) + ":" + std::to_string(info.st_mtim.tv_nsec) + ":" +
+            std::to_string(info.st_ctim.tv_sec) + ":" + std::to_string(info.st_ctim.tv_nsec);
+    };
+    stamp(metadataDirectory_ / "index"); stamp(metadataDirectory_ / "HEAD");
+    stamp(commonDirectory_ / "packed-refs");
+    std::ifstream head(metadataDirectory_ / "HEAD");
+    std::array<char, 4096> buffer{}; head.getline(buffer.data(), buffer.size());
+    const std::string line(buffer.data());
+    if (line.starts_with("ref: refs/") && line.size() < 4096 && line.find("..") == std::string::npos)
+        stamp(commonDirectory_ / line.substr(5));
     return result;
 }
 
@@ -231,20 +279,21 @@ std::vector<GitChange> GitRepository::changes(std::optional<std::size_t> limit, 
 void GitRepository::invalidateSnapshot() const {
     std::lock_guard lock(snapshotMutex_);
     snapshotValid_ = false;
+    ++invalidation_;
 }
 
 std::optional<GitChange> GitRepository::change(const std::string &path) const {
     if (!validRepository_) return std::nullopt;
     std::string error;
     if (!validPath(path, error)) throw std::invalid_argument(error);
-    const auto status = process::run(command({"--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", path}), path_);
+    const auto status = process::run(command({"--no-optional-locks", "--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", path}), path_);
     requireComplete(status, "git status");
     if (status.exitCode != 0) throw std::runtime_error("git status failed: " + status.output);
     auto matches = parseChanges(status.output, 1);
     if (matches.empty()) return std::nullopt;
     if (!matches.front().oldPath && (matches.front().indexStatus == "A" || matches.front().worktreeStatus == "A")) {
         // A pathspec makes Git report a staged rename as an add, so recover its source from full status only here.
-        const auto allStatus = process::run(command({"status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
+        const auto allStatus = process::run(command({"--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"}), path_);
         requireComplete(allStatus, "git status");
         if (allStatus.exitCode != 0) throw std::runtime_error("git status failed: " + allStatus.output);
         auto allChanges = parseChanges(allStatus.output);

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "daemon/repository/git.h"
+#include "daemon/repository/cache.h"
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace aegis::daemon::repository {
 
@@ -29,6 +31,7 @@ struct FileEntry {
 struct FileListing {
     std::vector<FileEntry> entries;
     bool truncated = false;
+    std::optional<std::size_t> nextOffset;
 };
 
 struct FileContent {
@@ -39,6 +42,7 @@ struct FileContent {
     bool binary = false;
     bool truncated = false;
     std::string content;
+    std::string cacheIdentity;
 };
 
 struct FileComparison {
@@ -53,12 +57,18 @@ struct FileComparison {
     bool truncated = false;
 };
 
+class RepositoryIndex;
+
 class Files final {
 public:
-    explicit Files(const GitRepository &git);
+    explicit Files(const GitRepository &git, bool backgroundIndex = false);
+    ~Files();
+    RepositoryIndex &index() const { return *index_; }
+    struct CacheStats { ReviewCache<FileContent>::Stats contents; ReviewCache<FileComparison>::Stats comparisons; };
+    CacheStats cacheStats() const { return {contents_.stats(), comparisons_.stats()}; }
 
     FileListing list(const std::string &path, FileScope scope, std::size_t limit = 500,
-                     bool recursive = false, bool includeChanges = true) const;
+                     bool recursive = false, bool includeChanges = true, std::size_t offset = 0) const;
     FileContent read(const std::string &path, FileSource source, bool loadLarge = false) const;
     FileComparison compare(const std::string &path,
                            FileSource base = FileSource::head,
@@ -68,7 +78,6 @@ public:
                                  bool loadLarge = false) const;
 
 private:
-    std::vector<std::string> gitPaths(const std::string &prefix, bool &truncated) const;
     std::string objectId(const std::string &path, FileSource source) const;
     std::string objectIdAt(const std::string &path, const std::string &revision) const;
     FileContent readWorktree(const std::string &path, bool loadLarge) const;
@@ -79,6 +88,10 @@ private:
                          bool loadLarge) const;
 
     const GitRepository &git_;
+    std::unique_ptr<RepositoryIndex> index_;
+    mutable ReviewCache<FileContent> contents_;
+    mutable ReviewCache<std::string> objects_{1024 * 1024, 4096};
+    mutable ReviewCache<FileComparison> comparisons_;
 };
 
 std::string fileSourceName(FileSource source);

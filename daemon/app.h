@@ -4,6 +4,7 @@
 #include "daemon/api/server.h"
 #include "daemon/repository/git.h"
 #include "daemon/repository/files.h"
+#include "daemon/repository/watcher.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -30,6 +31,7 @@ private:
     repository::Files files_;
     agents::Manager agents_;
     api::Server server_;
+    std::unique_ptr<repository::RepositoryWatcher> watcher_;
 };
 
 }
