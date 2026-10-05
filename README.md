@@ -59,14 +59,17 @@ See [docs/architecture.md](docs/architecture.md) for lifecycle states, interrupt
 
 ## Performance smoke benchmark
 
-The optional `aegis_perf_bench` target seeds 100,000 SQLite events and a temporary 10,000-file Git repository, then reports latest-history p50/p95, fixture/database size, Git change enumeration, lazy root listing, and selected-file comparison timings:
+The optional `aegis_perf_bench` target measures repository indexing/root availability, native quick-open, literal Git search, cold/cached review opens, PTY/event throughput, SQLite history queries, bounded cache soak and RSS. It defaults to 10,000 files; `--all-scales` also covers 1,000 and 100,000 files:
 
 ```bash
 cmake --build build --target aegis_perf_bench -j2
-./build/aegis_perf_bench
+./build/aegis_perf_bench --all-scales
+node scripts/bundle-sizes.mjs
+node --expose-gc scripts/review-soak.mjs     # Node 24+
+node scripts/mermaid-smoke.mjs              # after web build
 ```
 
-This is a local, synthetic benchmark (not a CI gate); compare runs on the same filesystem and machine. Fast CI instead exercises PTY burst batching, bounded slow-subscriber recovery, Git fixtures, persistence, and frontend reconnection.
+See [performance methodology and measurements](docs/performance.md). Browser diagnostics are available with `?perf` using `window.aegisReviewPerformance()`; samples are bounded. `scripts/compare-perf.py before.log after.log` emits optional regression warnings. This is a local, synthetic benchmark (not a timing gate); compare runs on the same filesystem and machine. Fast CI instead exercises PTY burst batching, bounded slow-subscriber recovery, Git fixtures, persistence, and frontend reconnection.
 
 ## Requirements and build options
 
@@ -89,6 +92,8 @@ Its historical CLI utilities (`status`, `review`, `verify`, `analyze`, and other
 - Use xterm.js for interactive PTY sessions and CLI setup prompts.
 - Inspect changed or repository files, compare staged/unstaged changes, stage or unstage in context, and restore verification evidence after reload.
 - Add task-scoped review notes to a file or line range, resolve/reopen them, and carry bounded findings into handoff context.
+- Browse indexed files and review virtualized code/split or unified diffs; the Advanced viewer lazily loads Monaco.
+- Preview Markdown with lazy, sanitized Mermaid diagrams; copy source, zoom/pan/fit or open fullscreen. Escape exits fullscreen. Repository diagram configuration and callbacks are disabled.
 - Jump from a task's file-change activity directly to the read-only diff; use `Ctrl/Cmd+P` to quick-open a repository file.
 - Inspect bounded handoff context before switching agents.
 - Stage, unstage, commit, push, pull, merge a local branch, and switch local branches through the Git view. Merge, pull, and branch switching require a clean worktree and no active agent run. Merge conflicts are left intact and refreshed in Review for inspection or agent-led resolution.

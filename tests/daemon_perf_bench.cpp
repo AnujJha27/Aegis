@@ -5,6 +5,7 @@
 #include "daemon/api/server.h"
 #include "daemon/protocol/event_hub.h"
 #include "daemon/repository/files.h"
+#include "daemon/repository/index.h"
 #include "daemon/repository/git.h"
 #include "daemon/session/store.h"
 
@@ -200,7 +201,8 @@ void websocketSoak(const std::filesystem::path &root) {
 }
 }
 
-int main() {
+int main(int argc, char **argv) {
+    const bool allScales = argc > 1 && std::string(argv[1]) == "--all-scales";
     const auto root = std::filesystem::temp_directory_path() /
         ("aegis-perf-" + std::to_string(Clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
@@ -393,6 +395,65 @@ int main() {
                   << " selected_compare_ms=" << compareMs << " refresh10_p50_ms=" << percentile(refreshMs, .50)
                   << " refresh10_p95_ms=" << percentile(refreshMs, .95) << " listed_entries=" << listing.entries.size()
                   << " benchmark_peak_rss_kib=" << peakRssKiB() << '\n';
+        auto micros = [](auto start) { return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count(); };
+        const auto indexed = files.index().snapshot();
+        std::cout << "index_files=" << indexed->files.size() << " index_build_us=" << indexed->buildMicros << " root_available_us=" << indexed->rootMicros << '\n';
+        auto review = [&](int scale, aegis::daemon::repository::Files &measured) {
+            std::vector<long long> quick, literal;
+            for (int i = 0; i < 40; ++i) {
+                auto at = Clock::now(); auto hits = measured.index().search(i % 2 ? "file99" : "f0txt");
+                quick.push_back(micros(at));
+                if (hits.entries.size() > 60) throw std::runtime_error("quick-open exceeded its result bound");
+            }
+            for (int i = 0; i < 10; ++i) {
+                auto at = Clock::now();
+                const auto found = aegis::daemon::process::run({"git", "grep", "--untracked", "--exclude-standard", "-F", "-n", "-m", "1", "--", "fixture 999", "."}, repository, std::chrono::seconds(30), 1024 * 1024);
+                if (found.exitCode != 0 && found.exitCode != 1) throw std::runtime_error("workspace literal search failed");
+                literal.push_back(micros(at));
+            }
+            auto treeAt = Clock::now(); measured.list("", aegis::daemon::repository::FileScope::all, 500, false, false); const auto treeUs = micros(treeAt);
+            const auto path = "dir-0/file-1.txt";
+            auto at = Clock::now(); measured.read(path, aegis::daemon::repository::FileSource::worktree); const auto coldFile = micros(at);
+            at = Clock::now(); measured.read(path, aegis::daemon::repository::FileSource::worktree); const auto warmFile = micros(at);
+            at = Clock::now(); measured.compare(path); const auto coldDiff = micros(at);
+            at = Clock::now(); measured.compare(path); const auto warmDiff = micros(at);
+            std::cout << "review_scale=" << scale << " quick_open_p50_us=" << percentile(quick, .50) << " quick_open_p95_us=" << percentile(quick, .95)
+                      << " workspace_literal_p50_us=" << percentile(literal, .50) << " workspace_literal_p95_us=" << percentile(literal, .95)
+                      << " indexed_tree_us=" << treeUs << " cold_file_us=" << coldFile << " cached_file_us=" << warmFile << " cold_diff_us=" << coldDiff << " cached_diff_us=" << warmDiff
+                      << " index_build_us=" << measured.index().snapshot()->buildMicros << " root_available_us=" << measured.index().snapshot()->rootMicros << '\n';
+        };
+        review(10000, files);
+        if (allScales) {
+            for (int count : {1000, 100000}) {
+                std::filesystem::remove_all(repository);
+                std::filesystem::create_directories(repository);
+                if (aegis::daemon::process::run({"git", "init", "-q"}, repository).exitCode) throw std::runtime_error("scale repository init failed");
+                for (int i = 0; i < count; ++i) {
+                    const auto path = repository / ("dir-" + std::to_string(i / 100)) / ("file-" + std::to_string(i) + ".txt");
+                    std::filesystem::create_directories(path.parent_path()); std::ofstream(path) << "fixture " << i << '\n';
+                }
+                git.invalidateSnapshot();
+                aegis::daemon::repository::Files scaled(git); review(count, scaled);
+            }
+        }
+        if (allScales) files.index().rebuild();
+        std::string large(8 * 1024 * 1024, 'x');
+        for (std::size_t i = 79; i < large.size(); i += 80) large[i] = '\n';
+        auto lineStart = Clock::now(); std::vector<std::uint32_t> offsets{0};
+        for (std::size_t i = 0; i < large.size(); ++i) if (large[i] == '\n') offsets.push_back(static_cast<std::uint32_t>(i + 1));
+        std::cout << "large_file_bytes=" << large.size() << " line_offsets=" << offsets.size() << " large_file_line_index_us=" << micros(lineStart) << '\n';
+        for (int pass = 0; pass < 3; ++pass) {
+            for (int i = 0; i < 200; ++i) {
+                const auto path = "dir-" + std::to_string(i / 100) + "/file-" + std::to_string(i) + ".txt";
+                files.read(path, aegis::daemon::repository::FileSource::worktree);
+                files.compare(path); files.index().search("f" + std::to_string(i));
+            }
+            const auto stats = files.cacheStats();
+            std::cout << "review_soak_pass=" << pass << " content_cache_entries=" << stats.contents.entries << " content_cache_bytes=" << stats.contents.bytes
+                      << " comparison_cache_entries=" << stats.comparisons.entries << " comparison_cache_bytes=" << stats.comparisons.bytes << " rss_kib=" << residentRssKiB() << '\n';
+            if (stats.contents.entries > 128 || stats.comparisons.entries > 128 || stats.contents.bytes > 32 * 1024 * 1024 || stats.comparisons.bytes > 32 * 1024 * 1024)
+                throw std::runtime_error("review caches exceeded their bounds");
+        }
         const auto sqliteBytesAfterCycles = std::filesystem::file_size(dbPath);
         const auto threadsAfter = threadCount();
         cleanup();

@@ -1,0 +1,7 @@
+events=100000 transactional_fixture_seed_ms=969 seed_per_s=103199 latest20_p50_us=64 latest20_p95_us=111 soak_cycles=50 verify_p50_us=19398 verify_p95_us=26912 handoff_p50_us=751 handoff_p95_us=1042 sqlite_bytes=30990336
+event_subscribers=2 slow_subscriber_events_before_resync=502 queue_high_water_events=502 queue_high_water_bytes=4192533
+websocket_clients=2 fast_events=1200 slow_events_before_resync=623 recovery_history_events=500 flood_and_recovery_ms=9962
+pty_bytes=131072 pty_chunks=2 pty_elapsed_ms=17
+agent_cycles=8 interrupt_terminate_p50_ms=372 interrupt_terminate_p95_ms=389
+repo_files=10000 changes_ms=61 root_listing_ms=44 selected_compare_ms=22 refresh10_p50_ms=61 refresh10_p95_ms=62 listed_entries=100 benchmark_peak_rss_kib=21264
+sqlite_bytes_after_cycles=31002624 thread_count_before_after=1/1 cpu_time_ms=7454 peak_rss_kib=21264 post_cleanup_rss_kib=18188 temp_files_removed=1
