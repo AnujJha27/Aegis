@@ -72,6 +72,24 @@ private:
     sqlite3_stmt *statement_ = nullptr;
 };
 
+TaskContext readTaskContext(const std::string &raw) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse(raw);
+    } catch (const nlohmann::json::exception &) {
+        throw std::runtime_error("invalid persisted task context");
+    }
+    if (!parsed.is_object()) throw std::runtime_error("invalid persisted task context");
+    const auto field = [&](const char *key) {
+        if (!parsed.contains(key)) return std::string{};
+        const auto &value = parsed.at(key);
+        if (!value.is_string()) throw std::runtime_error("invalid persisted task context");
+        return value.get<std::string>();
+    };
+    return TaskContext{field("goal"), field("constraints"), field("decisions"),
+                       field("attempts"), field("unfinished"), field("next_action")};
+}
+
 bool hasColumn(sqlite3 *database, const char *table, const char *column) {
     const auto sql = std::string("PRAGMA table_info(") + table + ")";
     Statement statement(database, sql.c_str());
@@ -123,6 +141,9 @@ Store::Store(const std::filesystem::path &path) {
         if (!hasColumn(database_, "verifications", "repository_fingerprint"))
             execute("ALTER TABLE verifications ADD COLUMN repository_fingerprint TEXT;");
         if (previousVersion < 5) execute("PRAGMA user_version = 5;");
+        if (!hasColumn(database_, "tasks", "context_json"))
+            execute("ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}';");
+        if (previousVersion < 6) execute("PRAGMA user_version = 6;");
         execute("CREATE INDEX IF NOT EXISTS events_run_type_sequence ON events(run_id, type, sequence DESC);");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
@@ -308,6 +329,28 @@ ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std:
     return finding;
 }
 
+bool Store::updateTaskContext(const std::string &taskId, const TaskContext &context) {
+    const auto valid = [](const std::string &value) {
+        return value.size() <= 4000 && value.find('\0') == std::string::npos;
+    };
+    if (!valid(context.goal) || !valid(context.constraints) || !valid(context.decisions) ||
+        !valid(context.attempts) || !valid(context.unfinished) || !valid(context.nextAction))
+        throw std::invalid_argument("invalid task context fields");
+    std::lock_guard lock(mutex_);
+    Statement current(database_, "SELECT id FROM tasks WHERE id = ?");
+    check(sqlite3_bind_text(current.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
+    if (sqlite3_step(current.get()) != SQLITE_ROW) return false;
+    const nlohmann::json encoded{{"goal", context.goal}, {"constraints", context.constraints},
+        {"decisions", context.decisions}, {"attempts", context.attempts},
+        {"unfinished", context.unfinished}, {"next_action", context.nextAction}};
+    const auto encodedText = encoded.dump();
+    Statement statement(database_, "UPDATE tasks SET context_json = ? WHERE id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, encodedText.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task context");
+    check(sqlite3_bind_text(statement.get(), 2, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
+    check(sqlite3_step(statement.get()), database_, "update task context");
+    return sqlite3_changes(database_) != 0;
+}
+
 bool Store::updateFindingStatus(const std::string &findingId, const std::string &status) {
     if (status != "open" && status != "resolved") return false;
     std::lock_guard lock(mutex_);
@@ -321,14 +364,16 @@ bool Store::updateFindingStatus(const std::string &findingId, const std::string 
 
 std::optional<Task> Store::task(const std::string &taskId) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks WHERE id = ?");
+    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks WHERE id = ?");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
     if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
-    return Task{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
+    Task result{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
-                sqlite3_column_int64(statement.get(), 4)};
+                sqlite3_column_int64(statement.get(), 4), TaskContext{}};
+    result.context = readTaskContext(columnText(statement.get(), 5));
+    return result;
 }
 
 std::vector<AgentRun> Store::runs(const std::string &taskId) const {
@@ -387,14 +432,16 @@ std::vector<ReviewFinding> Store::findings(const std::string &taskId, std::size_
 
 std::vector<Task> Store::tasks() const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, prompt, repository, status, created_at FROM tasks ORDER BY created_at");
+    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks ORDER BY created_at");
     std::vector<Task> result;
     while (sqlite3_step(statement.get()) == SQLITE_ROW) {
-        result.push_back({reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
-                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
-                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
-                          reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
-                          sqlite3_column_int64(statement.get(), 4)});
+        Task task{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
+                  reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
+                  reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
+                  reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
+                  sqlite3_column_int64(statement.get(), 4), TaskContext{}};
+        task.context = readTaskContext(columnText(statement.get(), 5));
+        result.push_back(std::move(task));
     }
     return result;
 }

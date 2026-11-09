@@ -16,12 +16,22 @@ export type FileEntry = { path: string; name: string; kind: "file" | "directory"
 export type FileContent = { source: "head" | "index" | "worktree" | "commit"; revision?: string | null; size: number; exists: boolean; binary: boolean; truncated: boolean; content: string };
 export type FileComparison = { path: string; old_path: string | null; parent_commit?: string | null; commit?: string | null; status: string; original: FileContent; modified: FileContent; binary: boolean; truncated: boolean };
 
+export type TaskContext = {
+  goal: string;
+  constraints: string;
+  decisions: string;
+  attempts: string;
+  unfinished: string;
+  next_action: string;
+};
+
 export type Task = {
   id: string;
   prompt: string;
   repository: string;
   status: string;
   createdAt: number;
+  context?: TaskContext;
 };
 
 export type Agent = {
@@ -76,6 +86,7 @@ export type HandoffContext = {
   changed_files_truncated: boolean;
   verification: VerificationRun | null;
   findings: ReviewFinding[];
+  context?: TaskContext;
 };
 export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved"; created_at: number; updated_at: number };
 export type NewReviewFinding = { file_path: string; run_id?: string; start_line?: number; end_line?: number; message: string };
@@ -104,7 +115,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0) });
+const contextFields: (keyof TaskContext)[] = ["goal", "constraints", "decisions", "attempts", "unfinished", "next_action"];
+const normalizeContext = (value: unknown): TaskContext => {
+  const source = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  return Object.fromEntries(contextFields.map((field) => [field, typeof source[field] === "string" ? source[field] as string : ""])) as TaskContext;
+};
+const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0), context: normalizeContext(value.context) });
 const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0), externalSessionId: typeof value.external_session_id === "string" ? value.external_session_id : undefined, turnStatus: ["turn.started", "turn.completed", "turn.interrupted"].includes(String(value.turn_status)) ? value.turn_status as AgentRun["turnStatus"] : undefined });
 export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0) });
 const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt), freshness: ["current", "stale", "unknown"].includes(String(value.freshness)) ? value.freshness as VerificationRun["freshness"] : "unknown", repositoryFingerprint: typeof value.repository_fingerprint === "string" ? value.repository_fingerprint : null });
@@ -149,6 +165,8 @@ export const api = {
   graph: (taskId: string) => request<TaskGraph>(`/api/tasks/${taskId}/graph`),
   provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[]; truncated?: boolean }>(`/api/tasks/${taskId}/provenance`),
   createTask: async (prompt: string) => task(await request<Record<string, unknown>>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })),
+  updateTaskContext: async (taskId: string, context: TaskContext) => task(await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/context`, { method: "PATCH", body: JSON.stringify({ context }) })),
+  continueTask: async (taskId: string, agent: string, sourceRunId: string, prompt: string) => run(await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/continue`, { method: "POST", body: JSON.stringify({ agent, source_run_id: sourceRunId, prompt }) })),
   launch: async (taskId: string, agent: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify({ agent }) })),
   deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),
   interrupt: (runId: string) => request<{ status: string }>(`/api/runs/${runId}/interrupt`, { method: "POST", body: "{}" }),

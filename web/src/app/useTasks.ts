@@ -18,5 +18,10 @@ export function useTasks() {
     return task;
   }
 
-  return { tasks, selectedTask, setSelectedTask, create, refresh };
+  const update = useCallback((task: Task) => {
+    setTasks((current) => current.map((item) => item.id === task.id ? { ...item, ...task } : item));
+    setSelectedTask((current) => current?.id === task.id ? { ...current, ...task } : current);
+  }, []);
+
+  return { tasks, selectedTask, setSelectedTask, create, refresh, update };
 }

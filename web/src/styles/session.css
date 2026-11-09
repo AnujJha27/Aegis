@@ -79,3 +79,14 @@
 .send-button span, .launch-button span { margin-left: 8px; }
 .composer-hint { display: flex; gap: 15px; max-width: 850px; margin: 7px auto 0; }
 .composer-status { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #a8b3c2; }
+.task-continuation summary { cursor: pointer; color: var(--muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; padding: 6px 0; }
+.task-continuation summary:hover { color: #c8d4e3; }
+dialog[aria-label="Continue with another agent"] { width: min(900px, 92vw); max-height: 90vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: #e8edf5; padding: 18px; }
+dialog[aria-label="Continue with another agent"]::backdrop { background: rgba(4, 6, 10, .7); }
+#handoff-preview { width: 100%; height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: #0b0f15; color: #d5deea; padding: 11px 12px; font: 12px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-continuation label { display: block; margin: 10px 0 4px; color: var(--faint); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+.task-continuation textarea { width: 100%; min-height: 72px; resize: vertical; color: #e8edf5; background: #0b0f15; border: 1px solid var(--line); outline: none; border-radius: 7px; padding: 9px 11px; font-size: 12px; line-height: 1.45; }
+.task-continuation textarea:focus { border-color: #4f6f8c; box-shadow: 0 0 0 2px rgba(126, 182, 255, .08); }
+.task-continuation .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.task-continuation .dialog-actions button { padding: 8px 12px; border: 1px solid #344154; border-radius: 6px; background: #18202c; color: #c8d4e3; font-size: 12px; }
+.task-continuation .dialog-actions button:hover { border-color: #6c8eb2; background: #202b3a; }

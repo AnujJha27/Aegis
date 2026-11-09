@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Agent, type GitChange, type GitStatus, type Repository, type Task } from "./api";
+import { api, type Agent, type AgentRun, type GitChange, type GitStatus, type Repository, type Task } from "./api";
 import { Layout } from "../components/Layout";
 import { useAgentWorkspace } from "./useAgentWorkspace";
 import { usePtySession } from "./usePtySession";
@@ -202,6 +202,12 @@ export function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed"); setBusy("Verification failed"); }
   }
 
+  function onContinued(run: AgentRun, sourceRunId: string) {
+    if (run.taskId !== selectedTaskIdRef.current) return;
+    workspace.setRuns((current) => current.some((item) => item.id === run.id) ? current : [...current, run]);
+    if (currentRunIdRef.current === sourceRunId) workspace.setSelectedRunId(run.id);
+  }
+
   function openReviewFile(path: string) {
     setOpenFileRequest((current) => ({ path, token: current.token + 1 }));
     setDrawer("review");
@@ -218,5 +224,6 @@ export function App() {
     screen={screen} onScreen={setScreen} drawer={drawer} onDrawer={setDrawer} connection={selectedTask ? workspace.connection : daemonConnection}
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
-    onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFileRequest.path} openFileToken={openFileRequest.token} onOpenFile={openReviewFile} />;
+    onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFileRequest.path} openFileToken={openFileRequest.token} onOpenFile={openReviewFile}
+    onContinued={onContinued} onTaskUpdated={taskState.update} />;
 }

@@ -163,6 +163,25 @@ int main() {
         assert(migrated.eventsBefore("legacy-task", 2, 10).events.front().id == "legacy-event");
         assert(migrated.verifications("legacy-task").empty());
         assert(migrated.findings("legacy-task").empty());
+        const auto migratedTask = migrated.task("legacy-task");
+        assert(migratedTask && migratedTask->context.goal.empty() && migratedTask->context.nextAction.empty());
+        const aegis::daemon::TaskContext migratedContext{"goal-x", "constraints-x", "decisions-x", "attempts-x", "unfinished-x", "next-x"};
+        assert(migrated.updateTaskContext("legacy-task", migratedContext));
+        assert(!migrated.updateTaskContext("absent-task", migratedContext));
+        bool rejected = false;
+        try {
+            aegis::daemon::TaskContext oversized = migratedContext;
+            oversized.goal.assign(4001, 'x');
+            migrated.updateTaskContext("legacy-task", oversized);
+        } catch (const std::invalid_argument &) { rejected = true; }
+        assert(rejected);
+        const auto contextTask = migrated.task("legacy-task");
+        assert(contextTask && contextTask->context.goal == migratedContext.goal &&
+               contextTask->context.constraints == migratedContext.constraints &&
+               contextTask->context.decisions == migratedContext.decisions &&
+               contextTask->context.attempts == migratedContext.attempts &&
+               contextTask->context.unfinished == migratedContext.unfinished &&
+               contextTask->context.nextAction == migratedContext.nextAction);
         const auto migratedFinding = migrated.createFinding("legacy-task", std::nullopt, "legacy.cpp", 1, std::nullopt, "Migration retained the task.");
         assert(migratedFinding.status == "open");
         const aegis::daemon::VerificationRun legacyVerification{
@@ -176,7 +195,7 @@ int main() {
     assert(sqlite3_open(legacyPath.string().c_str(), &legacy) == SQLITE_OK);
     sqlite3_stmt *version = nullptr;
     assert(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK);
-    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 5);
+    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == aegis::daemon::Store::currentSchemaVersion);
     sqlite3_finalize(version);
     sqlite3_stmt *eventIndex = nullptr;
     assert(sqlite3_prepare_v2(legacy, "SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_task_sequence'", -1, &eventIndex, nullptr) == SQLITE_OK);

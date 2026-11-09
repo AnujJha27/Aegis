@@ -78,7 +78,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         std::vector<std::string> changedFiles;
         changedFiles.reserve(changes.size());
         for (auto &change : changes) changedFiles.push_back(std::move(change.path));
-        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, std::move(changedFiles), changedFilesTruncated, std::move(verification), std::move(findings)};
+        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, std::move(changedFiles), changedFilesTruncated, std::move(verification), std::move(findings), task->context};
         return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
     }
     if (const auto taskId = pathId(target, "/graph")) {

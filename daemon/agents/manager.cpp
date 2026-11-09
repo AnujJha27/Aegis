@@ -6,6 +6,7 @@
 #include "daemon/repository/git.h"
 
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <unistd.h>
@@ -21,6 +22,14 @@ std::int64_t now() {
 
 bool isTerminal(const std::string &status) {
     return status == "completed" || status == "failed" || status == "interrupted" || status == "terminated";
+}
+
+bool validPrompt(const std::string &prompt) {
+    if (prompt.empty() || prompt.size() > 65536) return false;
+    if (prompt.find('\0') != std::string::npos) return false;
+    for (const char c : prompt)
+        if (!std::isspace(static_cast<unsigned char>(c))) return true;
+    return false;
 }
 
 }
@@ -68,7 +77,12 @@ bool Manager::isRunning(const std::string &runId) const {
     return running_.contains(runId);
 }
 
-std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent) {
+std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent,
+                                        const std::optional<std::string> &initialPrompt) {
+    if (initialPrompt) {
+        if (agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
+        if (!validPrompt(*initialPrompt)) return std::nullopt;
+    }
     const auto task = store_.task(taskId);
     if (!task) return std::nullopt;
     if (task->repository.find('\0') != std::string::npos) return std::nullopt;
@@ -87,6 +101,12 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     std::shared_ptr<Adapter> adapter;
     if (agent == "codex") adapter = std::make_shared<CodexAdapter>(std::move(sink), std::move(sessionSink));
     else if (agent == "shell") adapter = std::make_shared<PtyAdapter>(agent, std::vector<std::string>{"/bin/sh"}, std::move(sink));
+    else if (agent == "claude")
+        adapter = std::make_shared<PtyAdapter>(agent,
+            initialPrompt ? std::vector<std::string>{agent, "--", *initialPrompt} : std::vector<std::string>{agent}, std::move(sink));
+    else if (agent == "opencode")
+        adapter = std::make_shared<PtyAdapter>(agent,
+            initialPrompt ? std::vector<std::string>{agent, "--prompt", *initialPrompt} : std::vector<std::string>{agent}, std::move(sink));
     else adapter = std::make_shared<PtyAdapter>(agent, std::vector<std::string>{agent}, std::move(sink));
 
     repository::GitRepository git(repository_);
@@ -118,6 +138,16 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
         store_.updateRunStatus(run.id, "failed");
         publish({newEventId(), taskId, run.id, "run.failed", agent, "agent adapter failed to start", now()});
         return std::nullopt;
+    }
+    if (initialPrompt) {
+        if (agent == "codex") {
+            if (send(run.id, *initialPrompt) != SendResult::accepted) {
+                terminate(run.id);
+                return std::nullopt;
+            }
+        } else {
+            publish({newEventId(), taskId, run.id, "user.message", agent, *initialPrompt, now()});
+        }
     }
     return store_.run(run.id);
 }

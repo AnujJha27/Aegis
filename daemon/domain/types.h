@@ -7,12 +7,22 @@
 
 namespace aegis::daemon {
 
+struct TaskContext {
+    std::string goal;
+    std::string constraints;
+    std::string decisions;
+    std::string attempts;
+    std::string unfinished;
+    std::string nextAction;
+};
+
 struct Task {
     std::string id;
     std::string prompt;
     std::string repository;
     std::string status = "open";
     std::int64_t createdAt = 0;
+    TaskContext context{};
 };
 
 struct AgentRun {
@@ -97,6 +107,7 @@ struct HandoffContext {
     bool changedFilesTruncated = false;
     std::optional<VerificationRun> verification;
     std::vector<ReviewFinding> findings;
+    TaskContext context{};
 };
 
 struct GraphNode {

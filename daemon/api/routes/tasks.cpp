@@ -48,6 +48,39 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
         for (const auto &event : context.store->events(*taskId, 500, false)) result.push_back(protocol::toJson(event));
         return jsonResponse(boost::beast::http::status::ok, result);
     }
+    if (request.method() == boost::beast::http::verb::patch) {
+        const auto taskId = pathId(target, "/context");
+        if (taskId) {
+            const auto existing = context.store->task(*taskId);
+            if (!existing) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(existing->repository, context.repository))
+                return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
+            static const std::string_view keys[] = {"goal", "constraints", "decisions", "attempts", "unfinished", "next_action"};
+            try {
+                const auto body = nlohmann::json::parse(request.body());
+                if (!body.is_object() || body.size() != 6)
+                    return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields");
+                TaskContext update;
+                std::string *values[] = {&update.goal, &update.constraints, &update.decisions,
+                                         &update.attempts, &update.unfinished, &update.nextAction};
+                for (std::size_t index = 0; index < 6; ++index) {
+                    if (!body.contains(keys[index]))
+                        return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields");
+                    const auto &value = body.at(keys[index]);
+                    if (!value.is_string() || value.get_ref<const std::string &>().size() > 4000 ||
+                        value.get_ref<const std::string &>().find('\0') != std::string::npos)
+                        return error(boost::beast::http::status::bad_request, "invalid_context", "context fields must be strings of at most 4000 bytes without NUL");
+                    *values[index] = value.get_ref<const std::string &>();
+                }
+                if (!context.store->updateTaskContext(*taskId, update))
+                    return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+                const auto updated = context.store->task(*taskId);
+                return jsonResponse(boost::beast::http::status::ok, protocol::toJson(*updated));
+            } catch (const nlohmann::json::exception &) {
+                return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+            }
+        }
+    }
     if (request.method() == boost::beast::http::verb::post && target == "/api/tasks") {
         try {
             const auto body = nlohmann::json::parse(request.body());

@@ -145,9 +145,12 @@ void CodexAdapter::workerLoop() {
             command.push_back("resume");
             command.push_back("--json");
             command.push_back(*context.externalSessionId);
+            if (!prompt.empty() && prompt.front() == '-') command.push_back("--");
             command.push_back(prompt);
         } else {
-            command.insert(command.end(), {"--json", "--color", "never", prompt});
+            command.insert(command.end(), {"--json", "--color", "never"});
+            if (!prompt.empty() && prompt.front() == '-') command.push_back("--");
+            command.push_back(prompt);
         }
 
         auto child = std::make_shared<process::ChildProcess>();

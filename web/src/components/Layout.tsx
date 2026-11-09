@@ -5,6 +5,7 @@ import { AegisMark } from "./AegisMark";
 import { lazy, Suspense } from "react";
 const ReviewPanel = lazy(() => import("../features/review/ReviewPanel").then((module) => ({ default: module.ReviewPanel })));
 import { TaskList } from "../features/tasks/TaskList";
+import { TaskContinuation } from "../features/agents/TaskContinuation";
 import { AgentSession } from "../features/terminal/AgentSession";
 import { VerificationPanel } from "../features/verification/VerificationPanel";
 
@@ -16,6 +17,7 @@ type Props = {
   screen: "session" | "review"; onScreen: (screen: "session" | "review") => void; connection: string;
   drawer: "review" | "graphs" | "activity"; onDrawer: (drawer: "review" | "graphs" | "activity") => void;
   gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: (command?: string[]) => void; error: string; onDismissError: () => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void;
+  onContinued?: (run: AgentRun, sourceRunId: string) => void; onTaskUpdated?: (task: Task) => void;
 };
 
 export function Layout(props: Props) {
@@ -25,6 +27,7 @@ export function Layout(props: Props) {
       <TaskList tasks={props.tasks} selectedTask={props.selectedTask} onSelect={props.onSelectTask} prompt={props.taskPrompt} onPrompt={props.onTaskPrompt} onCreate={props.onCreateTask} />
       <AgentSession task={props.selectedTask} run={props.run} runFinished={props.runFinished} turnBusy={props.turnBusy} turnCompleted={props.turnCompleted} turnInterrupted={props.turnInterrupted} resumable={props.resumable} interactive={Boolean(props.agents.find((agent) => agent.name === props.run?.agent)?.interactive)} ptyConnection={props.ptyConnection} onPtyInput={props.onPtyInput} onPtyResize={props.onPtyResize} events={props.events} prompt={props.prompt} onPrompt={props.onPrompt} onSend={props.onSend} busy={props.busy} sending={props.sending}>
         <AgentPicker agents={props.agents} selected={props.selectedAgent} onChange={props.onAgentChange} onLaunch={props.onLaunch} canLaunch={props.canLaunch} runs={props.runs} run={props.run} runFinished={props.runFinished} turnBusy={props.turnBusy} actionsBusy={props.actionsBusy} onSelectRun={props.onSelectRun} onInterruptRun={props.onInterruptRun} onTerminateRun={props.onTerminateRun} onDeleteRun={props.onDeleteRun} />
+        {props.selectedTask && <TaskContinuation key={props.selectedTask.id} task={props.selectedTask} run={props.run} agents={props.agents} onContinued={props.onContinued} onTaskUpdated={props.onTaskUpdated} sourceBusy={props.turnBusy || props.run?.status === "starting" || (Boolean(props.agents.find((agent) => agent.name === props.run?.agent)?.interactive) && !props.runFinished)} />}
       </AgentSession>
     </section>
     {props.screen === "review" && <><nav className="review-tabs" aria-label="Review views"><button aria-pressed={props.drawer === "review"} className={props.drawer === "review" ? "active" : ""} onClick={() => props.onDrawer("review")}>Review</button><button aria-pressed={props.drawer === "graphs"} className={props.drawer === "graphs" ? "active" : ""} onClick={() => props.onDrawer("graphs")}>Graphs</button><button aria-pressed={props.drawer === "activity"} className={props.drawer === "activity" ? "active" : ""} onClick={() => props.onDrawer("activity")}>Activity</button></nav><Suspense fallback={<div className="code-state">Loading review workspace…</div>}><ReviewPanel view={props.drawer} taskId={props.selectedTask?.id} activeRun={props.run} activeRunId={props.run?.id} taskPrompt={props.selectedTask?.prompt} events={props.activityEvents} graph={props.graph} provenance={props.provenance} handoff={props.handoff} gitChanges={props.gitChanges} gitStatus={props.gitStatus} onGitChanged={props.onGitChanged} verification={props.verification} verificationRunning={props.busy === "Verifying…"} onVerify={props.onVerify} openFilePath={props.openFilePath} openFileToken={props.openFileToken} onOpenFile={props.onOpenFile} /></Suspense></>}

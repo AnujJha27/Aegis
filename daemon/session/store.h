@@ -14,7 +14,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 5;
+    static constexpr int currentSchemaVersion = 6;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();
@@ -34,6 +34,7 @@ public:
                                 std::string filePath, std::optional<int> startLine,
                                 std::optional<int> endLine, std::string message);
     bool updateFindingStatus(const std::string &findingId, const std::string &status);
+    bool updateTaskContext(const std::string &taskId, const TaskContext &context);
     std::optional<Task> task(const std::string &taskId) const;
     std::vector<AgentRun> runs(const std::string &taskId) const;
     std::optional<AgentEvent> latestTurnEvent(const std::string &runId) const;

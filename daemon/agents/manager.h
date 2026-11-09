@@ -30,7 +30,8 @@ public:
     std::vector<AgentInfo> available() const;
     bool hasRunningRuns() const;
     bool isRunning(const std::string &runId) const;
-    std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent);
+    std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent,
+                                   const std::optional<std::string> &initialPrompt = std::nullopt);
     SendResult send(const std::string &runId, std::string_view message);
     bool sendPty(const std::string &runId, std::string_view input);
     bool resizePty(const std::string &runId, unsigned short cols, unsigned short rows);

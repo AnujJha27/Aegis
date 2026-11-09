@@ -7,8 +7,13 @@
 
 namespace aegis::daemon::protocol {
 
+inline nlohmann::json toJson(const TaskContext &context) {
+    return {{"goal", context.goal}, {"constraints", context.constraints}, {"decisions", context.decisions},
+            {"attempts", context.attempts}, {"unfinished", context.unfinished}, {"next_action", context.nextAction}};
+}
+
 inline nlohmann::json toJson(const Task &task) {
-    return {{"id", task.id}, {"prompt", task.prompt}, {"repository", task.repository}, {"status", task.status}, {"created_at", task.createdAt}};
+    return {{"id", task.id}, {"prompt", task.prompt}, {"repository", task.repository}, {"status", task.status}, {"created_at", task.createdAt}, {"context", toJson(task.context)}};
 }
 
 inline nlohmann::json toJson(const AgentRun &run) {
@@ -82,6 +87,7 @@ inline nlohmann::json toJson(const HandoffContext &context) {
     nlohmann::json result{{"task_id", context.taskId}, {"prompt", context.prompt}, {"recent_events", events}, {"diff", context.diff}, {"changed_files", context.changedFiles}, {"changed_files_truncated", context.changedFilesTruncated}};
     result["verification"] = context.verification ? toJson(*context.verification) : nlohmann::json(nullptr);
     result["findings"] = findings;
+    result["context"] = toJson(context.context);
     return result;
 }
 
