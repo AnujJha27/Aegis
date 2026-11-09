@@ -40,7 +40,7 @@ function Journey() {
     repository={{ path: "/repo", branch: "main" }} tasks={[task]} selectedTask={task} onSelectTask={() => {}}
     taskPrompt="" onTaskPrompt={() => {}} onCreateTask={() => {}}
     agents={[{ name: "codex", available: true, structured: true, interactive: false, resumable: true, interruptible: true }]}
-    selectedAgent="codex" onAgentChange={() => {}} onLaunch={() => {}} canLaunch
+    selectedAgent="codex" selectedModel="" onModelChange={() => {}} onAgentChange={() => {}} onLaunch={() => {}} canLaunch
     run={run} runs={[run]} onSelectRun={() => {}} onDeleteRun={() => {}} onInterruptRun={() => {}} onTerminateRun={() => {}}
     actionsBusy={false} runFinished={false} turnBusy={false} turnCompleted turnInterrupted={false} onPtyInput={() => {}} onPtyResize={() => {}}
     ptyConnection="idle" events={[]} activityEvents={[]} prompt="" onPrompt={() => {}} onSend={() => {}} busy="Ready" sending={false}
@@ -59,6 +59,7 @@ describe("workspace UI journey", () => {
     vi.spyOn(api, "compareFiles").mockResolvedValue(comparison);
     render(<Journey />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     expect(screen.getByRole("heading", { name: "Review the changed source" })).toBeTruthy();
     expect(screen.getByText(/TURN COMPLETE · RUN ACTIVE/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Review" }));

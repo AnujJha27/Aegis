@@ -18,6 +18,7 @@ export function App() {
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [gitStatus, setGitStatus] = useState<GitStatus>();
   const [selectedAgent, setSelectedAgent] = useState("shell");
+  const [selectedModel, setSelectedModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [openFileRequest, setOpenFileRequest] = useState({ path: "", token: 0 });
@@ -75,6 +76,11 @@ export function App() {
     return () => { active = false; window.clearTimeout(retryTimer); };
   }, [taskState.refresh]);
 
+  function changeAgent(agent: string) {
+    setSelectedAgent(agent);
+    setSelectedModel("");
+  }
+
   function onEvent(event: import("./api").AgentEvent) {
     if (event.type === "terminal.output") window.dispatchEvent(new CustomEvent("aegis:terminal-output", { detail: event }));
     if (event.runId === currentRunIdRef.current && event.type === "turn.started") setBusy("Agent working…");
@@ -127,9 +133,9 @@ export function App() {
     const taskId = selectedTask?.id;
     const agent = selectedAgent;
     if (!taskId) return;
-    setBusy(`Starting ${agent}…`);
+    setBusy(selectedModel ? `Starting ${agent} (${selectedModel})…` : `Starting ${agent}…`);
     try {
-      const run = await api.launch(taskId, agent);
+      const run = await api.launch(taskId, agent, selectedModel || undefined);
       if (selectedTaskIdRef.current !== taskId) return;
       workspace.setRuns((current) => [...current, run]);
       workspace.setSelectedRunId(run.id);
@@ -164,14 +170,20 @@ export function App() {
   async function deleteRun(runId: string) {
     const run = workspace.runs.find((item) => item.id === runId);
     if (!run || !["completed", "failed", "interrupted", "terminated"].includes(run.status)) return;
+    const taskId = run.taskId;
+    const shortId = runId.slice(0, 8);
     try {
       await api.deleteRun(runId);
+      if (selectedTaskIdRef.current !== taskId) return;
       const remaining = workspace.runs.filter((item) => item.id !== runId);
-      workspace.setRuns(remaining);
+      workspace.setRuns((current) => current.filter((item) => item.id !== runId));
       workspace.setEvents((current) => current.filter((event) => event.runId !== runId));
       if (workspace.selectedRunId === runId) workspace.setSelectedRunId(remaining.at(-1)?.id ?? "");
       await review.refresh();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete run"); }
+    } catch (reason) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setError(reason instanceof Error ? `${reason.message} (run ${shortId})` : `Could not delete run ${shortId}`);
+    }
   }
 
   async function interruptRun(runId: string) {
@@ -179,33 +191,59 @@ export function App() {
     const adapter = agents.find((item) => item.name === run?.agent);
     if (!run || !adapter?.interruptible || !["starting", "running"].includes(run.status) ||
         !(run.status === "starting" || workspace.turnBusy || adapter.interactive)) return;
+    const taskId = run.taskId;
+    const shortId = runId.slice(0, 8);
     setBusy("Interrupting turn…");
     try { await api.interrupt(runId); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not interrupt agent"); setBusy("Interrupt failed"); }
+    catch (reason) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setError(reason instanceof Error ? `${reason.message} (run ${shortId})` : `Could not interrupt agent ${shortId}`);
+      setBusy("Interrupt failed");
+    }
   }
 
   async function terminateRun(runId: string) {
     const run = workspace.runs.find((item) => item.id === runId);
     if (!run || !["starting", "running"].includes(run.status)) return;
+    const taskId = run.taskId;
+    const shortId = runId.slice(0, 8);
     setBusy("Stopping agent…");
     try {
       await api.terminate(runId);
+      if (selectedTaskIdRef.current !== taskId) return;
       workspace.setRuns((current) => current.map((item) => item.id === runId ? { ...item, status: "terminated", finishedAt: Date.now() } : item));
       setBusy("Agent stopped");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not stop agent"); setBusy("Stop failed"); }
+    } catch (reason) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setError(reason instanceof Error ? `${reason.message} (run ${shortId})` : `Could not stop agent ${shortId}`);
+      setBusy("Stop failed");
+    }
   }
 
   async function verify(command?: string[]) {
-    if (!selectedTask) return;
+    const taskId = selectedTask?.id;
+    if (!taskId) return;
     setBusy("Verifying…");
-    try { await review.verify(currentRun?.id, command); setBusy("Ready"); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed"); setBusy("Verification failed"); }
+    try {
+      await review.verify(currentRun?.id, command);
+      if (selectedTaskIdRef.current !== taskId) return;
+      setBusy("Ready");
+    } catch (reason) {
+      if (selectedTaskIdRef.current !== taskId) return;
+      setError(reason instanceof Error ? `${reason.message} (task ${taskId.slice(0, 8)})` : `Verification failed for task ${taskId.slice(0, 8)}`);
+      setBusy("Verification failed");
+    }
   }
 
   function onContinued(run: AgentRun, sourceRunId: string) {
     if (run.taskId !== selectedTaskIdRef.current) return;
     workspace.setRuns((current) => current.some((item) => item.id === run.id) ? current : [...current, run]);
     if (currentRunIdRef.current === sourceRunId) workspace.setSelectedRunId(run.id);
+  }
+
+  async function onImportedTask(task: Task) {
+    setSelectedTask(task);
+    try { await taskState.refresh(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not refresh tasks"); }
   }
 
   function openReviewFile(path: string) {
@@ -217,7 +255,7 @@ export function App() {
   return <Layout
     repository={repository} tasks={tasks} selectedTask={selectedTask} onSelectTask={setSelectedTask}
     taskPrompt={taskPrompt} onTaskPrompt={setTaskPrompt} onCreateTask={createTask}
-    agents={agents} selectedAgent={selectedAgent} onAgentChange={setSelectedAgent} onLaunch={launch} canLaunch={Boolean(selectedTask && agents.some((agent) => agent.name === selectedAgent && agent.available))}
+    agents={agents} selectedAgent={selectedAgent} onAgentChange={changeAgent} onLaunch={launch} selectedModel={selectedModel} onModelChange={setSelectedModel} canLaunch={Boolean(selectedTask && agents.some((agent) => agent.name === selectedAgent && agent.available))}
     run={currentRun} runs={workspace.runs} onSelectRun={workspace.setSelectedRunId} onDeleteRun={deleteRun} onInterruptRun={interruptRun} onTerminateRun={terminateRun} actionsBusy={busy === "Interrupting turn…" || busy === "Stopping agent…"} runFinished={runFinished} turnBusy={workspace.turnBusy} turnCompleted={workspace.turnCompleted} turnInterrupted={workspace.turnInterrupted} resumable={Boolean(currentAgent?.resumable)}
     onPtyInput={pty.send} onPtyResize={pty.resize} ptyConnection={pty.connection} events={workspace.currentRunEvents} activityEvents={workspace.currentEvents}
     prompt={prompt} onPrompt={setPrompt} onSend={send} busy={busy} sending={sendingRunId === currentRun?.id}
@@ -225,5 +263,5 @@ export function App() {
     gitChanges={gitChanges} gitStatus={gitStatus} onGitChanged={refreshGit}
     verification={review.verification} handoff={review.handoff} graph={review.graph} provenance={review.provenance}
     onVerify={verify} error={error} onDismissError={() => setError("")} openFilePath={openFileRequest.path} openFileToken={openFileRequest.token} onOpenFile={openReviewFile}
-    onContinued={onContinued} onTaskUpdated={taskState.update} />;
+    onContinued={onContinued} onTaskUpdated={taskState.update} onImported={onImportedTask} />;
 }

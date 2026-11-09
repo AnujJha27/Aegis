@@ -12,6 +12,7 @@ describe("run deletion confirmation", () => {
     const onDeleteRun = vi.fn();
     render(<AgentPicker agents={[]} selected="codex" onChange={vi.fn()} onLaunch={vi.fn()} canLaunch={false} runs={[run]} run={run} runFinished turnBusy={false} actionsBusy={false} onSelectRun={vi.fn()} onInterruptRun={vi.fn()} onTerminateRun={vi.fn()} onDeleteRun={onDeleteRun} />);
 
+    fireEvent.click(screen.getByText("Run actions"));
     fireEvent.click(screen.getByRole("button", { name: "Delete selected run" }));
     expect(screen.getByRole("group", { name: "Confirm run deletion" })).toBeTruthy();
     expect(onDeleteRun).not.toHaveBeenCalled();
@@ -36,6 +37,7 @@ describe("run controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Interrupt turn" }));
     expect(onInterruptRun).toHaveBeenCalledWith(run.id);
+    fireEvent.click(screen.getByText("Run actions"));
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
     expect(screen.getByRole("group", { name: "Confirm agent stop" })).toBeTruthy();
     expect(onTerminateRun).not.toHaveBeenCalled();

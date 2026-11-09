@@ -3,19 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { App } from "./App";
 
-const workspaceMocks = vi.hoisted(() => ({ setRuns: vi.fn(), setSelectedRunId: vi.fn() }));
+const workspaceMocks = vi.hoisted(() => ({ setRuns: vi.fn(), setSelectedRunId: vi.fn(), runs: [] as { id: string; taskId: string; agent: string; status: string; startedAt: number; finishedAt: number }[] }));
 
 vi.mock("../components/Layout", () => ({
-  Layout: ({ connection, selectedTask, error, onDismissError, onSelectTask, onLaunch }: { connection: string; selectedTask?: { id: string }; error: string; onDismissError?: () => void; onSelectTask?: (task: { id: string; prompt: string; repository: string; status: string; createdAt: number }) => void; onLaunch?: () => void }) => <div>
+  Layout: ({ connection, selectedTask, error, onDismissError, onSelectTask, onLaunch, onTerminateRun }: { connection: string; selectedTask?: { id: string }; error: string; onDismissError?: () => void; onSelectTask?: (task: { id: string; prompt: string; repository: string; status: string; createdAt: number }) => void; onLaunch?: () => void; onTerminateRun?: (id: string) => void }) => <div>
     <output aria-label="connection">{connection}</output>
     <output aria-label="selected task">{selectedTask?.id ?? "none"}</output>
     <button onClick={() => onSelectTask?.({ id: "task-2", prompt: "Other", repository: "/repo", status: "active", createdAt: 2 })}>Switch task</button>
     <button onClick={onLaunch}>Launch</button>
+    <button onClick={() => onTerminateRun?.("run-1")}>Terminate</button>
     {error && <div role="alert">{error}<button aria-label="Dismiss error" onClick={onDismissError}>Dismiss</button></div>}
   </div>,
 }));
 vi.mock("./useAgentWorkspace", () => ({
-  useAgentWorkspace: () => ({ runs: [], setRuns: workspaceMocks.setRuns, selectedRunId: "", setSelectedRunId: workspaceMocks.setSelectedRunId, events: [], setEvents: vi.fn(), currentRun: undefined, currentEvents: [], currentRunEvents: [], runFinished: false, turnBusy: false, turnCompleted: false, turnInterrupted: false, connection: "connected" }),
+  useAgentWorkspace: () => ({ runs: workspaceMocks.runs, setRuns: workspaceMocks.setRuns, selectedRunId: "", setSelectedRunId: workspaceMocks.setSelectedRunId, events: [], setEvents: vi.fn(), currentRun: undefined, currentEvents: [], currentRunEvents: [], runFinished: false, turnBusy: false, turnCompleted: false, turnInterrupted: false, connection: "connected" }),
 }));
 vi.mock("./usePtySession", () => ({ usePtySession: () => ({ send: vi.fn(), resize: vi.fn() }) }));
 vi.mock("./useReviewData", () => ({
@@ -47,6 +48,30 @@ describe("App startup recovery", () => {
 
     expect(screen.getByLabelText("selected task").textContent).toBe("task-2");
     expect(workspaceMocks.setRuns).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a termination result after switching tasks", async () => {
+    let resolveTerminate!: (result: { status: string }) => void;
+    vi.spyOn(api, "tasks").mockResolvedValue([
+      { id: "task-1", prompt: "Fix it", repository: "/repo", status: "active", createdAt: 1 },
+      { id: "task-2", prompt: "Other", repository: "/repo", status: "active", createdAt: 2 },
+    ]);
+    vi.spyOn(api, "repository").mockResolvedValue({ path: "/repo", branch: "main" });
+    vi.spyOn(api, "agents").mockResolvedValue([]);
+    vi.spyOn(api, "gitStatus").mockResolvedValue({ repository: { path: "/repo" }, files: [], branches: ["main"], current_branch: "main", clean: true, agent_running: false });
+    vi.spyOn(api, "terminate").mockImplementation(() => new Promise((resolve) => { resolveTerminate = resolve; }));
+    workspaceMocks.setRuns.mockClear();
+    workspaceMocks.runs = [{ id: "run-1", taskId: "task-1", agent: "shell", status: "running", startedAt: 1, finishedAt: 0 }];
+    render(<App />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    fireEvent.click(screen.getByRole("button", { name: "Terminate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch task" }));
+    await act(async () => { resolveTerminate({ status: "ok" }); });
+
+    expect(screen.getByLabelText("selected task").textContent).toBe("task-2");
+    expect(workspaceMocks.setRuns).not.toHaveBeenCalled();
+    workspaceMocks.runs = [];
   });
 
   it("retries bootstrap and restores tasks after a temporary daemon outage", async () => {

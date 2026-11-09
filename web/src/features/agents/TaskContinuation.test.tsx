@@ -4,6 +4,7 @@ import type { Agent, AgentRun, HandoffContext, Task } from "../../app/api";
 import { api } from "../../app/api";
 import { formatHandoff } from "../review/handoffText";
 import { TaskContinuation } from "./TaskContinuation";
+import { profileStorageKey, saveProfile } from "../workflow/workingProfile";
 
 vi.mock("../../app/api", () => ({
   api: { updateTaskContext: vi.fn(), handoff: vi.fn(), continueTask: vi.fn() },
@@ -80,6 +81,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
 });
 
 describe("TaskContinuation", () => {
@@ -188,6 +190,9 @@ describe("TaskContinuation", () => {
     const select = within(dialog).getByLabelText("Continue with") as HTMLSelectElement;
     expect(Array.from(select.querySelectorAll("option")).map((option) => option.value)).toEqual(["opencode"]);
 
+    const modelSelect = within(dialog).getByLabelText("Model for continuation") as HTMLInputElement;
+    fireEvent.change(modelSelect, { target: { value: "vendor/model-1" } });
+
     const preview = within(dialog).getByLabelText("Handoff preview") as HTMLTextAreaElement;
     const expected = formatHandoff(handoffContext, sourceRun);
     expect(preview.readOnly).toBe(true);
@@ -195,7 +200,24 @@ describe("TaskContinuation", () => {
     expect(apiMock.continueTask).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue task" }));
-    await waitFor(() => expect(apiMock.continueTask).toHaveBeenCalledWith("task-1", "opencode", "run-1", expected));
+    await waitFor(() => expect(apiMock.continueTask).toHaveBeenCalledWith("task-1", "opencode", "run-1", expected, expect.any(String), null, "vendor/model-1"));
+    await waitFor(() => expect(onContinued).toHaveBeenCalledWith(continuedRun, "run-1"));
+  });
+
+  it("retries a failed continuation with the same fifth requestId", async () => {
+    apiMock.continueTask.mockRejectedValueOnce(new Error("continue failed"));
+    renderComponent();
+    fireEvent.click(screen.getByRole("button", { name: /Continue with another agent/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Continue with another agent" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue task" }));
+    expect(await screen.findByText("continue failed")).toBeTruthy();
+    expect(apiMock.continueTask).toHaveBeenCalledTimes(1);
+    const firstRequestId = apiMock.continueTask.mock.calls[0][4] as string;
+    expect(typeof firstRequestId).toBe("string");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue task" }));
+    await waitFor(() => expect(apiMock.continueTask).toHaveBeenCalledTimes(2));
+    expect(apiMock.continueTask.mock.calls[1][4]).toBe(firstRequestId);
     await waitFor(() => expect(onContinued).toHaveBeenCalledWith(continuedRun, "run-1"));
   });
 
@@ -239,5 +261,54 @@ describe("TaskContinuation", () => {
       resolveContinue(continuedRun);
     });
     expect(onContinued).not.toHaveBeenCalled();
+  });
+
+  it("applies a saved workflow to the constraints draft and saves everything in one update", async () => {
+    localStorage.clear();
+    saveProfile("repo", {
+      version: 1,
+      instructions: [],
+      workflows: [
+        {
+          name: "Review",
+          steps: [
+            { purpose: "verify changes", context: "current diff", agent: "codex (advisory)", result: "review notes", evidenceNeeded: "test logs" },
+          ],
+        },
+      ],
+    });
+    renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "unsavedgoal" } });
+    fireEvent.change(screen.getByLabelText("Next action"), { target: { value: "existingdraftnext" } });
+    fireEvent.change(screen.getByLabelText("Constraints"), { target: { value: "unsavedconstraint" } });
+
+    fireEvent.click(screen.getByText("Working style"));
+    const details = screen.getByText("Working style").closest("details") as HTMLElement;
+    fireEvent.click(within(details).getByText("Reusable workflows"));
+    const nested = within(details).getByText("Reusable workflows").closest("details") as HTMLElement;
+    const workflowSelect = within(nested).getByRole("combobox") as HTMLSelectElement;
+    fireEvent.change(workflowSelect, { target: { value: "Review" } });
+    fireEvent.click(within(nested).getByRole("button", { name: "apply workflow" }));
+
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("unsavedgoal");
+    expect((screen.getByLabelText("Next action") as HTMLInputElement).value).toBe("existingdraftnext");
+    const constraints = screen.getByLabelText("Constraints") as HTMLTextAreaElement;
+    expect(constraints.value).toContain("unsavedconstraint");
+    expect(constraints.value).toContain("Workflow: Review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(apiMock.updateTaskContext).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskContext).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        goal: "unsavedgoal",
+        next_action: "existingdraftnext",
+        constraints: expect.stringContaining("unsavedconstraint"),
+      }),
+    );
+    const savedConstraints = apiMock.updateTaskContext.mock.calls[0][1].constraints as string;
+    expect(savedConstraints).toContain("Workflow: Review");
+    expect(localStorage.getItem(profileStorageKey("repo"))).not.toBeNull();
   });
 });
