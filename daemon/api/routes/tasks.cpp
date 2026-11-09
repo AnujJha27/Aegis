@@ -8,13 +8,7 @@
 #include <string_view>
 
 namespace aegis::daemon::api::routes {
-namespace {
 
-bool isDirectory(const std::string &path) {
-    return std::filesystem::is_directory(std::filesystem::path(path));
-}
-
-}
 
 std::optional<Response> tasks(const Request &request, const Context &context) {
     const auto target = std::string(request.target());
@@ -60,8 +54,20 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
             const auto prompt = body.value("prompt", std::string{});
             const auto repository = body.value("repository", context.repository.string());
             if (prompt.empty()) return error(boost::beast::http::status::bad_request, "missing_prompt", "prompt is required");
-            if (!isDirectory(repository)) return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a directory");
-            return jsonResponse(boost::beast::http::status::created, protocol::toJson(context.store->createTask(prompt, repository)));
+            if (repository.find('\0') != std::string::npos)
+                return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a valid directory");
+            std::error_code fsError;
+            const std::filesystem::path repositoryPath(repository);
+            if (!std::filesystem::exists(repositoryPath, fsError) || fsError ||
+                !std::filesystem::is_directory(repositoryPath, fsError) || fsError)
+                return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a directory");
+            if (!matchesRepository(repository, context.repository))
+                return error(boost::beast::http::status::bad_request, "repository_mismatch", "repository does not match daemon repository");
+            std::error_code canonicalError;
+            const auto canonicalRepository = std::filesystem::weakly_canonical(context.repository, canonicalError);
+            if (canonicalError)
+                return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a valid directory");
+            return jsonResponse(boost::beast::http::status::created, protocol::toJson(context.store->createTask(prompt, canonicalRepository.string())));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
         }

@@ -62,7 +62,7 @@ inline nlohmann::json toJson(const repository::CommitFile &file) {
 }
 
 inline nlohmann::json toJson(const VerificationRun &run) {
-    return {{"id", run.id}, {"task_id", run.taskId}, {"run_id", run.runId ? nlohmann::json(*run.runId) : nlohmann::json(nullptr)}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}};
+    return {{"id", run.id}, {"task_id", run.taskId}, {"run_id", run.runId ? nlohmann::json(*run.runId) : nlohmann::json(nullptr)}, {"command", run.command}, {"exit_code", run.exitCode}, {"output", run.output}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}, {"repository_fingerprint", run.repositoryFingerprint ? nlohmann::json(*run.repositoryFingerprint) : nlohmann::json(nullptr)}, {"freshness", run.freshness}};
 }
 
 inline nlohmann::json toJson(const ReviewFinding &finding) {

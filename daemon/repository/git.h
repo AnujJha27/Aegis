@@ -52,6 +52,7 @@ public:
     std::string currentBranch() const;
     bool clean() const;
     std::string metadataKey() const;
+    std::optional<std::string> verificationFingerprint() const;
     void invalidateSnapshot() const;
     std::string diff(std::size_t maxOutputBytes = 1024 * 1024) const;
     bool stage(const std::string &path, std::string &error) const;

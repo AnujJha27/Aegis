@@ -15,6 +15,12 @@
 #include <string_view>
 #include <sys/stat.h>
 
+#include <boost/uuid/detail/sha1.hpp>
+
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+
 namespace aegis::daemon::repository {
 namespace {
 
@@ -116,6 +122,47 @@ std::optional<CommitSummary> parseCommitSummary(const std::string &line) {
     if (error != std::errc{} || end != fields[3].data() + fields[3].size()) return std::nullopt;
     result.subject = fields[4];
     return result;
+}
+
+std::optional<std::string> sha1Hex(boost::uuids::detail::sha1 &digest) {
+    unsigned int value[5] = {0, 0, 0, 0, 0};
+    digest.get_digest(value);
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(40);
+    for (const auto word : value)
+        for (int shift = 28; shift >= 0; shift -= 4) result.push_back(digits[(word >> shift) & 0xF]);
+    return result;
+}
+
+// Opens relative under root without following symlinks in any ancestor or the final component.
+int openWithin(const std::filesystem::path &root, const std::string &relative) {
+    int fd = ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return -1;
+    std::size_t start = 0;
+    while (start < relative.size()) {
+        const auto slash = relative.find('/', start);
+        const auto component = relative.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        const bool last = slash == std::string::npos;
+        if (component.empty() || component == ".") {
+            if (last) break;
+            start = slash + 1;
+            continue;
+        }
+        if (component == "..") {
+            ::close(fd);
+            return -1;
+        }
+        const auto next = ::openat(fd, component.c_str(),
+            (last ? O_RDONLY | O_NONBLOCK : O_RDONLY | O_DIRECTORY) | O_NOFOLLOW | O_CLOEXEC);
+        const int openErrno = errno;
+        ::close(fd);
+        if (next < 0) { errno = openErrno; return -1; }
+        if (last) return next;
+        fd = next;
+        start = slash + 1;
+    }
+    return fd;
 }
 
 }
@@ -249,6 +296,137 @@ GitRepository::Snapshot GitRepository::snapshot(bool refresh) const {
     }
     lock.unlock();
     return result;
+}
+
+std::optional<std::string> GitRepository::verificationFingerprint() const {
+    // shortcut: symlinks and submodules report unknown, support them when dependencies can be fingerprinted safely.
+    if (!validRepository_) return std::nullopt;
+    std::error_code canonicalError;
+    const auto root = std::filesystem::canonical(path_, canonicalError);
+    if (canonicalError) return std::nullopt;
+    const auto metaBefore = metadataKey();
+    boost::uuids::detail::sha1 digest;
+    const auto feed = [&digest](const void *data, std::size_t size) { digest.process_bytes(data, size); };
+    const auto feedText = [&feed](std::string text) { auto framed = std::to_string(text.size()) + ":" + text; feed(framed.data(), framed.size()); };
+    const auto trimOutput = [](std::string value) {
+        while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) value.pop_back();
+        return value;
+    };
+
+    feedText("aegis-verification-fingerprint-v1");
+    feedText("root");
+    feedText(root.string());
+
+    const auto headCommand = command({"--no-optional-locks", "rev-parse", "--verify", "HEAD"});
+    const auto symbolicCommand = command({"--no-optional-locks", "symbolic-ref", "HEAD"});
+    const auto head = process::run(headCommand, path_);
+    if (head.outputTruncated) return std::nullopt;
+    std::string unbornRef;
+    bool headWasUnborn = false;
+    if (head.exitCode == 0 && validCommitId(trimOutput(head.output))) {
+        feedText("head");
+        feedText(trimOutput(head.output));
+    } else {
+        const auto symbolic = process::run(symbolicCommand, path_);
+        if (symbolic.outputTruncated || symbolic.exitCode != 0) return std::nullopt;
+        const auto ref = trimOutput(symbolic.output);
+        if (ref.empty() || ref.find("..") != std::string::npos) return std::nullopt;
+        headWasUnborn = true;
+        unbornRef = ref;
+        feedText("unborn");
+        feedText(ref);
+    }
+
+    const auto indexCommand = command({"--no-optional-locks", "ls-files", "--stage", "-z"});
+    const auto index = process::run(indexCommand, path_);
+    if (index.outputTruncated || index.exitCode != 0) return std::nullopt;
+    for (std::size_t offset = 0; offset < index.output.size();) {
+        const auto end = index.output.find('\0', offset);
+        if (end == std::string::npos) return std::nullopt;
+        const auto entry = std::string_view(index.output).substr(offset, end - offset);
+        offset = end + 1;
+        if (entry.substr(0, 6) == "160000") return std::nullopt; // submodule gitlink
+    }
+    feedText("index");
+    feedText(index.output);
+
+    const auto listingCommand = command({"--no-optional-locks", "ls-files", "--cached", "--others", "--exclude-standard", "-z"});
+    const auto trackedPaths = [](const process::Result &result) -> std::optional<std::vector<std::string>> {
+        if (result.outputTruncated || result.exitCode != 0) return std::nullopt;
+        std::vector<std::string> paths;
+        for (std::size_t offset = 0; offset < result.output.size();) {
+            const auto end = result.output.find('\0', offset);
+            if (end == std::string::npos) return std::nullopt;
+            paths.push_back(result.output.substr(offset, end - offset));
+            offset = end + 1;
+        }
+        paths.erase(std::remove_if(paths.begin(), paths.end(), [](const std::string &path) {
+            return path == ".aegis" || path == ".aegis-git" || path.rfind(".aegis/", 0) == 0 || path.rfind(".aegis-git/", 0) == 0;
+        }), paths.end());
+        std::sort(paths.begin(), paths.end());
+        paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+        return paths;
+    };
+    const auto listing = process::run(listingCommand, path_);
+    auto paths = trackedPaths(listing);
+    if (!paths) return std::nullopt;
+    feedText("files");
+    feedText(std::to_string(paths->size()));
+    for (const auto &relative : *paths) {
+        feedText("file");
+        feedText(relative);
+        const auto fd = openWithin(root, relative);
+        if (fd < 0) {
+            if (errno == ENOENT) {
+                feedText("deleted");
+                continue;
+            }
+            return std::nullopt;
+        }
+        struct stat before {};
+        if (::fstat(fd, &before) != 0 || !S_ISREG(before.st_mode)) {
+            ::close(fd);
+            return std::nullopt;
+        }
+        feedText("mode");
+        feedText(std::to_string(static_cast<unsigned long long>(before.st_mode)));
+        feedText("bytes");
+        feedText(std::to_string(static_cast<unsigned long long>(before.st_size)));
+        std::array<char, 65536> buffer{};
+        for (;;) {
+            const auto readCount = ::read(fd, buffer.data(), buffer.size());
+            if (readCount < 0) {
+                if (errno == EINTR) continue;
+                ::close(fd);
+                return std::nullopt;
+            }
+            if (readCount == 0) break;
+            feed(buffer.data(), static_cast<std::size_t>(readCount));
+        }
+        struct stat after {};
+        if (::fstat(fd, &after) != 0 || before.st_mode != after.st_mode || before.st_size != after.st_size ||
+            before.st_mtim.tv_sec != after.st_mtim.tv_sec || before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+            before.st_ctim.tv_sec != after.st_ctim.tv_sec || before.st_ctim.tv_nsec != after.st_ctim.tv_nsec) {
+            ::close(fd);
+            return std::nullopt;
+        }
+        ::close(fd);
+        feedText("end");
+    }
+    const auto headAgain = process::run(headCommand, path_);
+    if (headAgain.outputTruncated || headAgain.exitCode != head.exitCode || headAgain.output != head.output) return std::nullopt;
+    if (headAgain.exitCode != 0) {
+        const auto symbolicAgain = process::run(symbolicCommand, path_);
+        if (!headWasUnborn || symbolicAgain.outputTruncated || symbolicAgain.exitCode != 0 ||
+            trimOutput(symbolicAgain.output) != unbornRef) return std::nullopt;
+    }
+    const auto indexAgain = process::run(indexCommand, path_);
+    if (indexAgain.outputTruncated || indexAgain.exitCode != 0 || indexAgain.output != index.output) return std::nullopt;
+    const auto listingAgain = process::run(listingCommand, path_);
+    const auto pathsAgain = trackedPaths(listingAgain);
+    if (!pathsAgain || *pathsAgain != paths) return std::nullopt;
+    if (metadataKey() != metaBefore) return std::nullopt;
+    return sha1Hex(digest);
 }
 
 std::string GitRepository::metadataKey() const {

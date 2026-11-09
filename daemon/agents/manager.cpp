@@ -69,7 +69,14 @@ bool Manager::isRunning(const std::string &runId) const {
 }
 
 std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent) {
-    if (!store_.task(taskId)) return std::nullopt;
+    const auto task = store_.task(taskId);
+    if (!task) return std::nullopt;
+    if (task->repository.find('\0') != std::string::npos) return std::nullopt;
+    {
+        std::error_code error;
+        if (!std::filesystem::equivalent(std::filesystem::path(task->repository), repository_, error) || error)
+            return std::nullopt;
+    }
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
     auto run = store_.startRun(taskId, agent);
     std::clog << "aegis_daemon: starting agent " << agent << " run " << run.id << '\n';

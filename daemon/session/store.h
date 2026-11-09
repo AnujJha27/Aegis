@@ -14,7 +14,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 4;
+    static constexpr int currentSchemaVersion = 5;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();

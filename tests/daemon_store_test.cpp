@@ -19,6 +19,7 @@ int main() {
     const auto path = fixtureDirectory / "store.sqlite";
     const auto legacyPath = fixtureDirectory / "legacy.sqlite";
     const auto corruptPath = fixtureDirectory / "corrupt.sqlite";
+    const auto legacyV4Path = fixtureDirectory / "legacy-v4.sqlite";
 
     {
         aegis::daemon::Store store(path);
@@ -39,11 +40,15 @@ int main() {
 
         aegis::daemon::VerificationRun verification{
             "verification-1", task.id, run.id, {"cmake", "--build", "build"}, 0, "ok", 10, 20};
+        verification.repositoryFingerprint = "fingerprint-abc";
+        verification.freshness = "current";
         store.saveVerification(verification);
         const auto history = store.verifications(task.id);
         assert(history.size() == 1);
         assert(history.front().command == verification.command);
         assert(history.front().runId == run.id);
+        assert(history.front().repositoryFingerprint == "fingerprint-abc");
+        assert(history.front().freshness == "unknown");
 
         const auto finding = store.createFinding(task.id, run.id, "src/main.cpp", 7, 9, "Check cleanup on early return.");
         assert(finding.status == "open" && finding.startLine == 7 && finding.endLine == 9);
@@ -130,6 +135,10 @@ int main() {
         const auto abandoned = store.runs(store.tasks().front().id).back();
         assert(abandoned.status == "interrupted");
         assert(abandoned.finishedAt > 0);
+        const auto reopenedVerifications = store.verifications(store.tasks().front().id);
+        assert(reopenedVerifications.size() == 1);
+        assert(reopenedVerifications.front().repositoryFingerprint == "fingerprint-abc");
+        assert(reopenedVerifications.front().freshness == "unknown");
     }
 
     sqlite3 *legacy = nullptr;
@@ -156,17 +165,48 @@ int main() {
         assert(migrated.findings("legacy-task").empty());
         const auto migratedFinding = migrated.createFinding("legacy-task", std::nullopt, "legacy.cpp", 1, std::nullopt, "Migration retained the task.");
         assert(migratedFinding.status == "open");
+        const aegis::daemon::VerificationRun legacyVerification{
+            "legacy-verification", "legacy-task", std::nullopt, {"true"}, 0, "", 4, 4};
+        migrated.saveVerification(legacyVerification);
+        const auto legacyVerifications = migrated.verifications("legacy-task");
+        assert(legacyVerifications.size() == 1);
+        assert(!legacyVerifications.front().repositoryFingerprint.has_value());
+        assert(legacyVerifications.front().freshness == "unknown");
     }
     assert(sqlite3_open(legacyPath.string().c_str(), &legacy) == SQLITE_OK);
     sqlite3_stmt *version = nullptr;
     assert(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK);
-    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 4);
+    assert(sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 5);
     sqlite3_finalize(version);
     sqlite3_stmt *eventIndex = nullptr;
     assert(sqlite3_prepare_v2(legacy, "SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_task_sequence'", -1, &eventIndex, nullptr) == SQLITE_OK);
     assert(sqlite3_step(eventIndex) == SQLITE_ROW);
     sqlite3_finalize(eventIndex);
     sqlite3_close(legacy);
+
+    sqlite3 *legacyV4 = nullptr;
+    assert(sqlite3_open(legacyV4Path.string().c_str(), &legacyV4) == SQLITE_OK);
+    assert(sqlite3_exec(legacyV4,
+        "PRAGMA user_version = 4;"
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL);"
+        "CREATE TABLE runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), agent TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0, external_session_id TEXT);"
+        "CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);"
+        "CREATE TABLE verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);"
+        "INSERT INTO tasks VALUES ('v4-task','v4','/tmp','open',1);"
+        "INSERT INTO runs VALUES ('v4-run','v4-task','codex','completed',2,3,NULL);"
+        "INSERT INTO events (id, task_id, run_id, type, agent, content, timestamp) VALUES ('v4-event','v4-task','v4-run','user.message','codex','preserved',4);"
+        "INSERT INTO verifications VALUES ('v4-verification','v4-task','v4-run','[\"true\"]',0,'kept-output',4,4);",
+        nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(legacyV4);
+    {
+        aegis::daemon::Store migrated(legacyV4Path);
+        const auto v4Verifications = migrated.verifications("v4-task");
+        assert(v4Verifications.size() == 1);
+        assert(v4Verifications.front().output == "kept-output");
+        assert(v4Verifications.front().command == std::vector<std::string>{"true"});
+        assert(!v4Verifications.front().repositoryFingerprint.has_value());
+        assert(migrated.events("v4-task").front().id == "v4-event");
+    }
 
     const std::string corruptContents = "preserve this invalid database";
     {

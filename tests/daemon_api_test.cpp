@@ -79,7 +79,192 @@ int main() {
     assert(health.body().find("healthy") != std::string::npos);
     const auto version = request(context, http::verb::get, "/api/version");
     assert(version.result() == http::status::ok);
-    assert(nlohmann::json::parse(version.body()).at("schema_version") == 4);
+    assert(nlohmann::json::parse(version.body()).at("schema_version") == aegis::daemon::Store::currentSchemaVersion);
+
+    // Regression: verification freshness lifecycle, ctest normalization, and
+    // command validation. The freshness/migration implementation is forthcoming;
+    // these assertions pin the expected serialized behavior.
+    RepositoryFixture verifyFixture;
+    verifyFixture.write("source.cpp", "int alpha = 1;\n");
+    verifyFixture.commit("base");
+    aegis::daemon::repository::GitRepository verifyGit(verifyFixture.root());
+    aegis::daemon::repository::Files verifyFiles(verifyGit);
+    aegis::daemon::agents::Manager verifyManager(verifyFixture.root(), store, events);
+    const aegis::daemon::api::Context verifyContext{&store, &events, &verifyManager, &verifyGit, &verifyFiles, verifyFixture.root(), {}};
+    const auto verifyTask = store.createTask("verification freshness", verifyFixture.root().string());
+    const auto firstVerify = request(verifyContext, http::verb::post, "/api/verify",
+        nlohmann::json{{"task_id", verifyTask.id}, {"command", {"/usr/bin/true"}}}.dump());
+    assert(firstVerify.result() == http::status::ok);
+    const auto firstVerifyJson = nlohmann::json::parse(firstVerify.body());
+    assert(firstVerifyJson.at("freshness") == "current");
+    assert(!firstVerifyJson.at("repository_fingerprint").get<std::string>().empty());
+    const auto firstVerificationId = firstVerifyJson.at("id").get<std::string>();
+    const auto fetchVerifications = [&verifyContext, &verifyTask]() {
+        const auto response = request(verifyContext, http::verb::get,
+            "/api/tasks/" + verifyTask.id + "/verifications");
+        assert(response.result() == http::status::ok);
+        return nlohmann::json::parse(response.body());
+    };
+    const auto currentHistory = fetchVerifications();
+    assert(currentHistory.size() == 1);
+    assert(currentHistory[0].at("id") == firstVerificationId);
+    assert(currentHistory[0].at("freshness") == "current");
+
+    verifyFixture.write("source.cpp", "int alpha = 2;\n");
+    verifyFixture.commit("change tracked source");
+    const auto staleHistory = fetchVerifications();
+    bool staleFound = false;
+    for (const auto &entry : staleHistory)
+        if (entry.at("id") == firstVerificationId) {
+            staleFound = true;
+            assert(entry.at("freshness") == "stale");
+        }
+    assert(staleFound);
+    const auto staleHandoff = request(verifyContext, http::verb::get,
+        "/api/tasks/" + verifyTask.id + "/handoff");
+    assert(staleHandoff.result() == http::status::ok);
+    const auto staleHandoffJson = nlohmann::json::parse(staleHandoff.body());
+    assert(staleHandoffJson.at("verification").at("id") == firstVerificationId);
+    assert(staleHandoffJson.at("verification").at("freshness") == "stale");
+
+    // Restoring the original bytes cannot restore the baseline once the commit
+    // changed HEAD: the fingerprint includes HEAD, so the verification stays stale.
+    verifyFixture.write("source.cpp", "int alpha = 1;\n");
+    const auto restoredHistory = fetchVerifications();
+    bool restoredFound = false;
+    for (const auto &entry : restoredHistory)
+        if (entry.at("id") == firstVerificationId) {
+            restoredFound = true;
+            assert(entry.at("freshness") == "stale");
+        }
+    assert(restoredFound);
+
+    verifyFixture.write("scratch.txt", "scratch\n");
+    const auto untrackedHistory = fetchVerifications();
+    bool untrackedStaleFound = false;
+    for (const auto &entry : untrackedHistory)
+        if (entry.at("id") == firstVerificationId) {
+            untrackedStaleFound = true;
+            assert(entry.at("freshness") == "stale");
+        }
+    assert(untrackedStaleFound);
+
+    const auto ctestTask = store.createTask("ctest validation", verifyFixture.root().string());
+    const auto ctestVerificationsBefore = store.verifications(ctestTask.id).size();
+    const auto ctestEventsBefore = store.events(ctestTask.id).size();
+    verifyFixture.write("build/.keep", "");
+    const auto ctestRun = request(verifyContext, http::verb::post, "/api/verify",
+        nlohmann::json{{"task_id", ctestTask.id}, {"command", {"ctest", "--test-dir", "build"}}}.dump());
+    assert(ctestRun.result() == http::status::ok);
+    const auto ctestJson = nlohmann::json::parse(ctestRun.body());
+    assert(ctestJson.at("exit_code").get<int>() != 0);
+    const auto ctestCommand = ctestJson.at("command").get<std::vector<std::string>>();
+    assert(std::find(ctestCommand.begin(), ctestCommand.end(), "--no-tests=error") != ctestCommand.end());
+    assert(store.verifications(ctestTask.id).size() == ctestVerificationsBefore + 1);
+    assert(store.events(ctestTask.id).size() == ctestEventsBefore + 2);
+
+    const auto invalidTask = store.createTask("invalid verification", verifyFixture.root().string());
+    const auto expectInvalidCommand = [&verifyContext, &invalidTask](const nlohmann::json &command) {
+        const auto response = request(verifyContext, http::verb::post, "/api/verify",
+            nlohmann::json{{"task_id", invalidTask.id}, {"command", command}}.dump());
+        assert(response.result() == http::status::bad_request);
+        assert(nlohmann::json::parse(response.body()).at("error").at("code") == "invalid_command");
+    };
+    expectInvalidCommand(nlohmann::json::array());
+    expectInvalidCommand(std::vector<std::string>{""});
+    expectInvalidCommand(std::vector<std::string>{"   "});
+    const std::string nulArgument = std::string("bad\0arg", 7);
+    expectInvalidCommand(std::vector<std::string>{"/usr/bin/true", nulArgument});
+    assert(store.verifications(invalidTask.id).empty());
+    assert(store.events(invalidTask.id).empty());
+
+    const auto legacyTask = store.createTask("legacy verification", verifyFixture.root().string());
+    aegis::daemon::VerificationRun legacyVerification;
+    legacyVerification.id = "legacy-verification";
+    legacyVerification.taskId = legacyTask.id;
+    legacyVerification.command = {"/usr/bin/true"};
+    legacyVerification.exitCode = 0;
+    legacyVerification.output = "exit_code=0";
+    store.saveVerification(legacyVerification);
+    const auto legacyHistory = request(verifyContext, http::verb::get,
+        "/api/tasks/" + legacyTask.id + "/verifications");
+    assert(legacyHistory.result() == http::status::ok);
+    const auto legacyEntries = nlohmann::json::parse(legacyHistory.body());
+    bool legacyFound = false;
+    for (const auto &entry : legacyEntries)
+        if (entry.at("id") == legacyVerification.id) {
+            legacyFound = true;
+            assert(entry.at("freshness") == "unknown");
+        }
+    assert(legacyFound);
+
+    // Regression: POST /api/tasks must reject repositories different from the context
+    // repository and canonicalize equivalent paths for the same repository.
+    RepositoryFixture mismatchFixture;
+    mismatchFixture.write("marker.txt", "other repo\n");
+    mismatchFixture.commit("base");
+    const auto mismatchCreated = request(context, http::verb::post, "/api/tasks",
+        nlohmann::json{{"prompt", "mismatched repo"}, {"repository", mismatchFixture.root().string()}}.dump());
+    assert(mismatchCreated.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(mismatchCreated.body()).at("error").at("code") == "repository_mismatch");
+
+    const auto dotRepository = (std::filesystem::current_path() / ".").string();
+    const auto dotCreated = request(context, http::verb::post, "/api/tasks",
+        nlohmann::json{{"prompt", "dot canonical repo"}, {"repository", dotRepository}}.dump());
+    assert(dotCreated.result() == http::status::created);
+    const auto dotTaskId = nlohmann::json::parse(dotCreated.body()).at("id").get<std::string>();
+    assert(store.task(dotTaskId)->repository == std::filesystem::current_path().string());
+
+    const auto canonicalLink = std::filesystem::temp_directory_path() /
+        ("aegis-canonical-link-" + std::to_string(getpid()));
+    std::filesystem::remove(canonicalLink);
+    std::filesystem::create_symlink(std::filesystem::current_path(), canonicalLink);
+    const auto linkCreated = request(context, http::verb::post, "/api/tasks",
+        nlohmann::json{{"prompt", "symlink canonical repo"}, {"repository", canonicalLink.string()}}.dump());
+    assert(linkCreated.result() == http::status::created);
+    const auto linkTaskId = nlohmann::json::parse(linkCreated.body()).at("id").get<std::string>();
+    assert(store.task(linkTaskId)->repository == std::filesystem::current_path().string());
+    std::filesystem::remove(canonicalLink);
+
+    // Regression: manager.launch must refuse tasks whose repository differs from the
+    // manager repository, without creating runs.
+    const auto mismatchTask = store.createTask("mismatched launch", mismatchFixture.root().string());
+    const auto mismatchRun = manager.launch(mismatchTask.id, "shell");
+    if (mismatchRun) manager.terminate(mismatchRun->id);
+    assert(!mismatchRun);
+    assert(store.runs(mismatchTask.id).empty());
+
+    // Regression: handoff recent_events must drop terminal.output noise while keeping
+    // the user.message correction that precedes it.
+    const auto correctionTask = store.createTask("handoff correction", std::filesystem::current_path().string());
+    const auto correctionRun = store.startRun(correctionTask.id, "shell");
+    store.appendEvent({"correction-user-message", correctionTask.id, correctionRun.id,
+                       "user.message", "shell", "actually focus on the parser", 1});
+    for (int index = 0; index < 25; ++index)
+        store.appendEvent({"correction-terminal-" + std::to_string(index), correctionTask.id,
+                           correctionRun.id, "terminal.output", "shell", "noise " + std::to_string(index), index + 2});
+    const auto correctionHandoff = request(context, http::verb::get, "/api/tasks/" + correctionTask.id + "/handoff");
+    assert(correctionHandoff.result() == http::status::ok);
+    const auto correctionHandoffJson = nlohmann::json::parse(correctionHandoff.body());
+    const auto correctionEvents = correctionHandoffJson.at("recent_events").get<std::vector<nlohmann::json>>();
+    bool correctionPresent = false;
+    for (const auto &event : correctionEvents) {
+        assert(event.at("type").get<std::string>() != "terminal.output");
+        if (event.at("id") == "correction-user-message") correctionPresent = true;
+    }
+    assert(correctionPresent);
+
+    // Regression: handoff and verify must reject store-created tasks whose repository
+    // differs from the context repository before doing any work.
+    const auto mismatchHandoff = request(context, http::verb::get, "/api/tasks/" + mismatchTask.id + "/handoff");
+    assert(mismatchHandoff.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(mismatchHandoff.body()).at("error").at("code") == "repository_mismatch");
+    const auto mismatchVerification = request(context, http::verb::post, "/api/verify",
+        nlohmann::json{{"task_id", mismatchTask.id}, {"command", {"/usr/bin/true"}}}.dump());
+    assert(mismatchVerification.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(mismatchVerification.body()).at("error").at("code") == "repository_mismatch");
+    assert(store.verifications(mismatchTask.id).empty());
+    assert(store.events(mismatchTask.id).empty());
 
     const auto historyTask = store.createTask("history", std::filesystem::current_path().string());
     const auto historyRun = store.startRun(historyTask.id, "shell");
@@ -157,18 +342,19 @@ int main() {
     mergeFixture.git({"switch", currentBranch});
     aegis::daemon::repository::GitRepository mergeGit(mergeFixture.root());
     aegis::daemon::repository::Files mergeFiles(mergeGit);
-    const aegis::daemon::api::Context mergeContext{&store, &events, &manager, &mergeGit, &mergeFiles, mergeFixture.root(), {}};
+    aegis::daemon::agents::Manager mergeManager(mergeFixture.root(), store, events);
+    const aegis::daemon::api::Context mergeContext{&store, &events, &mergeManager, &mergeGit, &mergeFiles, mergeFixture.root(), {}};
     const auto merged = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
     assert(merged.result() == http::status::ok);
     assert(mergeFiles.read("feature.txt", aegis::daemon::repository::FileSource::worktree).content == "feature\n");
     assert(mergeFiles.read("main.txt", aegis::daemon::repository::FileSource::worktree).content == "main\n");
     const auto guardTask = store.createTask("protect agent work during merge", mergeFixture.root().string());
-    const auto activeRun = manager.launch(guardTask.id, "shell");
+    const auto activeRun = mergeManager.launch(guardTask.id, "shell");
     assert(activeRun);
     const auto activeMerge = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
     assert(activeMerge.result() == http::status::conflict);
     assert(nlohmann::json::parse(activeMerge.body()).at("error").at("code") == "agent_running");
-    assert(manager.terminate(activeRun->id));
+    assert(mergeManager.terminate(activeRun->id));
     mergeFixture.write("dirty.txt", "keep me\n");
     const auto dirtyMerge = request(mergeContext, http::verb::post, "/api/git/merge", R"({"branch":"feature"})");
     assert(dirtyMerge.result() == http::status::conflict);

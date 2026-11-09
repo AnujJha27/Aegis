@@ -120,6 +120,9 @@ Store::Store(const std::filesystem::path &path) {
             execute("PRAGMA user_version = 4;");
             execute("COMMIT;");
         }
+        if (!hasColumn(database_, "verifications", "repository_fingerprint"))
+            execute("ALTER TABLE verifications ADD COLUMN repository_fingerprint TEXT;");
+        if (previousVersion < 5) execute("PRAGMA user_version = 5;");
         execute("CREATE INDEX IF NOT EXISTS events_run_type_sequence ON events(run_id, type, sequence DESC);");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
@@ -252,7 +255,7 @@ void Store::appendEvent(const AgentEvent &event) {
 void Store::saveVerification(const VerificationRun &verification) {
     std::lock_guard lock(mutex_);
     const auto command = nlohmann::json(verification.command).dump();
-    Statement statement(database_, "INSERT INTO verifications (id, task_id, run_id, command_json, exit_code, output, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    Statement statement(database_, "INSERT INTO verifications (id, task_id, run_id, command_json, exit_code, output, started_at, finished_at, repository_fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, verification.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind verification id");
     check(sqlite3_bind_text(statement.get(), 2, verification.taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind verification task");
     if (verification.runId)
@@ -263,6 +266,9 @@ void Store::saveVerification(const VerificationRun &verification) {
     check(sqlite3_bind_text(statement.get(), 6, verification.output.c_str(), -1, SQLITE_TRANSIENT), database_, "bind verification output");
     check(sqlite3_bind_int64(statement.get(), 7, verification.startedAt), database_, "bind verification start");
     check(sqlite3_bind_int64(statement.get(), 8, verification.finishedAt), database_, "bind verification finish");
+    if (verification.repositoryFingerprint)
+        check(sqlite3_bind_text(statement.get(), 9, verification.repositoryFingerprint->c_str(), -1, SQLITE_TRANSIENT), database_, "bind verification fingerprint");
+    else check(sqlite3_bind_null(statement.get(), 9), database_, "bind verification fingerprint");
     check(sqlite3_step(statement.get()), database_, "insert verification");
 }
 
@@ -348,7 +354,7 @@ std::optional<AgentEvent> Store::latestTurnEvent(const std::string &runId) const
 
 std::vector<VerificationRun> Store::verifications(const std::string &taskId, std::size_t limit) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, run_id, command_json, exit_code, output, started_at, finished_at FROM verifications WHERE task_id = ? ORDER BY finished_at DESC LIMIT ?");
+    Statement statement(database_, "SELECT id, task_id, run_id, command_json, exit_code, output, started_at, finished_at, repository_fingerprint FROM verifications WHERE task_id = ? ORDER BY finished_at DESC LIMIT ?");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind verification task");
     check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit)), database_, "bind verification limit");
     std::vector<VerificationRun> result;
@@ -363,6 +369,7 @@ std::vector<VerificationRun> Store::verifications(const std::string &taskId, std
         verification.output = columnText(statement.get(), 5);
         verification.startedAt = sqlite3_column_int64(statement.get(), 6);
         verification.finishedAt = sqlite3_column_int64(statement.get(), 7);
+        if (sqlite3_column_type(statement.get(), 8) != SQLITE_NULL) verification.repositoryFingerprint = columnText(statement.get(), 8);
         result.push_back(std::move(verification));
     }
     return result;

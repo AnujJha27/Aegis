@@ -71,6 +71,8 @@ struct VerificationRun {
     std::string output;
     std::int64_t startedAt = 0;
     std::int64_t finishedAt = 0;
+    std::optional<std::string> repositoryFingerprint = std::nullopt;
+    std::string freshness = "unknown";
 };
 
 struct ReviewFinding {

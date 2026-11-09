@@ -7,6 +7,7 @@
 #include "daemon/repository/git.h"
 #include "daemon/session/store.h"
 #include "daemon/verification/runner.h"
+#include "repository_fixture.h"
 
 #include <cassert>
 #include <algorithm>
@@ -68,6 +69,54 @@ int main() {
         {"/usr/bin/head", "-c", "1100000", "/dev/zero"}, repository, "test-task");
     assert(largeVerification.exitCode == 0 && largeVerification.output.size() < 1024 * 1024 + 100);
     assert(largeVerification.output.ends_with("...[verification output truncated]"));
+
+    {
+        RepositoryFixture fingerprintFixture;
+        fingerprintFixture.write("src.cpp", "int value = 1;\n");
+        fingerprintFixture.commit("base");
+        const auto stable = aegis::daemon::verification::run(
+            {"/usr/bin/true"}, fingerprintFixture.root(), "fingerprint-task");
+        assert(stable.exitCode == 0);
+        assert(stable.repositoryFingerprint.has_value());
+        assert(stable.freshness == "current");
+
+        const auto mutating = aegis::daemon::verification::run(
+            {"/bin/sh", "-c", "printf 'int value = 2;\\n' > src.cpp"},
+            fingerprintFixture.root(), "fingerprint-task");
+        assert(mutating.exitCode == 0);
+        assert(!mutating.repositoryFingerprint.has_value());
+        assert(mutating.freshness == "unknown");
+
+        const auto plainDirectory = std::filesystem::temp_directory_path() /
+            ("aegis-verification-plain-" + std::to_string(getpid()));
+        std::filesystem::create_directories(plainDirectory);
+        const auto nonGit = aegis::daemon::verification::run(
+            {"/usr/bin/true"}, plainDirectory, "fingerprint-task");
+        assert(!nonGit.repositoryFingerprint.has_value());
+        assert(nonGit.freshness == "unknown");
+        std::filesystem::remove_all(plainDirectory);
+    }
+
+    {
+        const auto printfVerification = aegis::daemon::verification::run(
+            {"/usr/bin/printf", "%s", "--no-tests=ignore"}, repository, "printf-task");
+        assert(printfVerification.exitCode == 0);
+        assert(printfVerification.output == "--no-tests=ignore");
+
+        const auto ctestDirectory = std::filesystem::temp_directory_path() /
+            ("aegis-ctest-empty-" + std::to_string(getpid()));
+        std::filesystem::create_directories(ctestDirectory);
+        const auto ctestVerification = aegis::daemon::verification::run(
+            {"ctest", "--test-dir", ctestDirectory.string(), "--no-tests=error", "--no-tests=ignore", "--no-tests", "ignore"},
+            ctestDirectory, "ctest-task");
+        assert(ctestVerification.exitCode != 0);
+        const auto &normalized = ctestVerification.command;
+        assert(std::count(normalized.begin(), normalized.end(), "--no-tests=error") == 1);
+        assert(std::find(normalized.begin(), normalized.end(), "--no-tests=ignore") == normalized.end());
+        assert(std::find(normalized.begin(), normalized.end(), "--no-tests") == normalized.end());
+        assert(std::find(normalized.begin(), normalized.end(), "ignore") == normalized.end());
+        std::filesystem::remove_all(ctestDirectory);
+    }
 
     const auto event = aegis::daemon::agents::parseCodexJsonLine(
         R"({"type":"item.completed","item":{"type":"agent_message","text":"implemented"}})", "task", "run", "codex");

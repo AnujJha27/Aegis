@@ -25,6 +25,16 @@ inline Response error(boost::beast::http::status status, const std::string &code
     return jsonResponse(status, {{"error", {{"code", code}, {"message", message}}}});
 }
 
+inline bool matchesRepository(const std::string &path, const std::filesystem::path &root) {
+    if (path.find('\0') != std::string::npos) return false;
+    std::error_code error;
+    const auto candidate = std::filesystem::weakly_canonical(std::filesystem::path(path), error);
+    if (error) return false;
+    const auto canonicalRoot = std::filesystem::weakly_canonical(root, error);
+    if (error) return false;
+    return std::filesystem::equivalent(candidate, canonicalRoot, error) && !error;
+}
+
 inline std::optional<std::string> pathId(const std::string &target, const std::string &suffix) {
     constexpr std::string_view prefix = "/api/tasks/";
     const auto path = target.substr(0, target.find('?'));

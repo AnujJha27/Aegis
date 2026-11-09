@@ -1,5 +1,6 @@
 #include "daemon/api/route_handlers.h"
 #include "daemon/api/route_helpers.h"
+#include "daemon/repository/git.h"
 
 #include <map>
 
@@ -50,14 +51,21 @@ std::optional<Response> review(const Request &request, const Context &context) {
     if (const auto taskId = pathId(target, "/handoff")) {
         const auto task = context.store->task(*taskId);
         if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
-        auto events = context.store->events(*taskId, 20);
+        if (!matchesRepository(task->repository, context.repository))
+            return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
+        auto events = context.store->events(*taskId, 20, false);
         for (auto &event : events) if (event.content.size() > 4000) event.content.resize(4000);
         auto diff = context.git ? context.git->diff(handoffPatchLimit) : std::string{};
         auto verificationHistory = context.store->verifications(*taskId, 1);
+        std::optional<std::string> currentFingerprint;
+        if (!verificationHistory.empty() && verificationHistory.front().repositoryFingerprint && context.git)
+            currentFingerprint = context.git->verificationFingerprint();
         std::optional<VerificationRun> verification;
         if (!verificationHistory.empty()) {
             verification = std::move(verificationHistory.front());
             if (verification->output.size() > 8000) verification->output.resize(8000);
+            verification->freshness = !verification->repositoryFingerprint || !currentFingerprint ? "unknown"
+                : (*currentFingerprint == *verification->repositoryFingerprint ? "current" : "stale");
         }
         auto findings = context.store->findings(*taskId, 20);
         for (auto &finding : findings) if (finding.message.size() > 2000) finding.message.resize(2000);

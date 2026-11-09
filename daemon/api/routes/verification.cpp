@@ -1,11 +1,14 @@
 #include "daemon/api/route_handlers.h"
 #include "daemon/api/route_helpers.h"
+#include "daemon/repository/git.h"
 #include "daemon/verification/runner.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -37,9 +40,21 @@ std::optional<Response> verification(const Request &request, const Context &cont
     const auto target = std::string(request.target());
     if (request.method() == boost::beast::http::verb::get) {
         if (const auto taskId = pathId(target, "/verifications")) {
-            if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            const auto task = context.store->task(*taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(task->repository, context.repository))
+                return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
+            const auto records = context.store->verifications(*taskId);
+            std::optional<std::string> currentFingerprint;
+            if (!records.empty() && std::any_of(records.begin(), records.end(),
+                    [](const VerificationRun &run) { return run.repositoryFingerprint.has_value(); }) && context.git)
+                currentFingerprint = context.git->verificationFingerprint();
             nlohmann::json result = nlohmann::json::array();
-            for (const auto &run : context.store->verifications(*taskId)) result.push_back(protocol::toJson(run));
+            for (auto run : records) {
+                run.freshness = !run.repositoryFingerprint || !currentFingerprint ? "unknown"
+                    : (*currentFingerprint == *run.repositoryFingerprint ? "current" : "stale");
+                result.push_back(protocol::toJson(run));
+            }
             return jsonResponse(boost::beast::http::status::ok, result);
         }
     }
@@ -55,7 +70,10 @@ std::optional<Response> verification(const Request &request, const Context &cont
             if (command.empty()) return error(boost::beast::http::status::bad_request, "invalid_command", "command must not be empty");
             const auto taskId = body.value("task_id", std::string{});
             if (taskId.empty()) return error(boost::beast::http::status::bad_request, "missing_task_id", "task_id is required");
-            if (!context.store->task(taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            const auto task = context.store->task(taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(task->repository, context.repository))
+                return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
             std::optional<std::string> runId;
             if (body.contains("run_id") && !body["run_id"].is_null()) {
                 if (!body["run_id"].is_string()) return error(boost::beast::http::status::bad_request, "invalid_run_id", "run_id must be a string");
@@ -63,6 +81,12 @@ std::optional<Response> verification(const Request &request, const Context &cont
                 const auto run = context.store->run(*runId);
                 if (!run || run->taskId != taskId) return error(boost::beast::http::status::not_found, "run_not_found", "run not found for task");
             }
+            if (command.front().empty() || command.front().find('\0') != std::string::npos ||
+                std::all_of(command.front().begin(), command.front().end(), [](unsigned char c) { return std::isspace(c); }))
+                return error(boost::beast::http::status::bad_request, "invalid_command", "command executable must not be blank");
+            for (const auto &argument : command)
+                if (argument.find('\0') != std::string::npos)
+                    return error(boost::beast::http::status::bad_request, "invalid_command", "command arguments must not contain NUL");
             publishVerificationEvent(context, taskId, runId, "verification.started");
             auto result = aegis::daemon::verification::run(command, context.repository, taskId, runId);
             context.store->saveVerification(result);

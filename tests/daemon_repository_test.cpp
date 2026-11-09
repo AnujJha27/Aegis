@@ -8,8 +8,153 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 int main() {
+    {
+        RepositoryFixture fingerprintFixture;
+        fingerprintFixture.write("a.cpp", "int a = 1;\n");
+        fingerprintFixture.write("space name.cpp", "int spaced = 0;\n");
+        fingerprintFixture.commit("base");
+        aegis::daemon::repository::GitRepository fingerprintRepository(fingerprintFixture.root());
+        const auto baseline = fingerprintRepository.verificationFingerprint();
+        assert(baseline.has_value());
+        assert(fingerprintRepository.verificationFingerprint() == baseline);
+
+        fingerprintFixture.write("a.cpp", "int a = 2;\n");
+        const auto edited = fingerprintRepository.verificationFingerprint();
+        assert(edited.has_value() && edited != baseline);
+        fingerprintFixture.write("a.cpp", "int a = 1;\n");
+        assert(fingerprintRepository.verificationFingerprint() == baseline);
+
+        fingerprintFixture.write("a.cpp", "int a = 2;\n");
+        fingerprintFixture.git({"add", "--", "a.cpp"});
+        const auto staged = fingerprintRepository.verificationFingerprint();
+        assert(staged.has_value() && staged != baseline);
+        fingerprintFixture.write("a.cpp", "int a = 1;\n");
+        const auto unstagedAgainstIndex = fingerprintRepository.verificationFingerprint();
+        assert(unstagedAgainstIndex.has_value() && unstagedAgainstIndex != staged);
+        fingerprintFixture.write("a.cpp", "int a = 2;\n");
+        assert(fingerprintRepository.verificationFingerprint() == staged);
+
+        const auto beforeUntracked = fingerprintRepository.verificationFingerprint();
+        fingerprintFixture.write("untracked.txt", "one\n");
+        const auto withUntracked = fingerprintRepository.verificationFingerprint();
+        assert(withUntracked.has_value() && withUntracked != beforeUntracked);
+        fingerprintFixture.write("untracked.txt", "two\n");
+        const auto editedUntracked = fingerprintRepository.verificationFingerprint();
+        assert(editedUntracked.has_value() && editedUntracked != withUntracked);
+        std::filesystem::remove(fingerprintFixture.root() / "untracked.txt");
+        assert(fingerprintRepository.verificationFingerprint() == beforeUntracked);
+
+        fingerprintFixture.write(".gitignore", "/ignored*\n");
+        fingerprintFixture.git({"add", "--", ".gitignore"});
+        const auto withIgnore = fingerprintRepository.verificationFingerprint();
+        assert(withIgnore.has_value() && withIgnore != unstagedAgainstIndex);
+        fingerprintFixture.write("ignored.txt", "runtime\n");
+        assert(fingerprintRepository.verificationFingerprint() == withIgnore);
+        fingerprintFixture.write("ignored.txt", "runtime-changed\n");
+        assert(fingerprintRepository.verificationFingerprint() == withIgnore);
+
+        const auto beforeBinary = fingerprintRepository.verificationFingerprint();
+        fingerprintFixture.write("blob.dat", std::string("x\0y", 3));
+        const auto withBinary = fingerprintRepository.verificationFingerprint();
+        assert(withBinary.has_value() && withBinary != beforeBinary);
+        fingerprintFixture.write("blob.dat", std::string("x\0z", 3));
+        const auto editedBinary = fingerprintRepository.verificationFingerprint();
+        assert(editedBinary.has_value() && editedBinary != withBinary);
+
+        fingerprintFixture.write("line\nbreak.txt", "odd\n");
+        const auto withOddNames = fingerprintRepository.verificationFingerprint();
+        assert(withOddNames.has_value() && withOddNames != editedBinary);
+        fingerprintFixture.write("line\nbreak.txt", "odd-2\n");
+        assert(fingerprintRepository.verificationFingerprint() != withOddNames);
+        fingerprintFixture.write("space name.cpp", "int spaced = 1;\n");
+        const auto withSpaceEdit = fingerprintRepository.verificationFingerprint();
+        assert(withSpaceEdit.has_value() && withSpaceEdit != withOddNames);
+        std::filesystem::remove(fingerprintFixture.root() / "line\nbreak.txt");
+        assert(fingerprintRepository.verificationFingerprint() != withSpaceEdit);
+
+        const auto beforeSymlink = fingerprintRepository.verificationFingerprint();
+        const auto symlinkTarget = std::filesystem::temp_directory_path() /
+            ("aegis-fp-outside-" + std::to_string(getpid()));
+        {
+            std::ofstream outside(symlinkTarget, std::ios::binary);
+            outside << "secret";
+        }
+        std::filesystem::create_symlink(symlinkTarget, fingerprintFixture.root() / "escape");
+        const auto withSymlink = fingerprintRepository.verificationFingerprint();
+        assert(!withSymlink.has_value() || withSymlink != beforeSymlink);
+        std::filesystem::remove(fingerprintFixture.root() / "escape");
+        std::filesystem::remove(symlinkTarget);
+        assert(fingerprintRepository.verificationFingerprint() == beforeSymlink);
+
+        const auto plainDirectory = std::filesystem::temp_directory_path() /
+            ("aegis-fp-plain-" + std::to_string(getpid()));
+        std::filesystem::create_directories(plainDirectory);
+        aegis::daemon::repository::GitRepository plainRepository(plainDirectory);
+        assert(!plainRepository.verificationFingerprint().has_value());
+        std::filesystem::remove_all(plainDirectory);
+
+        RepositoryFixture unbornFixture;
+        unbornFixture.write("seed.cpp", "int seed = 0;\n");
+        aegis::daemon::repository::GitRepository unbornRepository(unbornFixture.root());
+        const auto unbornFingerprint = unbornRepository.verificationFingerprint();
+        assert(unbornFingerprint.has_value());
+        assert(unbornRepository.verificationFingerprint() == unbornFingerprint);
+
+        RepositoryFixture otherFingerprintFixture;
+        otherFingerprintFixture.write("a.cpp", "int a = 1;\n");
+        otherFingerprintFixture.write("space name.cpp", "int spaced = 0;\n");
+        otherFingerprintFixture.commit("base");
+        aegis::daemon::repository::GitRepository otherFingerprintRepository(otherFingerprintFixture.root());
+        const auto otherFingerprint = otherFingerprintRepository.verificationFingerprint();
+        assert(otherFingerprint.has_value() && otherFingerprint != baseline);
+
+        RepositoryFixture markerFixture;
+        markerFixture.write("a", "");
+        markerFixture.write("b", "");
+        markerFixture.commit("empty tracked files");
+        struct stat trackedStat {};
+        assert(::stat((markerFixture.root() / "a").string().c_str(), &trackedStat) == 0);
+        assert(S_ISREG(trackedStat.st_mode));
+        const std::string marker = "endfilebmode" + std::to_string(trackedStat.st_mode);
+        aegis::daemon::repository::GitRepository markerRepository(markerFixture.root());
+        markerFixture.write("a", "x" + marker + "y");
+        markerFixture.write("b", "z");
+        const auto stateOne = markerRepository.verificationFingerprint();
+        assert(stateOne.has_value());
+        markerFixture.write("a", "x");
+        markerFixture.write("b", "y" + marker + "z");
+        const auto stateTwo = markerRepository.verificationFingerprint();
+        assert(stateTwo.has_value() && stateTwo != stateOne);
+
+        markerFixture.write(".aegis/state", "one");
+        assert(markerRepository.verificationFingerprint() == stateTwo);
+        markerFixture.write(".aegis/state", "two");
+        assert(markerRepository.verificationFingerprint() == stateTwo);
+
+        const auto rootAlias = std::filesystem::temp_directory_path() /
+            ("aegis-root-alias-" + std::to_string(getpid()));
+        std::filesystem::remove(rootAlias);
+        std::filesystem::create_directory_symlink(markerFixture.root(), rootAlias);
+        aegis::daemon::repository::GitRepository aliasRepository(rootAlias);
+        const auto aliasFingerprint = aliasRepository.verificationFingerprint();
+        assert(aliasFingerprint.has_value() && aliasFingerprint == stateTwo);
+        std::filesystem::remove(rootAlias);
+
+        const auto fifoPath = markerFixture.root() / "a";
+        assert(std::filesystem::remove(fifoPath));
+        assert(::mkfifo(fifoPath.c_str(), 0666) == 0);
+        ::alarm(2);
+        const auto fifoFingerprint = markerRepository.verificationFingerprint();
+        ::alarm(0);
+        assert(!fifoFingerprint.has_value());
+        std::filesystem::remove(fifoPath);
+    }
+
     RepositoryFixture fixture;
     fixture.write("staged.cpp", "int staged = 0;\n");
     fixture.write("mixed.cpp", "int mixed = 0;\n");
