@@ -26,7 +26,7 @@ vi.mock("../features/git/GitPanel", () => ({ GitPanel: () => <div>Git operations
 const task: Task = { id: "task-1", prompt: "Review the changed source", repository: "/repo", status: "active", createdAt: 1 };
 const run: AgentRun = { id: "run-12345678", taskId: task.id, agent: "codex", status: "running", startedAt: 1, finishedAt: 0 };
 const change: GitChange = { path: "source.cpp", old_path: null, index_status: " ", worktree_status: "M", additions: 1, deletions: 1, binary: false };
-const verification: VerificationRun = { id: "verify-1", taskId: task.id, runId: run.id, command: ["ctest", "--test-dir", "build"], exitCode: 0, output: "all checks passed", startedAt: 2, finishedAt: 3 };
+const verification: VerificationRun = { id: "verify-1", taskId: task.id, runId: run.id, command: ["ctest", "--test-dir", "build"], exitCode: 0, output: "all checks passed", startedAt: 2, finishedAt: 3, freshness: "current" };
 const comparison: FileComparison = {
   path: change.path, old_path: null, status: "M", binary: false, truncated: false,
   original: { source: "head", size: 12, exists: true, binary: false, truncated: false, content: "before" },

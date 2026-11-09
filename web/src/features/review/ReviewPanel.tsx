@@ -4,7 +4,7 @@ import { GraphView } from "./GraphView";
 import { HandoffPanel } from "./HandoffPanel";
 import { ProvenancePanel } from "./ProvenancePanel";
 
-type Props = { view: "review" | "graphs" | "activity"; taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void };
+type Props = { view: "review" | "graphs" | "activity"; taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: (command?: string[]) => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void };
 
 export function ReviewPanel(props: Props) {
   if (props.view === "graphs") return <section className="review-content"><div className="drawer-title"><span>Graphs</span><small>Task context map</small></div><GraphView graph={props.graph} /></section>;

@@ -77,3 +77,31 @@ describe("useReviewData task ownership", () => {
     expect(result.current.verification).toEqual(latest);
   });
 });
+
+describe("verify command forwarding", () => {
+  const latest: VerificationRun = { id: "verify-new", taskId: "task-1", runId: null, command: ["npm", "test"], exitCode: 0, output: "ok", startedAt: 1, finishedAt: 2 };
+
+  function setup() {
+    vi.spyOn(api, "handoff").mockResolvedValue({ task_id: "task-1", prompt: "check", recent_events: [], diff: "", changed_files: [], changed_files_truncated: false, verification: null, findings: [] });
+    vi.spyOn(api, "graph").mockResolvedValue({ task_id: "task-1", nodes: [], edges: [] });
+    vi.spyOn(api, "provenance").mockResolvedValue({ task_id: "task-1", records: [] });
+    vi.spyOn(api, "verifications").mockResolvedValue([]);
+    return vi.spyOn(api, "verify").mockResolvedValue(latest);
+  }
+
+  it("forwards the selected argv to the daemon", async () => {
+    const verify = setup();
+    const { result } = renderHook(() => useReviewData("task-1", "review"));
+    await act(async () => {
+      await (result.current.verify as unknown as (runId?: string, command?: string[]) => Promise<VerificationRun>)("run-1", ["npm", "test"]);
+    });
+    expect(verify).toHaveBeenCalledWith("task-1", ["npm", "test"], "run-1");
+  });
+
+  it("falls back to the safe default CTest command", async () => {
+    const verify = setup();
+    const { result } = renderHook(() => useReviewData("task-1", "review"));
+    await act(async () => { await result.current.verify(); });
+    expect(verify).toHaveBeenCalledWith("task-1", ["ctest", "--test-dir", "build", "--no-tests=error"], undefined);
+  });
+});

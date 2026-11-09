@@ -15,7 +15,7 @@ type Props = {
   run?: AgentRun; runs: AgentRun[]; onSelectRun: (id: string) => void; onDeleteRun: (id: string) => void; onInterruptRun: (id: string) => void; onTerminateRun: (id: string) => void; actionsBusy: boolean; runFinished: boolean; turnBusy: boolean; turnCompleted: boolean; turnInterrupted: boolean; resumable: boolean; onPtyInput: (input: string) => void; onPtyResize: (cols: number, rows: number) => void; ptyConnection: PtyConnection; events: AgentEvent[]; activityEvents: AgentEvent[]; prompt: string; onPrompt: (value: string) => void; onSend: () => void; busy: string; sending: boolean;
   screen: "session" | "review"; onScreen: (screen: "session" | "review") => void; connection: string;
   drawer: "review" | "graphs" | "activity"; onDrawer: (drawer: "review" | "graphs" | "activity") => void;
-  gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: () => void; error: string; onDismissError: () => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void;
+  gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; handoff?: HandoffContext; graph?: TaskGraph; provenance: ProvenanceRecord[]; onVerify: (command?: string[]) => void; error: string; onDismissError: () => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void;
 };
 
 export function Layout(props: Props) {

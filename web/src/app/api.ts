@@ -63,6 +63,8 @@ export type VerificationRun = {
   output: string;
   startedAt: number;
   finishedAt: number;
+  freshness?: "current" | "stale" | "unknown";
+  repositoryFingerprint?: string | null;
 };
 
 export type HandoffContext = {
@@ -105,7 +107,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0) });
 const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0), externalSessionId: typeof value.external_session_id === "string" ? value.external_session_id : undefined, turnStatus: ["turn.started", "turn.completed", "turn.interrupted"].includes(String(value.turn_status)) ? value.turn_status as AgentRun["turnStatus"] : undefined });
 export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0) });
-const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt) });
+const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt), freshness: ["current", "stale", "unknown"].includes(String(value.freshness)) ? value.freshness as VerificationRun["freshness"] : "unknown", repositoryFingerprint: typeof value.repository_fingerprint === "string" ? value.repository_fingerprint : null });
 
 export const api = {
   repository: () => request<Repository>("/api/repository"),

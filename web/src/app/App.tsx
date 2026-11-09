@@ -195,10 +195,10 @@ export function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not stop agent"); setBusy("Stop failed"); }
   }
 
-  async function verify() {
+  async function verify(command?: string[]) {
     if (!selectedTask) return;
     setBusy("Verifying…");
-    try { await review.verify(currentRun?.id); setBusy("Ready"); }
+    try { await review.verify(currentRun?.id, command); setBusy("Ready"); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed"); setBusy("Verification failed"); }
   }
 

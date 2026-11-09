@@ -9,7 +9,7 @@ import { ReviewFindings } from "./ReviewFindings";
 
 const FileViewer = lazy(() => import("./FileViewer").then((module) => ({ default: module.FileViewer })));
 
-type Props = { taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: () => void; handoff?: HandoffContext; openFilePath?: string; openFileToken?: number };
+type Props = { taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: (command?: string[]) => void; handoff?: HandoffContext; openFilePath?: string; openFileToken?: number };
 type Range = "all" | "staged" | "unstaged";
 const commitFileChange = (file: GitCommitFile): GitChange => ({ path: file.path, old_path: file.old_path, index_status: file.status, worktree_status: " ", additions: 0, deletions: 0, binary: false });
 
@@ -73,6 +73,7 @@ export function CodeWorkspace(props: Props) {
 
   const currentChange = props.gitChanges.find((item) => item.path === selected);
   const fileEvent = props.events.find((event) => event.type === "file.changed" && event.content.trim() === selected);
+  const verificationFreshness = props.verification?.freshness ?? "unknown";
   const staged = Boolean(currentChange && currentChange.index_status !== " " && currentChange.index_status !== "?");
   const unstaged = Boolean(currentChange && (currentChange.worktree_status !== " " || currentChange.index_status === "?"));
 
@@ -116,9 +117,9 @@ export function CodeWorkspace(props: Props) {
         <li className={`evidence-step ${props.taskPrompt ? "complete" : "pending"}`}><strong>Task</strong><small>{props.taskPrompt || "No task selected"}</small></li>
         <li className={`evidence-step ${props.activeRun ? props.activeRun.status === "running" || props.activeRun.status === "starting" ? "current" : "complete" : "pending"}`}><strong>Agent run</strong><small>{props.activeRun ? `${props.activeRun.agent} · ${props.activeRun.status} · ${props.activeRun.id.slice(0, 8)}` : "No agent run selected"}</small></li>
         <li className={`evidence-step ${file ? "current" : "pending"}`}><strong>File</strong><small>{file ? <>{file.path} · {fileEvent ? `Changed during ${fileEvent.agent} run ${fileEvent.runId.slice(0, 8)}` : file.changed ? "Attribution unknown" : "Not recorded as changed"}</> : "Select a file to inspect"}</small></li>
-        <li className={`evidence-step ${props.verificationRunning ? "current" : props.verification ? props.verification.exitCode === 0 ? "complete" : "failed" : "pending"}`}><strong>Verification</strong><small>{props.verificationRunning ? "Running…" : props.verification ? `${props.verification.exitCode === 0 ? "Passed" : "Failed"} · ${props.verification.command.join(" ")}` : "Not run"}</small></li>
+        <li className={`evidence-step ${props.verificationRunning ? "current" : props.verification ? props.verification.exitCode === 0 ? verificationFreshness === "current" ? "complete" : "pending" : "failed" : "pending"}`}><strong>Verification</strong><small>{props.verificationRunning ? "Running…" : props.verification ? `${props.verification.exitCode === 0 ? verificationFreshness === "current" ? "Passed" : verificationFreshness === "stale" ? "Stale" : "Freshness unknown" : "Failed"}${props.verification.exitCode !== 0 && verificationFreshness !== "current" ? ` (freshness ${verificationFreshness})` : ""} · ${props.verification.command.join(" ")}` : "Not run"}</small></li>
       </ol></section>
-      <section className="review-side-section"><div className="side-section-heading"><span className="subheading">VERIFICATION</span></div><VerificationPanel run={props.verification} running={props.verificationRunning} onVerify={props.onVerify} /></section>
+      <section className="review-side-section"><div className="side-section-heading"><span className="subheading">VERIFICATION</span></div><VerificationPanel run={props.verification} running={props.verificationRunning} onVerify={props.onVerify} repository={props.gitStatus?.repository.path} /></section>
       <details className="review-git-details"><summary>Git operations</summary><GitPanel changes={props.gitChanges} status={props.gitStatus} onChanged={props.onGitChanged} showFiles={false} /></details>
       {props.handoff && <details className="review-git-details"><summary>Handoff context</summary><pre className="review-handoff">{props.handoff.prompt}{"\n\n"}{props.handoff.changed_files.join("\n")}</pre></details>}
     </aside>

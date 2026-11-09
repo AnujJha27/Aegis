@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type HandoffContext } from "../../app/api";
 import { HandoffPanel } from "./HandoffPanel";
 
@@ -35,5 +35,40 @@ describe("handoff verification evidence", () => {
     expect(document.querySelector(".handoff-grid pre")?.textContent).toContain("1 test failed");
     fireEvent.click(screen.getByRole("button", { name: "Copy context" }));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("1 test failed"));
+  });
+});
+
+describe("handoff verification freshness", () => {
+  const baseVerification = { id: "verify-1", taskId: "task-1", runId: null, command: ["ctest"], exitCode: 0, output: "all passed", startedAt: 10, finishedAt: 12 };
+
+  function contextWith(freshness?: string): HandoffContext {
+    return {
+      task_id: "task-1", prompt: "Fix the failing check", recent_events: [], diff: "", changed_files: [],
+      changed_files_truncated: false, findings: [],
+      verification: { ...baseVerification, ...(freshness ? { freshness } : {}) } as any,
+    };
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  async function copyContext(freshness?: string): Promise<string> {
+    render(<HandoffPanel context={contextWith(freshness)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy context" }));
+    const writeText = (navigator.clipboard as any).writeText;
+    return writeText.mock.calls[0][0] as string;
+  }
+
+  it("labels a stale historical check in the copied context", async () => {
+    const text = await copyContext("stale");
+    expect(text).toMatch(/stale/i);
+    expect(text).not.toContain("Status: Passed");
+  });
+
+  it("labels an unknown-freshness historical check in the copied context", async () => {
+    const text = await copyContext("unknown");
+    expect(text).toMatch(/unknown/i);
+    expect(text).not.toContain("Status: Passed");
   });
 });

@@ -53,11 +53,11 @@ export function useReviewData(taskId?: string, view?: "review" | "graphs" | "act
     if (taskId) void refresh().catch(() => {});
   }, [taskId, view]);
 
-  async function verify(runId?: string) {
+  async function verify(runId?: string, command?: string[]) {
     if (!taskId) return undefined;
     const requestedTaskId = taskId;
     const requestSequence = ++verifyRequestSequence.current;
-    const result = await api.verify(requestedTaskId, ["ctest", "--test-dir", "build"], runId);
+    const result = await api.verify(requestedTaskId, command ?? ["ctest", "--test-dir", "build", "--no-tests=error"], runId);
     if (requestedTaskId === currentTaskId.current && requestSequence === verifyRequestSequence.current) {
       ++verificationSequence.current;
       setVerification(result);

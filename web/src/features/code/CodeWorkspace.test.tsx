@@ -21,7 +21,7 @@ describe("read-only review workspace", () => {
   it("connects task, agent run, selected file attribution, and verification in the evidence trail", () => {
     const run: AgentRun = { id: "run-123456", taskId: "task-1", agent: "codex", status: "running", startedAt: 1, finishedAt: 0 };
     const event: AgentEvent = { id: "event-1", taskId: "task-1", runId: run.id, type: "file.changed", agent: "codex", content: file.path, timestamp: 2 };
-    const verification: VerificationRun = { id: "verify-1", taskId: "task-1", runId: run.id, command: ["ctest", "--test-dir", "build"], exitCode: 0, output: "ok", startedAt: 3, finishedAt: 4 };
+    const verification: VerificationRun = { id: "verify-1", taskId: "task-1", runId: run.id, command: ["ctest", "--test-dir", "build"], exitCode: 0, output: "ok", startedAt: 3, finishedAt: 4, freshness: "current" };
     render(<CodeWorkspace taskId="task-1" taskPrompt="Fix run submission" activeRun={run} events={[event]} gitChanges={[change]} verification={verification} openFilePath={file.path} onGitChanged={vi.fn().mockResolvedValue(undefined)} verificationRunning={false} onVerify={() => {}} />);
 
     const trail = screen.getByRole("list", { name: "Task evidence" });
@@ -29,6 +29,20 @@ describe("read-only review workspace", () => {
     expect(trail.textContent).toContain("codex · running · run-1234");
     expect(trail.textContent).toContain("Changed during codex run run-1234");
     expect(trail.textContent).toContain("Passed · ctest --test-dir build");
+  });
+
+  it("does not mark verification Passed when freshness is stale or unknown", () => {
+    const run: AgentRun = { id: "run-stale", taskId: "task-1", agent: "codex", status: "finished", startedAt: 1, finishedAt: 2 };
+    const stale: VerificationRun = { id: "verify-2", taskId: "task-1", runId: run.id, command: ["ctest"], exitCode: 0, output: "ok", startedAt: 3, finishedAt: 4, freshness: "stale" };
+    const props = { taskId: "task-1", events: [], gitChanges: [], onGitChanged: vi.fn().mockResolvedValue(undefined), verificationRunning: false, onVerify: () => {} };
+    const view = render(<CodeWorkspace {...props} verification={stale} />);
+    const trail = screen.getByRole("list", { name: "Task evidence" });
+    expect(trail.textContent).toContain("Stale");
+    expect(trail.textContent).not.toContain("Passed");
+    expect(trail.textContent).not.toContain("complete");
+
+    view.rerender(<CodeWorkspace {...props} verification={{ ...stale, freshness: undefined }} />);
+    expect(screen.getByRole("list", { name: "Task evidence" }).textContent).toContain("Freshness unknown");
   });
 
   it("offers commit history as a review scope", () => {
