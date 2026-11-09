@@ -17,7 +17,8 @@ inline nlohmann::json toJson(const Task &task) {
 }
 
 inline nlohmann::json toJson(const AgentRun &run) {
-    return {{"id", run.id}, {"task_id", run.taskId}, {"agent", run.agent}, {"status", run.status}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}, {"external_session_id", run.externalSessionId ? nlohmann::json(*run.externalSessionId) : nlohmann::json(nullptr)}};
+    return {{"id", run.id}, {"task_id", run.taskId}, {"agent", run.agent}, {"status", run.status}, {"started_at", run.startedAt}, {"finished_at", run.finishedAt}, {"external_session_id", run.externalSessionId ? nlohmann::json(*run.externalSessionId) : nlohmann::json(nullptr)},
+            {"model", run.model ? nlohmann::json(*run.model) : nlohmann::json(nullptr)}};
 }
 
 inline nlohmann::json toJson(const AgentEvent &event) {
@@ -76,7 +77,9 @@ inline nlohmann::json toJson(const ReviewFinding &finding) {
             {"file_path", finding.filePath}, {"start_line", finding.startLine ? nlohmann::json(*finding.startLine) : nlohmann::json(nullptr)},
             {"end_line", finding.endLine ? nlohmann::json(*finding.endLine) : nlohmann::json(nullptr)},
             {"message", finding.message}, {"status", finding.status},
-            {"created_at", finding.createdAt}, {"updated_at", finding.updatedAt}};
+            {"created_at", finding.createdAt}, {"updated_at", finding.updatedAt},
+            {"repository_fingerprint", finding.repositoryFingerprint ? nlohmann::json(*finding.repositoryFingerprint) : nlohmann::json(nullptr)},
+            {"freshness", finding.freshness}};
 }
 
 inline nlohmann::json toJson(const HandoffContext &context) {
@@ -88,6 +91,7 @@ inline nlohmann::json toJson(const HandoffContext &context) {
     result["verification"] = context.verification ? toJson(*context.verification) : nlohmann::json(nullptr);
     result["findings"] = findings;
     result["context"] = toJson(context.context);
+    result["repository_fingerprint"] = context.repositoryFingerprint ? nlohmann::json(*context.repositoryFingerprint) : nlohmann::json(nullptr);
     return result;
 }
 

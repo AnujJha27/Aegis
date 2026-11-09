@@ -77,8 +77,53 @@ bool Manager::isRunning(const std::string &runId) const {
     return running_.contains(runId);
 }
 
+bool Manager::hasWorkingRunExcept(const std::string &sourceRunId) const {
+    std::map<std::string, std::shared_ptr<Adapter>> snapshot;
+    {
+        std::lock_guard lock(mutex_);
+        snapshot = active_;
+    }
+    for (const auto &[runId, adapter] : snapshot) {
+        if (runId == sourceRunId || !adapter) continue;
+        bool active;
+        {
+            std::lock_guard lock(provenanceMutex_);
+            active = running_.contains(runId);
+        }
+        if (!active) {
+            const auto run = store_.run(runId);
+            if (!run || (run->status != "running" && run->status != "starting")) continue;
+        }
+        if (adapter->hasActiveTurn()) return true;
+    }
+    return false;
+}
+
+bool Manager::isTurnBusy(const std::string &runId) const {
+    std::shared_ptr<Adapter> adapter;
+    {
+        std::lock_guard lock(mutex_);
+        const auto found = active_.find(runId);
+        if (found == active_.end()) return false;
+        adapter = found->second;
+    }
+    return adapter->hasActiveTurn();
+}
+
 std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent,
-                                        const std::optional<std::string> &initialPrompt) {
+                                        const std::optional<std::string> &initialPrompt,
+                                        const std::optional<std::string> &model) {
+    if (model) {
+        if (agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
+        const auto &value = *model;
+        const auto plain = [](const char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '/' || c == ':' || c == '-';
+        };
+        if (value.empty() || value.size() > 200 || value.find('\0') != std::string::npos ||
+            !std::isalnum(static_cast<unsigned char>(value.front()))) return std::nullopt;
+        for (const char c : value)
+            if (!plain(c)) return std::nullopt;
+    }
     if (initialPrompt) {
         if (agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
         if (!validPrompt(*initialPrompt)) return std::nullopt;
@@ -92,7 +137,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
             return std::nullopt;
     }
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
-    auto run = store_.startRun(taskId, agent);
+    auto run = store_.startRun(taskId, agent, model);
     std::clog << "aegis_daemon: starting agent " << agent << " run " << run.id << '\n';
     EventSink sink = [this](AgentEvent event) { publish(std::move(event)); };
     SessionSink sessionSink = [this](const std::string &runId, std::string sessionId) {
@@ -103,10 +148,14 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     else if (agent == "shell") adapter = std::make_shared<PtyAdapter>(agent, std::vector<std::string>{"/bin/sh"}, std::move(sink));
     else if (agent == "claude")
         adapter = std::make_shared<PtyAdapter>(agent,
-            initialPrompt ? std::vector<std::string>{agent, "--", *initialPrompt} : std::vector<std::string>{agent}, std::move(sink));
+            initialPrompt ? (model ? std::vector<std::string>{agent, "--model", *model, "--", *initialPrompt}
+                                   : std::vector<std::string>{agent, "--", *initialPrompt})
+                          : (model ? std::vector<std::string>{agent, "--model", *model} : std::vector<std::string>{agent}), std::move(sink));
     else if (agent == "opencode")
         adapter = std::make_shared<PtyAdapter>(agent,
-            initialPrompt ? std::vector<std::string>{agent, "--prompt", *initialPrompt} : std::vector<std::string>{agent}, std::move(sink));
+            initialPrompt ? (model ? std::vector<std::string>{agent, "--model", *model, "--prompt", *initialPrompt}
+                                   : std::vector<std::string>{agent, "--prompt", *initialPrompt})
+                          : (model ? std::vector<std::string>{agent, "--model", *model} : std::vector<std::string>{agent}), std::move(sink));
     else adapter = std::make_shared<PtyAdapter>(agent, std::vector<std::string>{agent}, std::move(sink));
 
     repository::GitRepository git(repository_);
@@ -123,7 +172,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
         std::lock_guard lock(mutex_);
         active_[run.id] = adapter;
     }
-    const auto context = RunContext{taskId, run.id, agent, repository_, run.externalSessionId};
+    const auto context = RunContext{taskId, run.id, agent, repository_, run.externalSessionId, model};
     if (!adapter->start(context)) {
         std::cerr << "aegis_daemon: agent " << agent << " failed to start for run " << run.id << '\n';
         {

@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
                 } else if (browserConnected || app.hasHadEventClient()) {
                     browserConnected = true;
                     if (disconnectedAt == std::chrono::steady_clock::time_point{}) disconnectedAt = std::chrono::steady_clock::now();
-                    if (std::chrono::steady_clock::now() - disconnectedAt > std::chrono::seconds(3)) break;
+                    if (std::chrono::steady_clock::now() - disconnectedAt > std::chrono::seconds(3) && !app.hasRunningRuns()) break;
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));

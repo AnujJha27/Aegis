@@ -96,6 +96,11 @@ SendResult CodexAdapter::send(std::string_view message) {
     return SendResult::accepted;
 }
 
+bool CodexAdapter::hasActiveTurn() const {
+    std::lock_guard lock(mutex_);
+    return busy_;
+}
+
 void CodexAdapter::interrupt() {
     std::shared_ptr<process::ChildProcess> child;
     {
@@ -145,10 +150,18 @@ void CodexAdapter::workerLoop() {
             command.push_back("resume");
             command.push_back("--json");
             command.push_back(*context.externalSessionId);
+            if (context.model) {
+                command.push_back("--model");
+                command.push_back(*context.model);
+            }
             if (!prompt.empty() && prompt.front() == '-') command.push_back("--");
             command.push_back(prompt);
         } else {
             command.insert(command.end(), {"--json", "--color", "never"});
+            if (context.model) {
+                command.push_back("--model");
+                command.push_back(*context.model);
+            }
             if (!prompt.empty() && prompt.front() == '-') command.push_back("--");
             command.push_back(prompt);
         }

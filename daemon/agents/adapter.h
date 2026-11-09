@@ -28,6 +28,7 @@ struct RunContext {
     std::string agent;
     std::filesystem::path repository;
     std::optional<std::string> externalSessionId;
+    std::optional<std::string> model = std::nullopt;
 };
 
 using EventSink = std::function<void(AgentEvent)>;
@@ -65,6 +66,7 @@ public:
     virtual bool resizePty(unsigned short, unsigned short) { return false; }
     virtual void interrupt() = 0;
     virtual void terminate() = 0;
+    virtual bool hasActiveTurn() const { return capabilities().interactive; }
 };
 
 }

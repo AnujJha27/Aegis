@@ -33,6 +33,9 @@ public:
     SendResult send(std::string_view message) override;
     void interrupt() override;
     void terminate() override;
+    bool hasActiveTurn() const override;
+
+private:
 
 private:
     void workerLoop();
@@ -43,7 +46,7 @@ private:
     RunContext context_;
     std::atomic_bool running_ = false;
     std::atomic_bool busy_ = false;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::string pendingPrompt_;
     bool hasPendingPrompt_ = false;

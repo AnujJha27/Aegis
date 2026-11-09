@@ -21,6 +21,7 @@ public:
     std::uint16_t port() const;
     std::size_t activeEventClients() const { return server_.activeEventClients(); }
     bool hasHadEventClient() const { return server_.hasHadEventClient(); }
+    bool hasRunningRuns() const { return agents_.hasRunningRuns(); }
 
 private:
     std::filesystem::path repository_;

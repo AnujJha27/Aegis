@@ -113,7 +113,7 @@ std::string startDaemon(const std::string &executable,
         setpgid(0, 0);
         dup2(output[1], STDOUT_FILENO);
         close(output[0]); close(output[1]);
-        execl(executable.c_str(), executable.c_str(), "--repo", repository.c_str(), "--port", "0", "--web-root", webRoot.c_str(), "--managed", nullptr);
+        execl(executable.c_str(), executable.c_str(), "--repo", repository.c_str(), "--port", "0", "--web-root", webRoot.c_str(), nullptr);
         _exit(127);
     }
     close(output[1]);
@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
         stopDaemon(daemonPid);
         return 1;
     }
-    std::cout << url << '\n' << std::flush;
+    std::cout << url << '\n' << "engine keeps running after browser closes; Ctrl+C here stops engine and its runs\n" << std::flush;
     if (!openBrowser(url)) std::cerr << "aegis: browser could not be opened; use " << url << '\n';
 
     std::signal(SIGINT, requestStop);

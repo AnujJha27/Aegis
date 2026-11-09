@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <set>
 #include <string_view>
 
 namespace aegis::daemon::api::routes {
@@ -103,6 +104,75 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
             return jsonResponse(boost::beast::http::status::created, protocol::toJson(context.store->createTask(prompt, canonicalRepository.string())));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
+    if (request.method() == boost::beast::http::verb::post && target == "/api/imports/codex") {
+        const auto bad = [](const char *code, const char *message) {
+            return error(boost::beast::http::status::bad_request, code, message);
+        };
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            if (!body.is_object()) return bad("invalid_body", "request body must be a JSON object");
+            const auto readField = [](const nlohmann::json &object, const char *key, std::size_t maxLen) {
+                if (!object.contains(key) || !object.at(key).is_string()) return std::optional<std::string>{};
+                const auto &text = object.at(key).get_ref<const std::string &>();
+                if (text.size() > maxLen || text.find('\0') != std::string::npos) return std::optional<std::string>{};
+                return std::optional<std::string>{text};
+            };
+            const auto sessionId = readField(body, "session_id", 200);
+            const auto sourceName = readField(body, "source_name", 1000);
+            const auto parentThreadId = body.contains("parent_thread_id") ? readField(body, "parent_thread_id", 200) : std::optional<std::string>{std::string{}};
+            const auto prompt = readField(body, "prompt", 8000);
+            if (!sessionId || sessionId->empty() || !sourceName || !parentThreadId || !prompt || prompt->empty())
+                return bad("invalid_fields", "session_id, source_name and prompt are required strings within size limits");
+            if (!body.contains("context") || !body.at("context").is_object() || body.at("context").size() != 6)
+                return bad("invalid_context", "context must be an object with exactly the six known fields");
+            static const std::string_view contextKeys[] = {"goal", "constraints", "decisions", "attempts", "unfinished", "next_action"};
+            TaskContext taskContext;
+            std::string *contextValues[] = {&taskContext.goal, &taskContext.constraints, &taskContext.decisions,
+                                            &taskContext.attempts, &taskContext.unfinished, &taskContext.nextAction};
+            for (std::size_t index = 0; index < 6; ++index) {
+                const auto value = readField(body.at("context"), contextKeys[index].data(), 4000);
+                if (!value) return bad("invalid_context", "context fields must be strings of at most 4000 bytes without NUL");
+                *contextValues[index] = *value;
+            }
+            if (!body.contains("messages") || !body.at("messages").is_array() ||
+                body.at("messages").empty() || body.at("messages").size() > 1000)
+                return bad("invalid_messages", "messages must be an array of 1 to 1000 entries");
+            std::vector<ImportedMessage> messages;
+            std::set<std::string> messageIds;
+            std::size_t totalText = 0;
+            for (const auto &entry : body.at("messages")) {
+                if (!entry.is_object()) return bad("invalid_messages", "each message must be an object");
+                const auto messageId = readField(entry, "id", 200);
+                const auto role = readField(entry, "role", 16);
+                const auto text = readField(entry, "text", 12000);
+                const auto messageSourceName = readField(entry, "source_name", 1000);
+                if (!messageId || messageId->empty() || !role || !text || !messageSourceName || messageSourceName->empty())
+                    return bad("invalid_messages", "each message requires id, role, text, and non-empty source_name within size limits");
+                if (!messageIds.insert(*messageId).second)
+                    return bad("invalid_messages", "message ids must be unique within the payload");
+                if (*role != "user" && *role != "assistant" && *role != "tool")
+                    return bad("invalid_messages", "message role must be user, assistant, or tool");
+                if (!entry.contains("source_line") || !entry.at("source_line").is_number_integer())
+                    return bad("invalid_messages", "message source_line must be an integer");
+                const auto sourceLine = entry.at("source_line").get<std::int64_t>();
+                if (sourceLine <= 0) return bad("invalid_messages", "message source_line must be positive");
+                totalText += text->size();
+                messages.push_back({*messageId, *role, *text, sourceLine, *messageSourceName});
+            }
+            if (totalText > 500000) return bad("invalid_messages", "total message text exceeds 500000 bytes");
+            std::error_code canonicalError;
+            const auto canonicalRepository = std::filesystem::weakly_canonical(context.repository, canonicalError);
+            if (canonicalError) return bad("invalid_repository", "repository must be a valid directory");
+            const auto sourceKey = "codex|" +
+                nlohmann::json{canonicalRepository.string(), *sessionId, parentThreadId.value_or(std::string{})}.dump();
+            const auto task = context.store->importTask(sourceKey, *prompt, canonicalRepository.string(), taskContext, messages);
+            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(task));
+        } catch (const nlohmann::json::exception &) {
+            return bad("invalid_json", "request body must be valid JSON");
+        } catch (const std::exception &) {
+            return error(boost::beast::http::status::internal_server_error, "import_failed", "could not persist import");
         }
     }
     return std::nullopt;

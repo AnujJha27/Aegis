@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct sqlite3;
@@ -14,7 +15,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 6;
+    static constexpr int currentSchemaVersion = 10;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();
@@ -23,7 +24,9 @@ public:
     Store &operator=(const Store &) = delete;
 
     Task createTask(std::string prompt, std::string repository);
-    AgentRun startRun(const std::string &taskId, std::string agent);
+    Task importTask(const std::string &sourceKey, std::string prompt, std::string repository,
+                    const TaskContext &context, const std::vector<ImportedMessage> &messages);
+    AgentRun startRun(const std::string &taskId, std::string agent, const std::optional<std::string> &model = std::nullopt);
     bool updateRunStatus(const std::string &runId, const std::string &status);
     bool setExternalSessionId(const std::string &runId, std::string sessionId);
     std::optional<AgentRun> run(const std::string &runId) const;
@@ -32,7 +35,8 @@ public:
     void saveVerification(const VerificationRun &verification);
     ReviewFinding createFinding(const std::string &taskId, std::optional<std::string> runId,
                                 std::string filePath, std::optional<int> startLine,
-                                std::optional<int> endLine, std::string message);
+                                std::optional<int> endLine, std::string message,
+                                std::optional<std::string> fingerprint = std::nullopt);
     bool updateFindingStatus(const std::string &findingId, const std::string &status);
     bool updateTaskContext(const std::string &taskId, const TaskContext &context);
     std::optional<Task> task(const std::string &taskId) const;
@@ -45,6 +49,9 @@ public:
     std::vector<AgentEvent> terminalOutput(const std::string &runId, std::size_t limit = 128) const;
     std::vector<VerificationRun> verifications(const std::string &taskId, std::size_t limit = 20) const;
     std::vector<ReviewFinding> findings(const std::string &taskId, std::size_t limit = 100) const;
+    bool reserveContinuation(const std::string &requestId, const std::string &payload);
+    std::optional<std::pair<std::string, std::optional<std::string>>> continuation(const std::string &requestId) const;
+    bool completeContinuation(const std::string &requestId, const std::string &runId);
 
 private:
     void execute(const char *sql) const;

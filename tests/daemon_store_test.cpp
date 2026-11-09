@@ -12,6 +12,8 @@
 
 #include <algorithm>
 
+#include <nlohmann/json.hpp>
+
 int main() {
     const auto fixtureDirectory = std::filesystem::temp_directory_path() /
         ("aegis-daemon-store-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -53,8 +55,15 @@ int main() {
         const auto finding = store.createFinding(task.id, run.id, "src/main.cpp", 7, 9, "Check cleanup on early return.");
         assert(finding.status == "open" && finding.startLine == 7 && finding.endLine == 9);
         assert(store.findings(task.id).size() == 1);
+        const auto fingerprinted = store.createFinding(task.id, std::nullopt, "src/util.cpp", std::nullopt, std::nullopt,
+            "Fingerprinted finding.", std::optional<std::string>("fp-123"));
+        assert(fingerprinted.repositoryFingerprint == "fp-123" && fingerprinted.freshness == "unknown");
         assert(store.updateFindingStatus(finding.id, "resolved"));
         assert(!store.updateFindingStatus(finding.id, "critical"));
+        const auto ordered = store.findings(task.id);
+        assert(ordered.size() == 2);
+        assert(ordered.front().id == fingerprinted.id && ordered.front().status == "open");
+        assert(ordered.back().id == finding.id && ordered.back().status == "resolved");
 
         assert(store.updateRunStatus(run.id, "completed"));
         for (const auto *state : {"failed", "interrupted", "terminated"}) {
@@ -131,7 +140,10 @@ int main() {
         assert(!store.updateRunStatus(run.id, "running"));
         assert(store.run("run-absent") == std::nullopt);
         const auto findings = store.findings(store.tasks().front().id);
-        assert(findings.size() == 1 && findings.front().status == "resolved");
+        assert(findings.size() == 2);
+        assert(findings.front().status == "open" && findings.front().repositoryFingerprint == "fp-123");
+        assert(findings.front().freshness == "unknown");
+        assert(findings.back().status == "resolved");
         const auto abandoned = store.runs(store.tasks().front().id).back();
         assert(abandoned.status == "interrupted");
         assert(abandoned.finishedAt > 0);
@@ -184,6 +196,8 @@ int main() {
                contextTask->context.nextAction == migratedContext.nextAction);
         const auto migratedFinding = migrated.createFinding("legacy-task", std::nullopt, "legacy.cpp", 1, std::nullopt, "Migration retained the task.");
         assert(migratedFinding.status == "open");
+        assert(!migratedFinding.repositoryFingerprint.has_value());
+        assert(migratedFinding.freshness == "unknown");
         const aegis::daemon::VerificationRun legacyVerification{
             "legacy-verification", "legacy-task", std::nullopt, {"true"}, 0, "", 4, 4};
         migrated.saveVerification(legacyVerification);
@@ -243,6 +257,39 @@ int main() {
     assert(std::string(std::istreambuf_iterator<char>(preserved), {}) == corruptContents);
 
     std::filesystem::remove_all(fixtureDirectory);
+
+    {
+        aegis::daemon::Store store(":memory:");
+        const aegis::daemon::TaskContext ctx{"g", "c", "d", "a", "u", "n"};
+        const std::vector<aegis::daemon::ImportedMessage> messages{
+            {"m1", "user", "hello", 1, "session.jsonl"}, {"m2", "assistant", "hi", 2, "session.jsonl"}};
+        const auto task = store.importTask("key-a", "imported prompt", "/repo", ctx, messages);
+        assert(!task.id.empty() && task.context.goal == "g");
+        const auto importedRuns = store.runs(task.id);
+        assert(importedRuns.size() == 1 && importedRuns.front().status == "completed" &&
+               importedRuns.front().agent == "import" && importedRuns.front().finishedAt > 0);
+        assert(store.verifications(task.id).empty());
+        const auto importedEvents = store.events(task.id);
+        std::size_t messageEvents = 0;
+        for (const auto &event : importedEvents)
+            if (event.type == "import.message") {
+                const auto payload = nlohmann::json::parse(event.content);
+                assert(payload.at("historical").get<bool>());
+                assert(payload.at("source_id").get<std::string>() == "m1" ||
+                       payload.at("source_id").get<std::string>() == "m2");
+                ++messageEvents;
+            }
+        assert(messageEvents == 2);
+        const aegis::daemon::TaskContext edited{"g2", "c", "d", "a", "u", "n"};
+        const auto again = store.importTask("key-a", "other", "/repo", edited, messages);
+        assert(again.id == task.id && again.context.goal == "g");
+        assert(store.events(task.id).size() == importedEvents.size());
+        assert(store.runs(task.id).size() == 1);
+        assert(store.tasks().size() == 1);
+        const auto branch = store.importTask("key-b", "branch import", "/repo", ctx, messages);
+        assert(branch.id != task.id);
+        assert(store.tasks().size() == 2);
+    }
 
     aegis::daemon::EventHub hub;
     const auto subscription = hub.subscribe();

@@ -7,8 +7,23 @@
 
 #include <cctype>
 #include <chrono>
+#include <optional>
 
 namespace aegis::daemon::api::routes {
+namespace {
+
+bool validModel(const std::string &value) {
+    const auto plain = [](const char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '/' || c == ':' || c == '-';
+    };
+    if (value.empty() || value.size() > 200 || value.find('\0') != std::string::npos ||
+        !std::isalnum(static_cast<unsigned char>(value.front()))) return false;
+    for (const char c : value)
+        if (!plain(c)) return false;
+    return true;
+}
+
+}
 
 std::optional<Response> runs(const Request &request, const Context &context) {
     const auto target = std::string(request.target());
@@ -64,6 +79,51 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 return false;
             };
             if (!nonBlank(prompt)) return error(boost::beast::http::status::bad_request, "invalid_prompt", "prompt must be non-blank, without NUL and at most 65536 bytes");
+            std::optional<std::string> requestId;
+            if (body.contains("request_id")) {
+                if (!body["request_id"].is_string())
+                    return error(boost::beast::http::status::bad_request, "invalid_request_id", "request_id must be a string");
+                auto value = body["request_id"].get<std::string>();
+                if (value.empty() || value.size() > 100 || value.find('\0') != std::string::npos)
+                    return error(boost::beast::http::status::bad_request, "invalid_request_id", "request_id must be non-empty, at most 100 bytes and without NUL");
+                requestId = std::move(value);
+            }
+            std::optional<std::string> expectedFingerprint;
+            if (body.contains("repository_fingerprint") && !body["repository_fingerprint"].is_null()) {
+                if (!body["repository_fingerprint"].is_string())
+                    return error(boost::beast::http::status::bad_request, "invalid_repository_fingerprint", "repository_fingerprint must be null or a string");
+                auto value = body["repository_fingerprint"].get<std::string>();
+                if (value.empty() || value.size() > 200 || value.find('\0') != std::string::npos)
+                    return error(boost::beast::http::status::bad_request, "invalid_repository_fingerprint", "repository_fingerprint must be non-empty, at most 200 bytes and without NUL");
+                expectedFingerprint = std::move(value);
+            }
+            std::optional<std::string> model;
+            if (body.contains("model") && !body["model"].is_null()) {
+                if (!body["model"].is_string())
+                    return error(boost::beast::http::status::bad_request, "invalid_model", "model must be null or a string");
+                auto value = body["model"].get<std::string>();
+                if (!validModel(value))
+                    return error(boost::beast::http::status::bad_request, "invalid_model", "model must be 1-200 bytes, start with an alphanumeric character and contain only ASCII alphanumerics, '_', '.', '/', ':' or '-'");
+                model = std::move(value);
+            }
+            nlohmann::json receipt{{"task_id", taskId}, {"source_run_id", sourceRunId}, {"agent", agent}, {"prompt", prompt}};
+            if (body.contains("repository_fingerprint")) receipt["repository_fingerprint"] = body["repository_fingerprint"];
+            if (body.contains("model")) receipt["model"] = body["model"];
+            const auto payload = receipt.dump();
+            const auto replay = [&]() -> std::optional<Response> {
+                if (!requestId) return std::nullopt;
+                const auto saved = context.store->continuation(*requestId);
+                if (!saved) return std::nullopt;
+                if (saved->first != payload)
+                    return error(boost::beast::http::status::conflict, "request_id_conflict", "request_id was already used with a different continuation payload");
+                if (!saved->second)
+                    return error(boost::beast::http::status::conflict, "delivery_uncertain", "a matching continuation is pending; refresh run history instead of retrying");
+                const auto existing = context.store->run(*saved->second);
+                if (!existing)
+                    return error(boost::beast::http::status::conflict, "delivery_uncertain", "the continuation run is missing; refresh run history instead of retrying");
+                return jsonResponse(boost::beast::http::status::ok, protocol::toJson(*existing));
+            };
+            if (const auto deduped = replay()) return *deduped;
             const auto source = context.store->run(sourceRunId);
             if (!source || source->taskId != taskId) return error(boost::beast::http::status::not_found, "run_not_found", "source run not found for this task");
             const auto task = context.store->task(taskId);
@@ -78,14 +138,29 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 return error(boost::beast::http::status::conflict, "source_busy", "source run is starting");
             if (source->status == "running") {
                 if (source->agent == "codex") {
-                    if (const auto turn = context.store->latestTurnEvent(sourceRunId); turn && turn->type == "turn.started")
+                    bool busy = context.agentManager->isTurnBusy(sourceRunId);
+                    if (!busy)
+                        if (const auto turn = context.store->latestTurnEvent(sourceRunId); turn && turn->type == "turn.started") busy = true;
+                    if (busy)
                         return error(boost::beast::http::status::conflict, "source_busy", "source run has an active turn");
                 } else {
                     return error(boost::beast::http::status::conflict, "run_active", "stop the active run before continuing from it");
                 }
             }
-            const auto run = context.agentManager->launch(taskId, agent, prompt);
+            if (expectedFingerprint) {
+                const auto fresh = context.git ? context.git->verificationFingerprint() : std::nullopt;
+                if (!fresh || *fresh != *expectedFingerprint)
+                    return error(boost::beast::http::status::conflict, "repository_changed", "repository changed since the preview was captured; regenerate the preview");
+            }
+            if (context.agentManager->hasWorkingRunExcept(sourceRunId))
+                return error(boost::beast::http::status::conflict, "other_run_busy", "another agent run is active and may write the same repository");
+            if (requestId && !context.store->reserveContinuation(*requestId, payload)) {
+                if (const auto raced = replay()) return *raced;
+                return error(boost::beast::http::status::conflict, "delivery_uncertain", "a matching continuation is pending; refresh run history instead of retrying");
+            }
+            const auto run = context.agentManager->launch(taskId, agent, prompt, model);
             if (!run) return error(boost::beast::http::status::bad_request, "agent_start_failed", "agent could not be started");
+            if (requestId) context.store->completeContinuation(*requestId, run->id);
             const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
             const aegis::daemon::AgentEvent continued{agents::newEventId(), run->taskId, run->id, "run.continued", run->agent, sourceRunId, nowMs};
@@ -100,7 +175,16 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 const auto body = nlohmann::json::parse(request.body());
                 const auto agent = body.value("agent", std::string{});
                 if (agent.empty()) return error(boost::beast::http::status::bad_request, "missing_agent", "agent is required");
-                const auto run = context.agentManager->launch(*taskId, agent);
+                std::optional<std::string> model;
+                if (body.contains("model") && !body["model"].is_null()) {
+                    if (!body["model"].is_string())
+                        return error(boost::beast::http::status::bad_request, "invalid_model", "model must be null or a string");
+                    auto value = body["model"].get<std::string>();
+                    if (!validModel(value))
+                        return error(boost::beast::http::status::bad_request, "invalid_model", "model must be 1-200 bytes, start with an alphanumeric character and contain only ASCII alphanumerics, '_', '.', '/', ':' or '-'");
+                    model = std::move(value);
+                }
+                const auto run = context.agentManager->launch(*taskId, agent, std::nullopt, model);
                 if (!run) return error(boost::beast::http::status::bad_request, "agent_start_failed", "agent could not be started");
                 return jsonResponse(boost::beast::http::status::created, protocol::toJson(*run));
             } catch (const nlohmann::json::exception &) {

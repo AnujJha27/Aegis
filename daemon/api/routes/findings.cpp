@@ -1,5 +1,6 @@
 #include "daemon/api/route_handlers.h"
 #include "daemon/api/route_helpers.h"
+#include "daemon/repository/git.h"
 
 #include <algorithm>
 #include <cctype>
@@ -43,15 +44,25 @@ std::optional<Response> findings(const Request &request, const Context &context)
     const auto id = findingId(path);
     if (!taskId && !id) return std::nullopt;
 
+    if (taskId) {
+        const auto task = context.store->task(*taskId);
+        if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+        if (!matchesRepository(task->repository, context.repository))
+            return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
+    }
+
     if (taskId && request.method() == boost::beast::http::verb::get) {
-        if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+        const auto currentFingerprint = context.git ? context.git->verificationFingerprint() : std::nullopt;
         nlohmann::json result = nlohmann::json::array();
-        for (const auto &finding : context.store->findings(*taskId)) result.push_back(protocol::toJson(finding));
+        for (auto finding : context.store->findings(*taskId)) {
+            finding.freshness = !finding.repositoryFingerprint || !currentFingerprint ? "unknown"
+                : (*currentFingerprint == *finding.repositoryFingerprint ? "current" : "stale");
+            result.push_back(protocol::toJson(finding));
+        }
         return jsonResponse(boost::beast::http::status::ok, result);
     }
 
     if (taskId && request.method() == boost::beast::http::verb::post) {
-        if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
         try {
             const auto body = nlohmann::json::parse(request.body());
             if (!body.is_object() || !body.contains("file_path") || !body.at("file_path").is_string() ||
@@ -60,9 +71,9 @@ std::optional<Response> findings(const Request &request, const Context &context)
             const auto filePath = body.at("file_path").get<std::string>();
             const auto message = body.at("message").get<std::string>();
             if (!validFilePath(filePath)) return error(boost::beast::http::status::bad_request, "invalid_file_path", "file_path must be a repository-relative source path");
-            if (message.empty() || message.size() > 8000 ||
+            if (message.empty() || message.size() > 8000 || message.find('\0') != std::string::npos ||
                 std::all_of(message.begin(), message.end(), [](unsigned char c) { return std::isspace(c); }))
-                return error(boost::beast::http::status::bad_request, "invalid_message", "message must contain 1 to 8000 non-whitespace bytes");
+                return error(boost::beast::http::status::bad_request, "invalid_message", "message must contain 1 to 8000 non-whitespace bytes without NUL characters");
 
             bool validLines = true;
             const auto startLine = lineValue(body, "start_line", validLines);
@@ -77,7 +88,8 @@ std::optional<Response> findings(const Request &request, const Context &context)
                 const auto run = context.store->run(*runId);
                 if (!run || run->taskId != *taskId) return error(boost::beast::http::status::not_found, "run_not_found", "run not found for task");
             }
-            const auto finding = context.store->createFinding(*taskId, std::move(runId), filePath, startLine, endLine, message);
+            const auto finding = context.store->createFinding(*taskId, std::move(runId), filePath, startLine, endLine, message,
+                context.git ? context.git->verificationFingerprint() : std::nullopt);
             return jsonResponse(boost::beast::http::status::created, protocol::toJson(finding));
         } catch (const nlohmann::json::exception &) {
             return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid finding JSON");

@@ -56,10 +56,8 @@ std::optional<Response> review(const Request &request, const Context &context) {
         auto events = context.store->events(*taskId, 20, false);
         for (auto &event : events) if (event.content.size() > 4000) event.content.resize(4000);
         auto diff = context.git ? context.git->diff(handoffPatchLimit) : std::string{};
+        const auto currentFingerprint = context.git ? context.git->verificationFingerprint() : std::nullopt;
         auto verificationHistory = context.store->verifications(*taskId, 1);
-        std::optional<std::string> currentFingerprint;
-        if (!verificationHistory.empty() && verificationHistory.front().repositoryFingerprint && context.git)
-            currentFingerprint = context.git->verificationFingerprint();
         std::optional<VerificationRun> verification;
         if (!verificationHistory.empty()) {
             verification = std::move(verificationHistory.front());
@@ -68,7 +66,11 @@ std::optional<Response> review(const Request &request, const Context &context) {
                 : (*currentFingerprint == *verification->repositoryFingerprint ? "current" : "stale");
         }
         auto findings = context.store->findings(*taskId, 20);
-        for (auto &finding : findings) if (finding.message.size() > 2000) finding.message.resize(2000);
+        for (auto &finding : findings) {
+            if (finding.message.size() > 2000) finding.message.resize(2000);
+            finding.freshness = !finding.repositoryFingerprint || !currentFingerprint ? "unknown"
+                : (*currentFingerprint == *finding.repositoryFingerprint ? "current" : "stale");
+        }
         auto prompt = task->prompt;
         if (prompt.size() > 8000) prompt.resize(8000);
         auto changes = context.git ? context.git->changes(101, true) : std::vector<GitChange>{};
@@ -78,7 +80,7 @@ std::optional<Response> review(const Request &request, const Context &context) {
         std::vector<std::string> changedFiles;
         changedFiles.reserve(changes.size());
         for (auto &change : changes) changedFiles.push_back(std::move(change.path));
-        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, std::move(changedFiles), changedFilesTruncated, std::move(verification), std::move(findings), task->context};
+        HandoffContext handoff{task->id, std::move(prompt), std::move(events), diff, std::move(changedFiles), changedFilesTruncated, std::move(verification), std::move(findings), task->context, currentFingerprint};
         return jsonResponse(boost::beast::http::status::ok, protocol::toJson(handoff));
     }
     if (const auto taskId = pathId(target, "/graph")) {

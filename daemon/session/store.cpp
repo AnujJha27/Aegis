@@ -36,6 +36,7 @@ std::optional<AgentRun> readRun(sqlite3_stmt *statement) {
     AgentRun result{columnText(statement, 0), columnText(statement, 1), columnText(statement, 2),
                     columnText(statement, 3), sqlite3_column_int64(statement, 4), sqlite3_column_int64(statement, 5), std::nullopt};
     if (sqlite3_column_type(statement, 6) != SQLITE_NULL) result.externalSessionId = columnText(statement, 6);
+    if (sqlite3_column_type(statement, 7) != SQLITE_NULL) result.model = columnText(statement, 7);
     return result;
 }
 
@@ -51,6 +52,8 @@ ReviewFinding readFinding(sqlite3_stmt *statement) {
     result.status = columnText(statement, 7);
     result.createdAt = sqlite3_column_int64(statement, 8);
     result.updatedAt = sqlite3_column_int64(statement, 9);
+    if (sqlite3_column_type(statement, 10) != SQLITE_NULL) result.repositoryFingerprint = columnText(statement, 10);
+    result.freshness = "unknown";
     return result;
 }
 
@@ -144,7 +147,17 @@ Store::Store(const std::filesystem::path &path) {
         if (!hasColumn(database_, "tasks", "context_json"))
             execute("ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}';");
         if (previousVersion < 6) execute("PRAGMA user_version = 6;");
+        if (!hasColumn(database_, "findings", "repository_fingerprint"))
+            execute("ALTER TABLE findings ADD COLUMN repository_fingerprint TEXT;");
+        if (previousVersion < 7) execute("PRAGMA user_version = 7;");
+        execute("CREATE TABLE IF NOT EXISTS imports (source_key TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id));");
+        if (previousVersion < 8) execute("PRAGMA user_version = 8;");
         execute("CREATE INDEX IF NOT EXISTS events_run_type_sequence ON events(run_id, type, sequence DESC);");
+        execute("CREATE TABLE IF NOT EXISTS continuations (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL);");
+        if (previousVersion < 9) execute("PRAGMA user_version = 9;");
+        if (!hasColumn(database_, "runs", "model"))
+            execute("ALTER TABLE runs ADD COLUMN model TEXT;");
+        if (previousVersion < 10) execute("PRAGMA user_version = 10;");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -178,15 +191,18 @@ Task Store::createTask(std::string prompt, std::string repository) {
     return task;
 }
 
-AgentRun Store::startRun(const std::string &taskId, std::string agent) {
+AgentRun Store::startRun(const std::string &taskId, std::string agent, const std::optional<std::string> &model) {
     std::lock_guard lock(mutex_);
-    AgentRun run{id("run"), taskId, std::move(agent), "starting", now(), 0, std::nullopt};
-    Statement statement(database_, "INSERT INTO runs (id, task_id, agent, status, started_at) VALUES (?, ?, ?, ?, ?)");
+    AgentRun run{id("run"), taskId, std::move(agent), "starting", now(), 0, std::nullopt, model};
+    Statement statement(database_, "INSERT INTO runs (id, task_id, agent, status, started_at, model) VALUES (?, ?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, run.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run id");
     check(sqlite3_bind_text(statement.get(), 2, run.taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run task");
     check(sqlite3_bind_text(statement.get(), 3, run.agent.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run agent");
     check(sqlite3_bind_text(statement.get(), 4, run.status.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run status");
     check(sqlite3_bind_int64(statement.get(), 5, run.startedAt), database_, "bind run timestamp");
+    if (run.model)
+        check(sqlite3_bind_text(statement.get(), 6, run.model->c_str(), -1, SQLITE_TRANSIENT), database_, "bind run model");
+    else check(sqlite3_bind_null(statement.get(), 6), database_, "bind run model");
     check(sqlite3_step(statement.get()), database_, "insert run");
     return run;
 }
@@ -220,7 +236,7 @@ bool Store::setExternalSessionId(const std::string &runId, std::string sessionId
 
 std::optional<AgentRun> Store::run(const std::string &runId) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, agent, status, started_at, finished_at, external_session_id FROM runs WHERE id = ?");
+    Statement statement(database_, "SELECT id, task_id, agent, status, started_at, finished_at, external_session_id, model FROM runs WHERE id = ?");
     check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run lookup");
     if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
     return readRun(statement.get());
@@ -295,7 +311,8 @@ void Store::saveVerification(const VerificationRun &verification) {
 
 ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std::string> runId,
                                    std::string filePath, std::optional<int> startLine,
-                                   std::optional<int> endLine, std::string message) {
+                                   std::optional<int> endLine, std::string message,
+                                   std::optional<std::string> fingerprint) {
     if (filePath.empty() || message.empty() || (startLine && *startLine <= 0) ||
         (endLine && *endLine <= 0) || (startLine && endLine && *endLine < *startLine))
         throw std::invalid_argument("invalid review finding fields");
@@ -307,8 +324,8 @@ ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std:
             throw std::invalid_argument("finding run must belong to its task");
     }
     ReviewFinding finding{id("finding"), taskId, std::move(runId), std::move(filePath), startLine, endLine,
-                          std::move(message), "open", now(), now()};
-    Statement statement(database_, "INSERT INTO findings (id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                          std::move(message), "open", now(), now(), std::move(fingerprint), "unknown"};
+    Statement statement(database_, "INSERT INTO findings (id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     const auto bindText = [&](int index, const std::string &value) {
         check(sqlite3_bind_text(statement.get(), index, value.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding");
     };
@@ -325,6 +342,9 @@ ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std:
     bindText(8, finding.status);
     check(sqlite3_bind_int64(statement.get(), 9, finding.createdAt), database_, "bind finding timestamp");
     check(sqlite3_bind_int64(statement.get(), 10, finding.updatedAt), database_, "bind finding timestamp");
+    if (finding.repositoryFingerprint)
+        check(sqlite3_bind_text(statement.get(), 11, finding.repositoryFingerprint->c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding fingerprint");
+    else check(sqlite3_bind_null(statement.get(), 11), database_, "bind finding fingerprint");
     check(sqlite3_step(statement.get()), database_, "insert finding");
     return finding;
 }
@@ -378,7 +398,7 @@ std::optional<Task> Store::task(const std::string &taskId) const {
 
 std::vector<AgentRun> Store::runs(const std::string &taskId) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, agent, status, started_at, finished_at, external_session_id FROM runs WHERE task_id = ? ORDER BY started_at, rowid");
+    Statement statement(database_, "SELECT id, task_id, agent, status, started_at, finished_at, external_session_id, model FROM runs WHERE task_id = ? ORDER BY started_at, rowid");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run task");
     std::vector<AgentRun> result;
     while (sqlite3_step(statement.get()) == SQLITE_ROW) {
@@ -422,7 +442,7 @@ std::vector<VerificationRun> Store::verifications(const std::string &taskId, std
 
 std::vector<ReviewFinding> Store::findings(const std::string &taskId, std::size_t limit) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at FROM findings WHERE task_id = ? ORDER BY created_at DESC LIMIT ?");
+    Statement statement(database_, "SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint FROM findings WHERE task_id = ? ORDER BY status = 'resolved', created_at DESC LIMIT ?");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding task");
     check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit)), database_, "bind finding limit");
     std::vector<ReviewFinding> result;
@@ -503,6 +523,113 @@ std::vector<AgentEvent> Store::terminalOutput(const std::string &runId, std::siz
                           sqlite3_column_int64(statement.get(), 6), sqlite3_column_int64(statement.get(), 7)});
     std::reverse(result.begin(), result.end());
     return result;
+}
+
+Task Store::importTask(const std::string &sourceKey, std::string prompt, std::string repository,
+                       const TaskContext &context, const std::vector<ImportedMessage> &messages) {
+    std::lock_guard lock(mutex_);
+    execute("BEGIN IMMEDIATE;");
+    try {
+        std::string existingTaskId;
+        {
+            Statement lookup(database_, "SELECT task_id FROM imports WHERE source_key = ?");
+            check(sqlite3_bind_text(lookup.get(), 1, sourceKey.c_str(), -1, SQLITE_TRANSIENT), database_, "bind source key");
+            if (sqlite3_step(lookup.get()) == SQLITE_ROW) existingTaskId = columnText(lookup.get(), 0);
+        }
+        if (!existingTaskId.empty()) {
+            Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks WHERE id = ?");
+            check(sqlite3_bind_text(statement.get(), 1, existingTaskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind existing task lookup");
+            if (sqlite3_step(statement.get()) != SQLITE_ROW) throw std::runtime_error("import points to missing task");
+            Task result{columnText(statement.get(), 0), columnText(statement.get(), 1), columnText(statement.get(), 2),
+                        columnText(statement.get(), 3), sqlite3_column_int64(statement.get(), 4), TaskContext{}};
+            result.context = readTaskContext(columnText(statement.get(), 5));
+            execute("COMMIT;");
+            return result;
+        }
+        Task task{id("task"), std::move(prompt), std::move(repository), "open", now(), context};
+        const nlohmann::json encoded{{"goal", context.goal}, {"constraints", context.constraints},
+            {"decisions", context.decisions}, {"attempts", context.attempts},
+            {"unfinished", context.unfinished}, {"next_action", context.nextAction}};
+        const auto encodedContext = encoded.dump();
+        {
+            Statement statement(database_, "INSERT INTO tasks (id, prompt, repository, status, created_at, context_json) VALUES (?, ?, ?, ?, ?, ?)");
+            check(sqlite3_bind_text(statement.get(), 1, task.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
+            check(sqlite3_bind_text(statement.get(), 2, task.prompt.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task prompt");
+            check(sqlite3_bind_text(statement.get(), 3, task.repository.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task repository");
+            check(sqlite3_bind_text(statement.get(), 4, task.status.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task status");
+            check(sqlite3_bind_int64(statement.get(), 5, task.createdAt), database_, "bind task timestamp");
+            check(sqlite3_bind_text(statement.get(), 6, encodedContext.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task context");
+            check(sqlite3_step(statement.get()), database_, "insert task");
+        }
+        AgentRun run{id("run"), task.id, "import", "completed", now(), now(), std::nullopt};
+        {
+            Statement statement(database_, "INSERT INTO runs (id, task_id, agent, status, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?)");
+            check(sqlite3_bind_text(statement.get(), 1, run.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run id");
+            check(sqlite3_bind_text(statement.get(), 2, run.taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run task");
+            check(sqlite3_bind_text(statement.get(), 3, run.agent.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run agent");
+            check(sqlite3_bind_text(statement.get(), 4, run.status.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run status");
+            check(sqlite3_bind_int64(statement.get(), 5, run.startedAt), database_, "bind run timestamp");
+            check(sqlite3_bind_int64(statement.get(), 6, run.finishedAt), database_, "bind run finish");
+            check(sqlite3_step(statement.get()), database_, "insert run");
+        }
+        const auto insertEvent = [&](const char *type, const std::string &content) {
+            AgentEvent event{id("event"), task.id, run.id, type, "import", content, now(), 0};
+            Statement statement(database_, "INSERT INTO events (id, task_id, run_id, type, agent, content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            check(sqlite3_bind_text(statement.get(), 1, event.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event id");
+            check(sqlite3_bind_text(statement.get(), 2, event.taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event task");
+            check(sqlite3_bind_text(statement.get(), 3, event.runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event run");
+            check(sqlite3_bind_text(statement.get(), 4, event.type.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event type");
+            check(sqlite3_bind_text(statement.get(), 5, event.agent.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event agent");
+            check(sqlite3_bind_text(statement.get(), 6, event.content.c_str(), -1, SQLITE_TRANSIENT), database_, "bind event content");
+            check(sqlite3_bind_int64(statement.get(), 7, event.timestamp), database_, "bind event timestamp");
+            check(sqlite3_step(statement.get()), database_, "insert event");
+        };
+        for (const auto &message : messages)
+            insertEvent("import.message", nlohmann::json{{"source_id", message.id}, {"role", message.role},
+                {"text", message.text}, {"source_line", message.sourceLine}, {"source_name", message.sourceName},
+                {"historical", true}}.dump());
+        insertEvent("task.context", encodedContext);
+        insertEvent("import.source", nlohmann::json{{"source_key", sourceKey}}.dump());
+        {
+            Statement statement(database_, "INSERT INTO imports (source_key, task_id) VALUES (?, ?)");
+            check(sqlite3_bind_text(statement.get(), 1, sourceKey.c_str(), -1, SQLITE_TRANSIENT), database_, "bind import source key");
+            check(sqlite3_bind_text(statement.get(), 2, task.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind import task id");
+            check(sqlite3_step(statement.get()), database_, "insert import");
+        }
+        execute("COMMIT;");
+        return task;
+    } catch (...) {
+        execute("ROLLBACK;");
+        throw;
+    }
+}
+
+bool Store::reserveContinuation(const std::string &requestId, const std::string &payload) {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "INSERT OR IGNORE INTO continuations (request_id, payload) VALUES (?, ?)");
+    check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
+    check(sqlite3_bind_text(statement.get(), 2, payload.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation payload");
+    check(sqlite3_step(statement.get()), database_, "insert continuation");
+    return sqlite3_changes(database_) != 0;
+}
+
+std::optional<std::pair<std::string, std::optional<std::string>>> Store::continuation(const std::string &requestId) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT payload, run_id FROM continuations WHERE request_id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation lookup");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    std::optional<std::string> runId;
+    if (sqlite3_column_type(statement.get(), 1) != SQLITE_NULL) runId = columnText(statement.get(), 1);
+    return std::make_pair(columnText(statement.get(), 0), runId);
+}
+
+bool Store::completeContinuation(const std::string &requestId, const std::string &runId) {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "UPDATE continuations SET run_id = ? WHERE request_id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation run");
+    check(sqlite3_bind_text(statement.get(), 2, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
+    check(sqlite3_step(statement.get()), database_, "update continuation run");
+    return sqlite3_changes(database_) != 0;
 }
 
 }

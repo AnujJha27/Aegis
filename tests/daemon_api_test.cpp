@@ -411,6 +411,40 @@ int main() {
     assert(handoffJson.at("changed_files_truncated").get<bool>());
     assert(handoffJson.at("diff").get<std::string>().size() <= 24000);
 
+    // Regression: findings freshness lifecycle via the findings endpoint.
+    const auto findingFreshnessTask = store.createTask("finding freshness", handoffFixture.root().string());
+    const auto findingCreatedFresh = request(handoffContext, http::verb::post,
+        "/api/tasks/" + findingFreshnessTask.id + "/findings",
+        nlohmann::json{{"file_path", "modified.cpp"}, {"message", "check modified behavior"}}.dump());
+    assert(findingCreatedFresh.result() == http::status::created);
+    const auto findingFresh = nlohmann::json::parse(findingCreatedFresh.body());
+    assert(!findingFresh.at("repository_fingerprint").get<std::string>().empty());
+    const auto findingFreshList = request(handoffContext, http::verb::get,
+        "/api/tasks/" + findingFreshnessTask.id + "/findings");
+    assert(findingFreshList.result() == http::status::ok);
+    const auto findingFreshEntries = nlohmann::json::parse(findingFreshList.body());
+    assert(findingFreshEntries.size() == 1);
+    assert(findingFreshEntries[0].at("freshness") == "current");
+    const auto findingFreshHandoff = request(handoffContext, http::verb::get,
+        "/api/tasks/" + findingFreshnessTask.id + "/handoff");
+    assert(nlohmann::json::parse(findingFreshHandoff.body()).at("findings")[0].at("freshness") == "current");
+
+    handoffFixture.write("modified.cpp", "rewritten after review\n");
+    const auto findingStaleList = request(handoffContext, http::verb::get,
+        "/api/tasks/" + findingFreshnessTask.id + "/findings");
+    assert(nlohmann::json::parse(findingStaleList.body())[0].at("freshness") == "stale");
+    assert(nlohmann::json::parse(findingStaleList.body())[0].at("status") == "open");
+
+    const auto legacyFindingTask = store.createTask("legacy findings", handoffFixture.root().string());
+    const auto legacyFindingId = store.createFinding(legacyFindingTask.id, std::nullopt, "legacy.cpp",
+        std::nullopt, std::nullopt, "legacy finding without fingerprint", std::nullopt).id;
+    const auto legacyFindingList = request(handoffContext, http::verb::get,
+        "/api/tasks/" + legacyFindingTask.id + "/findings");
+    assert(legacyFindingList.result() == http::status::ok);
+    const auto legacyFindingEntries = nlohmann::json::parse(legacyFindingList.body());
+    assert(legacyFindingEntries.size() == 1 && legacyFindingEntries[0].at("id") == legacyFindingId);
+    assert(legacyFindingEntries[0].at("freshness") == "unknown");
+
     const auto created = request(context, http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);
     assert(created.body().find("inspect this") != std::string::npos);
@@ -440,6 +474,12 @@ int main() {
     const auto findingInvalidPath = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
         R"({"file_path":"../outside.cpp","message":"unsafe reference"})");
     assert(findingInvalidPath.result() == http::status::bad_request);
+    const auto findingsBeforeNul = store.findings(taskId).size();
+    const auto findingInvalidNul = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
+        nlohmann::json{{"file_path", "src/main.cpp"}, {"message", std::string("embedded\0nul message", 19)}}.dump());
+    assert(findingInvalidNul.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(findingInvalidNul.body()).at("error").at("code") == "invalid_message");
+    assert(store.findings(taskId).size() == findingsBeforeNul);
     assert(store.updateRunStatus(findingRun.id, "running"));
     assert(store.updateRunStatus(findingRun.id, "completed"));
     assert(store.deleteRun(findingRun.id));
@@ -558,6 +598,59 @@ int main() {
         server.stop();
     } else {
         std::clog << "SKIP WebSocket handshake integration: loopback bind unavailable\n";
+    }
+
+    // Regression: independent codex import scope — validation, idempotency, and data-only text.
+    {
+        const auto importBody = [](const nlohmann::json &overrideFields = nlohmann::json::object()) {
+            nlohmann::json body{{"session_id", "sess-1"}, {"source_name", "codex.jsonl"},
+                {"prompt", "imported"},
+                {"context", {{"goal", "g"}, {"constraints", "c"}, {"decisions", "d"},
+                              {"attempts", "a"}, {"unfinished", "u"}, {"next_action", "n"}}},
+                {"messages", nlohmann::json::array({
+                    {{"id", "m1"}, {"role", "user"}, {"text", "hello"}, {"source_line", 1}, {"source_name", "codex.jsonl"}},
+                    {{"id", "m2"}, {"role", "tool"}, {"text", "{\"raw\":true}"}, {"source_line", 2}, {"source_name", "codex.jsonl"}}})}};
+            body.update(overrideFields);
+            return body.dump();
+        };
+        const auto imported = request(context, http::verb::post, "/api/imports/codex", importBody());
+        assert(imported.result() == http::status::ok);
+        const auto importedTask = nlohmann::json::parse(imported.body());
+        const auto importedId = importedTask.at("id").get<std::string>();
+        assert(store.task(importedId)->repository == std::filesystem::current_path().string());
+        const auto importedEvents = store.events(importedId);
+        std::size_t toolMessages = 0;
+        for (const auto &event : importedEvents)
+            if (event.type == "import.message") {
+                const auto payload = nlohmann::json::parse(event.content);
+                assert(payload.at("historical").get<bool>());
+                if (payload.at("role") == "tool") {
+                    ++toolMessages;
+                    assert(payload.at("text") == "{\"raw\":true}");
+                }
+            }
+        assert(toolMessages == 1);
+        assert(store.verifications(importedId).empty());
+        assert(store.runs(importedId).size() == 1);
+        const auto duplicate = request(context, http::verb::post, "/api/imports/codex", importBody());
+        assert(duplicate.result() == http::status::ok);
+        assert(nlohmann::json::parse(duplicate.body()).at("id") == importedId);
+        assert(store.runs(importedId).size() == 1);
+        const auto expectRejected = [&](const nlohmann::json &overrideFields) {
+            const auto response = request(context, http::verb::post, "/api/imports/codex", importBody(overrideFields));
+            assert(response.result() == http::status::bad_request);
+        };
+        expectRejected(nlohmann::json{{"context", nlohmann::json{{"goal", std::string(4001, 'x')}, {"constraints", "c"},
+            {"decisions", "d"}, {"attempts", "a"}, {"unfinished", "u"}, {"next_action", "n"}}}});
+        expectRejected(nlohmann::json{{"messages", nlohmann::json::array({
+            {{"id", "m1"}, {"role", "system"}, {"text", "x"}, {"source_line", 1}, {"source_name", "s"}}})}});
+        expectRejected(nlohmann::json{{"messages", nlohmann::json::array({
+            {{"id", "m1"}, {"role", "user"}, {"text", "x"}, {"source_line", -1}, {"source_name", "s"}}})}});
+        expectRejected(nlohmann::json{{"messages", nlohmann::json::array({
+            {{"id", "m1"}, {"role", "user"}, {"text", "x"}, {"source_line", 1}, {"source_name", ""}}})}});
+        expectRejected(nlohmann::json{{"messages", nlohmann::json::array({
+            {{"id", "m1"}, {"role", "user"}, {"text", "x"}, {"source_line", 1}, {"source_name", "s"}},
+            {{"id", "m1"}, {"role", "user"}, {"text", "y"}, {"source_line", 2}, {"source_name", "s"}}})}});
     }
 
     std::filesystem::remove(database);

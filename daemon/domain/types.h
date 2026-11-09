@@ -25,6 +25,14 @@ struct Task {
     TaskContext context{};
 };
 
+struct ImportedMessage {
+    std::string id;
+    std::string role;
+    std::string text;
+    std::int64_t sourceLine = 0;
+    std::string sourceName;
+};
+
 struct AgentRun {
     std::string id;
     std::string taskId;
@@ -33,6 +41,7 @@ struct AgentRun {
     std::int64_t startedAt = 0;
     std::int64_t finishedAt = 0;
     std::optional<std::string> externalSessionId;
+    std::optional<std::string> model = std::nullopt;
 };
 
 struct AgentEvent {
@@ -96,6 +105,8 @@ struct ReviewFinding {
     std::string status = "open";
     std::int64_t createdAt = 0;
     std::int64_t updatedAt = 0;
+    std::optional<std::string> repositoryFingerprint = std::nullopt;
+    std::string freshness = "unknown";
 };
 
 struct HandoffContext {
@@ -108,6 +119,7 @@ struct HandoffContext {
     std::optional<VerificationRun> verification;
     std::vector<ReviewFinding> findings;
     TaskContext context{};
+    std::optional<std::string> repositoryFingerprint = std::nullopt;
 };
 
 struct GraphNode {

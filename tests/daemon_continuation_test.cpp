@@ -17,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -261,11 +262,41 @@ int main() {
         assert(!fs::exists(sentinel));
     }
 
+    for (const char *agent : {"codex", "claude", "opencode"}) {
+        const std::string agentName = agent;
+        const std::string model = agentName + "/model-1";
+        const fs::path logPath = fakeBin / ("model-" + agentName + ".log");
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const auto created = deliver(task.id, Json{{"agent", agentName}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"model", model}});
+        assert(created.result() == http::status::created);
+        const std::string runId = Json::parse(created.body()).at("id").get<std::string>();
+        const auto run = store.run(runId);
+        assert(run.has_value() && run->model == model);
+        launched.push_back(runId);
+        assertOneUserMessage(store, task.id, runId, payload);
+        assert(waitLogPrompt(logPath, payload));
+        const auto tokens = logTokens(logPath);
+        const auto modelIt = std::find(tokens.begin(), tokens.end(), "--model");
+        assert(modelIt != tokens.end() && std::next(modelIt) != tokens.end() && *std::next(modelIt) == model);
+        if (agentName == "codex") assert(waitEvent(store, task.id, runId, "turn.completed"));
+        manager.terminate(runId);
+        waitLogQuiet(logPath);
+    }
+    {
+        const auto runsBefore = store.runs(task.id).size();
+        for (const std::string &bad :
+             {std::string("   "), std::string("-x"), std::string("a\0b", 3), std::string(201, 'x')}) {
+            const auto r = deliver(task.id, Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"model", bad}});
+            assert(r.result() == http::status::bad_request);
+        }
+        assert(store.runs(task.id).size() == runsBefore);
+    }
+
     std::size_t continued = 0;
     for (const auto &e : store.events(task.id))
         if (e.type == "run.continued" && e.content == sourceRun.id && e.taskId == task.id && !e.id.empty())
             ++continued;
-    assert(continued >= 3);
+    assert(continued >= 6);
 
     const auto failedRun = store.startRun(task.id, "codex");
     assert(store.updateRunStatus(failedRun.id, "failed"));
@@ -283,6 +314,41 @@ int main() {
         waitLogQuiet(logPath);
     }
 
+    const std::string idemKey = "idem-key-1";
+    {
+        const fs::path logPath = fakeBin / "idem.log";
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const Json body = Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"request_id", idemKey}};
+        const auto first = deliver(task.id, body);
+        assert(first.result() == http::status::created);
+        const std::string firstRunId = Json::parse(first.body()).at("id").get<std::string>();
+        launched.push_back(firstRunId);
+        assert(waitEvent(store, task.id, firstRunId, "turn.completed"));
+        manager.terminate(firstRunId);
+        waitLogQuiet(logPath);
+        const auto runsBefore = store.runs(task.id).size();
+        const auto replay = deliver(task.id, body);
+        assert(replay.result() == http::status::ok);
+        assert(Json::parse(replay.body()).at("id") == firstRunId);
+        assert(store.runs(task.id).size() == runsBefore);
+        const Json mismatched = Json{{"agent", "claude"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"request_id", idemKey}};
+        assert(deliver(task.id, mismatched).result() == http::status::conflict);
+        const auto saved = store.continuation(idemKey);
+        const std::string expectedPayload = Json{{"task_id", task.id}, {"source_run_id", sourceRun.id}, {"agent", "codex"}, {"prompt", payload}}.dump();
+        assert(saved.has_value() && saved->first == expectedPayload);
+        assert(saved->second.has_value() && *saved->second == firstRunId);
+    }
+    {
+        const std::string pendingKey = "idem-pending-1";
+        assert(store.reserveContinuation(pendingKey, "seeded-pending"));
+        const auto pending = deliver(task.id, Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"request_id", pendingKey}});
+        assert(pending.result() == http::status::conflict);
+    }
+    for (const Json &rid : {Json(""), Json(std::string(101, 'x')), Json(std::string("a\0b", 3)), Json(5)}) {
+        const Json body = Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"request_id", rid}};
+        assert(deliver(task.id, body).result() == http::status::bad_request);
+    }
+
     const std::vector<Json> badBodies = {
         Json{{"agent", "codex"}, {"prompt", std::string(65537, 'x')}, {"source_run_id", sourceRun.id}},
         Json{{"agent", "codex"}, {"prompt", std::string{}}, {"source_run_id", sourceRun.id}},
@@ -298,6 +364,44 @@ int main() {
                .result() == http::status::not_found);
     assert(store.runs(fresh.id).empty());
     assert(!fs::exists(sentinel));
+
+    {
+        const auto runsBefore = store.runs(task.id).size();
+        const Json stale = Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"repository_fingerprint", "bad-fingerprint"}};
+        assert(deliver(task.id, stale).result() == http::status::conflict);
+        assert(store.runs(task.id).size() == runsBefore);
+        const Json accepted = Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}, {"repository_fingerprint", nullptr}};
+        const auto fpCreated = deliver(task.id, accepted);
+        assert(fpCreated.result() == http::status::created);
+        const std::string fpRunId = Json::parse(fpCreated.body()).at("id").get<std::string>();
+        launched.push_back(fpRunId);
+        manager.terminate(fpRunId);
+        waitLogQuiet(negLog);
+        assert(!fs::exists(sentinel));
+    }
+
+    {
+        const auto shellRun = manager.launch(task.id, "shell");
+        assert(shellRun.has_value());
+        const std::string shellRunId = shellRun->id;
+        assert(waitUntil([&] { return manager.isTurnBusy(shellRunId); }));
+        assert(manager.hasWorkingRunExcept(sourceRun.id));
+        assert(deliver(task.id, Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}})
+                   .result() == http::status::conflict);
+        manager.terminate(shellRunId);
+        assert(waitUntil([&] { return !manager.isTurnBusy(shellRunId); }));
+        assert(!manager.hasWorkingRunExcept(sourceRun.id));
+        launched.push_back(shellRunId);
+        const fs::path logPath = fakeBin / "retry.log";
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const auto retry = deliver(task.id, Json{{"agent", "codex"}, {"prompt", payload}, {"source_run_id", sourceRun.id}});
+        assert(retry.result() == http::status::created);
+        const std::string retryRunId = Json::parse(retry.body()).at("id").get<std::string>();
+        launched.push_back(retryRunId);
+        assert(waitEvent(store, task.id, retryRunId, "turn.completed"));
+        manager.terminate(retryRunId);
+        waitLogQuiet(logPath);
+    }
 
     setenv("FAKE_CODEX_DELAY", "3", 1);
     std::string activeRunId;
@@ -329,6 +433,7 @@ int main() {
         assert(!e.type.empty() && !e.agent.empty());
     }
     assert(store.runs(task.id).size() == launched.size() + 1);
+    assert(store.continuation(idemKey).has_value());
     const auto sourceAfter = store.run(sourceRun.id);
     assert(sourceAfter.has_value() && sourceAfter->status == sourceStatusBefore);
     assert(countRunEvents(store, task.id, sourceRun.id) == sourceEventsBefore);
