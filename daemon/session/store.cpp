@@ -158,6 +158,18 @@ Store::Store(const std::filesystem::path &path) {
         if (!hasColumn(database_, "runs", "model"))
             execute("ALTER TABLE runs ADD COLUMN model TEXT;");
         if (previousVersion < 10) execute("PRAGMA user_version = 10;");
+        if (previousVersion < 11) {
+            execute("BEGIN IMMEDIATE;");
+            try {
+                if (!hasColumn(database_, "tasks", "context_revision"))
+                    execute("ALTER TABLE tasks ADD COLUMN context_revision INTEGER NOT NULL DEFAULT 0;");
+                execute("PRAGMA user_version = 11;");
+                execute("COMMIT;");
+            } catch (...) {
+                execute("ROLLBACK;");
+                throw;
+            }
+        }
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -180,7 +192,7 @@ void Store::execute(const char *sql) const {
 
 Task Store::createTask(std::string prompt, std::string repository) {
     std::lock_guard lock(mutex_);
-    Task task{id("task"), std::move(prompt), std::move(repository), "open", now()};
+    Task task{id("task"), std::move(prompt), std::move(repository), "open", now(), 0};
     Statement statement(database_, "INSERT INTO tasks (id, prompt, repository, status, created_at) VALUES (?, ?, ?, ?, ?)");
     check(sqlite3_bind_text(statement.get(), 1, task.id.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
     check(sqlite3_bind_text(statement.get(), 2, task.prompt.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task prompt");
@@ -349,26 +361,52 @@ ReviewFinding Store::createFinding(const std::string &taskId, std::optional<std:
     return finding;
 }
 
-bool Store::updateTaskContext(const std::string &taskId, const TaskContext &context) {
+std::optional<Task> Store::updateTaskContext(const std::string &taskId, const TaskContext &context,
+                                             std::optional<std::int64_t> expectedRevision) {
     const auto valid = [](const std::string &value) {
         return value.size() <= 4000 && value.find('\0') == std::string::npos;
     };
     if (!valid(context.goal) || !valid(context.constraints) || !valid(context.decisions) ||
         !valid(context.attempts) || !valid(context.unfinished) || !valid(context.nextAction))
         throw std::invalid_argument("invalid task context fields");
+    if (expectedRevision && (*expectedRevision < 0 || *expectedRevision > 9007199254740991LL))
+        throw std::invalid_argument("invalid task context revision");
     std::lock_guard lock(mutex_);
-    Statement current(database_, "SELECT id FROM tasks WHERE id = ?");
-    check(sqlite3_bind_text(current.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
-    if (sqlite3_step(current.get()) != SQLITE_ROW) return false;
     const nlohmann::json encoded{{"goal", context.goal}, {"constraints", context.constraints},
         {"decisions", context.decisions}, {"attempts", context.attempts},
         {"unfinished", context.unfinished}, {"next_action", context.nextAction}};
     const auto encodedText = encoded.dump();
-    Statement statement(database_, "UPDATE tasks SET context_json = ? WHERE id = ?");
-    check(sqlite3_bind_text(statement.get(), 1, encodedText.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task context");
-    check(sqlite3_bind_text(statement.get(), 2, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
-    check(sqlite3_step(statement.get()), database_, "update task context");
-    return sqlite3_changes(database_) != 0;
+    execute("BEGIN IMMEDIATE;");
+    try {
+        Statement statement(database_, "UPDATE tasks SET context_json = ?, context_revision = context_revision + 1 "
+                                       "WHERE id = ? AND context_revision < 9007199254740991 AND (? IS NULL OR context_revision = ?)");
+        check(sqlite3_bind_text(statement.get(), 1, encodedText.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task context");
+        check(sqlite3_bind_text(statement.get(), 2, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task id");
+        if (expectedRevision) {
+            check(sqlite3_bind_int64(statement.get(), 3, *expectedRevision), database_, "bind expected revision");
+            check(sqlite3_bind_int64(statement.get(), 4, *expectedRevision), database_, "bind expected revision");
+        } else {
+            check(sqlite3_bind_null(statement.get(), 3), database_, "bind expected revision");
+            check(sqlite3_bind_null(statement.get(), 4), database_, "bind expected revision");
+        }
+        check(sqlite3_step(statement.get()), database_, "update task context");
+        if (sqlite3_changes(database_) == 0) {
+            execute("COMMIT;");
+            return std::nullopt;
+        }
+        Statement updated(database_, "SELECT id, prompt, repository, status, created_at, context_revision, context_json FROM tasks WHERE id = ?");
+        check(sqlite3_bind_text(updated.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
+        if (sqlite3_step(updated.get()) != SQLITE_ROW) throw std::runtime_error("updated task is missing");
+        Task result{columnText(updated.get(), 0), columnText(updated.get(), 1), columnText(updated.get(), 2),
+                    columnText(updated.get(), 3), sqlite3_column_int64(updated.get(), 4),
+                    sqlite3_column_int64(updated.get(), 5), TaskContext{}};
+        result.context = readTaskContext(columnText(updated.get(), 6));
+        execute("COMMIT;");
+        return result;
+    } catch (...) {
+        execute("ROLLBACK;");
+        throw;
+    }
 }
 
 bool Store::updateFindingStatus(const std::string &findingId, const std::string &status) {
@@ -384,15 +422,15 @@ bool Store::updateFindingStatus(const std::string &findingId, const std::string 
 
 std::optional<Task> Store::task(const std::string &taskId) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks WHERE id = ?");
+    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_revision, context_json FROM tasks WHERE id = ?");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind task lookup");
     if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
     Task result{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
                 reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
-                sqlite3_column_int64(statement.get(), 4), TaskContext{}};
-    result.context = readTaskContext(columnText(statement.get(), 5));
+                sqlite3_column_int64(statement.get(), 4), sqlite3_column_int64(statement.get(), 5), TaskContext{}};
+    result.context = readTaskContext(columnText(statement.get(), 6));
     return result;
 }
 
@@ -452,15 +490,15 @@ std::vector<ReviewFinding> Store::findings(const std::string &taskId, std::size_
 
 std::vector<Task> Store::tasks() const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks ORDER BY created_at");
+    Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_revision, context_json FROM tasks ORDER BY created_at");
     std::vector<Task> result;
     while (sqlite3_step(statement.get()) == SQLITE_ROW) {
         Task task{reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 0)),
                   reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 1)),
                   reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 2)),
                   reinterpret_cast<const char *>(sqlite3_column_text(statement.get(), 3)),
-                  sqlite3_column_int64(statement.get(), 4), TaskContext{}};
-        task.context = readTaskContext(columnText(statement.get(), 5));
+                  sqlite3_column_int64(statement.get(), 4), sqlite3_column_int64(statement.get(), 5), TaskContext{}};
+        task.context = readTaskContext(columnText(statement.get(), 6));
         result.push_back(std::move(task));
     }
     return result;
@@ -537,16 +575,17 @@ Task Store::importTask(const std::string &sourceKey, std::string prompt, std::st
             if (sqlite3_step(lookup.get()) == SQLITE_ROW) existingTaskId = columnText(lookup.get(), 0);
         }
         if (!existingTaskId.empty()) {
-            Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_json FROM tasks WHERE id = ?");
+            Statement statement(database_, "SELECT id, prompt, repository, status, created_at, context_revision, context_json FROM tasks WHERE id = ?");
             check(sqlite3_bind_text(statement.get(), 1, existingTaskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind existing task lookup");
             if (sqlite3_step(statement.get()) != SQLITE_ROW) throw std::runtime_error("import points to missing task");
             Task result{columnText(statement.get(), 0), columnText(statement.get(), 1), columnText(statement.get(), 2),
-                        columnText(statement.get(), 3), sqlite3_column_int64(statement.get(), 4), TaskContext{}};
-            result.context = readTaskContext(columnText(statement.get(), 5));
+                        columnText(statement.get(), 3), sqlite3_column_int64(statement.get(), 4),
+                        sqlite3_column_int64(statement.get(), 5), TaskContext{}};
+            result.context = readTaskContext(columnText(statement.get(), 6));
             execute("COMMIT;");
             return result;
         }
-        Task task{id("task"), std::move(prompt), std::move(repository), "open", now(), context};
+        Task task{id("task"), std::move(prompt), std::move(repository), "open", now(), 0, context};
         const nlohmann::json encoded{{"goal", context.goal}, {"constraints", context.constraints},
             {"decisions", context.decisions}, {"attempts", context.attempts},
             {"unfinished", context.unfinished}, {"next_action", context.nextAction}};

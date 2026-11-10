@@ -81,6 +81,72 @@ int main() {
     assert(version.result() == http::status::ok);
     assert(nlohmann::json::parse(version.body()).at("schema_version") == aegis::daemon::Store::currentSchemaVersion);
 
+    // Regression: durable task context optimistic revision (context_revision).
+    const auto revCreated = request(context, http::verb::post, "/api/tasks", R"({"prompt":"context revision"})");
+    assert(revCreated.result() == http::status::created);
+    const auto revTaskId = nlohmann::json::parse(revCreated.body()).at("id").get<std::string>();
+    const auto listTasks = [&context]() {
+        const auto response = request(context, http::verb::get, "/api/tasks");
+        assert(response.result() == http::status::ok);
+        return nlohmann::json::parse(response.body());
+    };
+    const auto findTaskRevision = [&](const std::string &id) {
+        for (const auto &entry : listTasks())
+            if (entry.at("id") == id) return entry.at("context_revision").get<std::int64_t>();
+        assert(false);
+        return std::int64_t{0};
+    };
+    assert(findTaskRevision(revTaskId) == 0);
+    const nlohmann::json sixFields{{"goal", "rev-goal"}, {"constraints", "c"}, {"decisions", "d"},
+        {"attempts", "a"}, {"unfinished", "u"}, {"next_action", "n"}};
+    const auto firstSave = request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context",
+        sixFields.dump());
+    assert(firstSave.result() == http::status::ok);
+    assert(nlohmann::json::parse(firstSave.body()).at("context_revision") == 1);
+    nlohmann::json optimistic = sixFields;
+    optimistic["goal"] = "optimistic-goal";
+    optimistic["expected_revision"] = 1;
+    const auto optimisticSave = request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context",
+        optimistic.dump());
+    assert(optimisticSave.result() == http::status::ok);
+    assert(nlohmann::json::parse(optimisticSave.body()).at("context_revision") == 2);
+    const auto staleSave = request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context",
+        optimistic.dump());
+    assert(staleSave.result() == http::status::conflict);
+    bool goalPreserved = false;
+    for (const auto &entry : listTasks())
+        if (entry.at("id") == revTaskId)
+            goalPreserved = entry.at("context").at("goal") == "optimistic-goal";
+    assert(goalPreserved);
+    const auto legacySave = request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context",
+        sixFields.dump());
+    assert(legacySave.result() == http::status::ok);
+    assert(nlohmann::json::parse(legacySave.body()).at("context_revision") == 3);
+    for (const auto &badRevision : nlohmann::json::array({-1, 1.5, "1", nullptr, 9007199254740993})) {
+        nlohmann::json bad = sixFields;
+        bad["expected_revision"] = badRevision;
+        const auto badSave = request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context", bad.dump());
+        assert(badSave.result() == http::status::bad_request);
+    }
+    // Regression: an unknown seventh key must be rejected; only expected_revision may be the seventh field.
+    nlohmann::json unknownKey = sixFields;
+    unknownKey["mystery"] = "x";
+    assert(request(context, http::verb::patch, "/api/tasks/" + revTaskId + "/context", unknownKey.dump()).result() == http::status::bad_request);
+    // Regression: nlohmann parses large positive integers as unsigned; expected_revision 0 must work as the first CAS,
+    // and a valid maximal unsigned expected_revision must be accepted (as a conflict here), not rejected.
+    const auto casCreated = request(context, http::verb::post, "/api/tasks", R"({"prompt":"cas zero"})");
+    assert(casCreated.result() == http::status::created);
+    const auto casTaskId = nlohmann::json::parse(casCreated.body()).at("id").get<std::string>();
+    nlohmann::json casZero = sixFields;
+    casZero["expected_revision"] = 0;
+    const auto casZeroSave = request(context, http::verb::patch, "/api/tasks/" + casTaskId + "/context", casZero.dump());
+    assert(casZeroSave.result() == http::status::ok);
+    assert(nlohmann::json::parse(casZeroSave.body()).at("context_revision") == 1);
+    assert(request(context, http::verb::patch, "/api/tasks/" + casTaskId + "/context", casZero.dump()).result() == http::status::conflict);
+    nlohmann::json maxRevision = sixFields;
+    maxRevision["expected_revision"] = 9007199254740991;
+    assert(request(context, http::verb::patch, "/api/tasks/" + casTaskId + "/context", maxRevision.dump()).result() == http::status::conflict);
+
     // Regression: verification freshness lifecycle, ctest normalization, and
     // command validation. The freshness/migration implementation is forthcoming;
     // these assertions pin the expected serialized behavior.

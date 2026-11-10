@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { Agent, AgentRun, Task, TaskContext } from "../../app/api";
+
+import type { Agent, AgentRun, Task, TaskContext, ApiError } from "../../app/api";
 import { api } from "../../app/api";
+import { useContextDraft } from "./useContextDraft";
 import { formatHandoff } from "../review/handoffText";
 import { loadProfile, formatProfile, formatWorkflow } from "../workflow/workingProfile";
 import { WorkingProfile } from "../workflow/WorkingProfilePanel";
@@ -15,14 +17,14 @@ type Props = {
   onContinued?: (run: AgentRun, sourceRunId: string) => void;
 };
 
-const emptyContext: TaskContext = { goal: "", constraints: "", decisions: "", attempts: "", unfinished: "", next_action: "" };
 const fields: [keyof TaskContext, string][] = [["goal", "Goal"], ["constraints", "Constraints"], ["decisions", "Decisions"], ["attempts", "Attempted approaches"], ["unfinished", "Unfinished work"], ["next_action", "Next action"]];
 const supported = ["codex", "claude", "opencode"];
 const encoder = new TextEncoder();
 const validDraft = (value: string) => !value.includes("\u0000") && encoder.encode(value).length <= 4000;
 
 export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated, onContinued }: Props) {
-  const [drafts, setDrafts] = useState<TaskContext>(() => ({ ...emptyContext, ...(task.context ?? {}) }));
+  const contextDraft = useContextDraft(task);
+  const drafts = contextDraft.draft;
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [preview, setPreview] = useState("");
@@ -35,6 +37,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   const taskRef = useRef(task);
   const runRef = useRef(run);
   const draftsRef = useRef(drafts);
+  const revisionRef = useRef(0);
   const targetRef = useRef("");
   const pendingRef = useRef(false);
   const sourceBusyRef = useRef(sourceBusy);
@@ -43,6 +46,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   taskRef.current = task;
   runRef.current = run;
   draftsRef.current = drafts;
+  revisionRef.current = contextDraft.revision;
   targetRef.current = target;
   sourceBusyRef.current = sourceBusy;
 
@@ -50,10 +54,6 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
     pendingRef.current = value;
     setPending(value);
   };
-
-  useEffect(() => {
-    setDrafts({ ...emptyContext, ...(task.context ?? {}) });
-  }, [task.id]);
 
   useEffect(() => {
     genRef.current += 1;
@@ -82,6 +82,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   const targets = agents.filter((a) => a.available && supported.includes(a.name) && a.name !== run?.agent).map((a) => a.name);
 
   const saveContext = async (): Promise<boolean> => {
+    if (contextDraft.conflict) return false;
     for (const [key] of fields) {
       if (!validDraft(draftsRef.current[key])) {
         setError(`${key}: must be at most 4000 UTF-8 bytes and contain no NUL characters`);
@@ -92,13 +93,27 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
     const taskId = taskRef.current.id;
     const runId = runRef.current?.id;
     try {
-      const saved = await api.updateTaskContext(taskId, draftsRef.current);
+      const snapshot: TaskContext = { ...draftsRef.current };
+      const saved = await api.updateTaskContext(taskId, snapshot, revisionRef.current);
       if (genRef.current !== gen || taskRef.current.id !== taskId || runRef.current?.id !== runId) return false;
+      if ((saved.context_revision ?? 0) < (taskRef.current.context_revision ?? 0)) {
+        contextDraft.acceptConflict(taskRef.current);
+        return false;
+      }
+      const unchanged = contextDraft.saved(saved, snapshot);
       onTaskUpdated?.(saved);
       setError("");
-      return true;
+      return unchanged;
     } catch (err) {
-      if (genRef.current === gen) setError(err instanceof Error ? err.message : String(err));
+      if (genRef.current === gen) {
+        const apiError = err as Partial<ApiError> | null;
+        if (err instanceof Error && apiError?.status === 409 && apiError.currentTask) {
+          contextDraft.acceptConflict(apiError.currentTask);
+          setError("");
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
       return false;
     }
   };
@@ -208,11 +223,27 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
             <textarea
               id={`task-context-${key}`}
               value={drafts[key]}
-              onChange={(event) => setDrafts((prev) => ({ ...prev, [key]: event.target.value }))}
+              onChange={(event) => contextDraft.edit({ ...draftsRef.current, [key]: event.target.value })}
             />
           </div>
         ))}
-        <button type="button" disabled={pending} onClick={saveContextStandalone}>Save task context</button>
+        <p>Context status: {contextDraft.conflict ? "Conflict" : contextDraft.storageError ? "Error" : contextDraft.dirty ? "Unsaved" : "Saved"}</p>
+        <button type="button" disabled={pending || !!contextDraft.conflict} onClick={saveContextStandalone}>Save task context</button>
+        {contextDraft.conflict ? (
+          <div role="alert">
+            <p>Conflict: task context was updated elsewhere. Saved context:</p>
+            <pre>{JSON.stringify(contextDraft.conflict.context, null, 2)}</pre>
+            <button type="button" onClick={() => contextDraft.resolveConflict(true)}>Use saved context</button>
+            <button type="button" onClick={() => contextDraft.resolveConflict(false)}>Keep my draft</button>
+          </div>
+        ) : null}
+        {contextDraft.storageError ? (
+          <div role="alert">
+            <p>{contextDraft.storageError}</p>
+            <p>Edits remain in this tab only until draft storage works; save task context before reloading.</p>
+            <button type="button" onClick={contextDraft.discardStored}>Discard stored draft</button>
+          </div>
+        ) : null}
       </details>
       <WorkingProfile
         task={task}
@@ -224,17 +255,17 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
             setError("Applying workflow would exceed 4000 UTF-8 bytes of constraints; shorten it first");
             return;
           }
-          setDrafts({
+          contextDraft.edit({
             ...latest,
             constraints,
             next_action: latest.next_action || wf.steps[0]?.purpose || "",
           });
         }}
       />
-      {error && !dialogOpen ? <div role="alert">{error}</div> : null}
+      {error && !dialogOpen && !contextDraft.conflict && !contextDraft.storageError ? <div role="alert">{error}</div> : null}
       <button
         type="button"
-        disabled={sourceBusy || !run || targets.length === 0 || pending}
+        disabled={sourceBusy || !run || targets.length === 0 || pending || !!contextDraft.conflict}
         onClick={startHandoff}
       >
         Continue with another agent
@@ -254,7 +285,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
           <input id="continue-model" aria-label="Model for continuation" placeholder="Provider default" maxLength={200} value={targetModel} onChange={(event) => changeModel(event.target.value)} disabled={pending} />
           <label htmlFor="handoff-preview">Handoff preview</label>
           <textarea id="handoff-preview" readOnly value={preview} />
-          {error ? <div role="alert">{error}</div> : null}
+          {error && !contextDraft.conflict && !contextDraft.storageError ? <div role="alert">{error}</div> : null}
           <button type="button" disabled={pending} onClick={() => setDialogOpen(false)}>Cancel</button>
           <button type="button" disabled={pending || !target || sourceBusy} onClick={confirmContinue}>Continue task</button>
         </div>

@@ -241,6 +241,39 @@ int main() {
         assert(migrated.events("v4-task").front().id == "v4-event");
     }
 
+    const auto schema10Path = fixtureDirectory / "schema10.sqlite";
+    sqlite3 *schema10 = nullptr;
+    assert(sqlite3_open(schema10Path.string().c_str(), &schema10) == SQLITE_OK);
+    assert(sqlite3_exec(schema10,
+        "PRAGMA user_version = 10;"
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, repository TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, context_json TEXT NOT NULL DEFAULT '{}');"
+        "INSERT INTO tasks VALUES ('s10-task','schema10','/tmp','open',1,'{\"goal\":\"orig-goal\",\"constraints\":\"orig-constraints\",\"decisions\":\"orig-decisions\",\"attempts\":\"orig-attempts\",\"unfinished\":\"orig-unfinished\",\"next_action\":\"orig-next\"}');"
+        "CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, task_id TEXT NOT NULL, run_id TEXT NOT NULL, type TEXT NOT NULL, agent TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL);",
+        nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(schema10);
+    {
+        aegis::daemon::Store store(schema10Path);
+        const auto migratedTask = store.task("s10-task");
+        assert(migratedTask && migratedTask->context.goal == "orig-goal" &&
+               migratedTask->context.constraints == "orig-constraints" &&
+               migratedTask->context.nextAction == "orig-next");
+        assert(migratedTask->contextRevision == 0);
+        const aegis::daemon::TaskContext s10Context{"g1", "c1", "d1", "a1", "u1", "n1"};
+        const auto casOne = store.updateTaskContext("s10-task", s10Context, 0);
+        assert(casOne && casOne->contextRevision == 1 && casOne->context.goal == "g1");
+        assert(!store.updateTaskContext("s10-task", s10Context, 0));
+        assert(store.task("s10-task")->context.goal == "g1");
+        const auto legacyUpdate = store.updateTaskContext("s10-task", s10Context);
+        assert(legacyUpdate && legacyUpdate->contextRevision == 2);
+        const auto allTasks = store.tasks();
+        assert(allTasks.size() == 1 && allTasks.front().contextRevision == 2);
+    }
+    {
+        aegis::daemon::Store store(schema10Path);
+        const auto reopened = store.task("s10-task");
+        assert(reopened && reopened->contextRevision == 2 && reopened->context.goal == "g1");
+    }
+
     const std::string corruptContents = "preserve this invalid database";
     {
         std::ofstream corrupt(corruptPath, std::ios::binary);

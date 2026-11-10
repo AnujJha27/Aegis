@@ -59,24 +59,45 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
             static const std::string_view keys[] = {"goal", "constraints", "decisions", "attempts", "unfinished", "next_action"};
             try {
                 const auto body = nlohmann::json::parse(request.body());
-                if (!body.is_object() || body.size() != 6)
-                    return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields");
+                if (!body.is_object() || (body.size() != 6 && !(body.size() == 7 && body.contains("expected_revision"))))
+                    return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields, optionally with expected_revision");
+                std::optional<std::int64_t> expectedRevision;
+                if (body.contains("expected_revision")) {
+                    const auto &expected = body.at("expected_revision");
+                    if (!expected.is_number_integer())
+                        return error(boost::beast::http::status::bad_request, "invalid_revision", "expected_revision must be an integer");
+                    if (expected.is_number_unsigned()) {
+                        if (expected.get<std::uint64_t>() > 9007199254740991ULL)
+                            return error(boost::beast::http::status::bad_request, "invalid_revision", "expected_revision must be an integer between 0 and 9007199254740991");
+                        expectedRevision = static_cast<std::int64_t>(expected.get<std::uint64_t>());
+                    } else {
+                        if (expected.get<std::int64_t>() < 0 ||
+                            expected.get<std::int64_t>() > 9007199254740991LL)
+                            return error(boost::beast::http::status::bad_request, "invalid_revision", "expected_revision must be an integer between 0 and 9007199254740991");
+                        expectedRevision = expected.get<std::int64_t>();
+                    }
+                }
                 TaskContext update;
                 std::string *values[] = {&update.goal, &update.constraints, &update.decisions,
                                          &update.attempts, &update.unfinished, &update.nextAction};
                 for (std::size_t index = 0; index < 6; ++index) {
                     if (!body.contains(keys[index]))
-                        return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields");
+                        return error(boost::beast::http::status::bad_request, "invalid_context", "context must be an object with exactly the six known fields, optionally with expected_revision");
                     const auto &value = body.at(keys[index]);
                     if (!value.is_string() || value.get_ref<const std::string &>().size() > 4000 ||
                         value.get_ref<const std::string &>().find('\0') != std::string::npos)
                         return error(boost::beast::http::status::bad_request, "invalid_context", "context fields must be strings of at most 4000 bytes without NUL");
                     *values[index] = value.get_ref<const std::string &>();
                 }
-                if (!context.store->updateTaskContext(*taskId, update))
+                const auto updated = context.store->updateTaskContext(*taskId, update, expectedRevision);
+                if (updated)
+                    return jsonResponse(boost::beast::http::status::ok, protocol::toJson(*updated));
+                const auto latest = context.store->task(*taskId);
+                if (!latest)
                     return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
-                const auto updated = context.store->task(*taskId);
-                return jsonResponse(boost::beast::http::status::ok, protocol::toJson(*updated));
+                return jsonResponse(boost::beast::http::status::conflict,
+                                    {{"error", {{"code", "context_conflict"}, {"message", "Task context changed; review the saved version before saving."}}},
+                                     {"current_task", protocol::toJson(*latest)}});
             } catch (const nlohmann::json::exception &) {
                 return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
             }

@@ -76,8 +76,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.handoff.mockResolvedValue(handoffContext);
   apiMock.continueTask.mockResolvedValue(continuedRun);
-  apiMock.updateTaskContext.mockResolvedValue(task as never);
+  apiMock.updateTaskContext.mockImplementation(async (taskId: string, context: Task["context"], expectedRevision = 0) => ({ ...task, id: taskId, context, context_revision: expectedRevision + 1 }) as never);
 });
+
+const draftKey = `aegis:context-draft:${JSON.stringify(["repo", "task-1"])}`;
 
 afterEach(() => {
   cleanup();
@@ -142,6 +144,7 @@ describe("TaskContinuation", () => {
       expect(apiMock.updateTaskContext).toHaveBeenCalledWith(
         "task-1",
         expect.objectContaining({ goal: "Ship SSO login · シングルサインオン", next_action: "续写失败用例" }),
+        0,
       ),
     );
     await waitFor(() => expect(onTaskUpdated).toHaveBeenCalled());
@@ -263,6 +266,176 @@ describe("TaskContinuation", () => {
     expect(onContinued).not.toHaveBeenCalled();
   });
 
+  it("restores an edited goal draft after remount", () => {
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "remount-draft" } });
+    view.unmount();
+    renderComponent();
+    openContextEditor();
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("remount-draft");
+  });
+
+  it("restores each draft when switching tasks and back", () => {
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "task-one-draft" } });
+    view.rerender(
+      <TaskContinuation task={taskWithoutContext} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "task-two-draft" } });
+    view.rerender(
+      <TaskContinuation task={task} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("task-one-draft");
+    view.rerender(
+      <TaskContinuation task={taskWithoutContext} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("task-two-draft");
+  });
+
+  it("keeps typed text and shows a storage error when localStorage quota is exceeded", () => {
+    const setItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    try {
+      renderComponent();
+      openContextEditor();
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "quota-draft" } });
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toMatch(/storage/i);
+      expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("quota-draft");
+    } finally {
+      Storage.prototype.setItem = setItem;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("retains the newer draft edited during a pending save after response and remount", async () => {
+    let resolveSave!: (value: Task) => void;
+    apiMock.updateTaskContext.mockImplementationOnce(
+      () => new Promise<Task>((resolve) => { resolveSave = resolve; }),
+    );
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "older-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(apiMock.updateTaskContext).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "newer-draft" } });
+    await act(async () => {
+      resolveSave(task as never);
+    });
+    view.unmount();
+    renderComponent();
+    openContextEditor();
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("newer-draft");
+  });
+
+  it("ignores an older save response that arrives after a newer context_revision", async () => {
+    let resolveSave!: (value: Task) => void;
+    apiMock.updateTaskContext.mockImplementationOnce(
+      () => new Promise<Task>((resolve) => { resolveSave = resolve; }),
+    );
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "localtypedgoal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(apiMock.updateTaskContext).toHaveBeenCalledTimes(1));
+    const newerTask = { ...task, context_revision: 3, context: { ...task.context, goal: "latestsaved" } } as unknown as Task;
+    view.rerender(
+      <TaskContinuation task={newerTask} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    await act(async () => {
+      resolveSave({ ...task, context_revision: 1, context: { ...task.context, goal: "submittedlocal" } } as never);
+    });
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("localtypedgoal");
+    expect(screen.getByRole("alert").textContent).toContain("latestsaved");
+    expect(onTaskUpdated).not.toHaveBeenCalled();
+  });
+
+  it("preserves local edits on newer context_revision, shows conflict, and resolves via Keep my draft", async () => {
+    const newerTask = { ...task, context_revision: 3 } as unknown as Task;
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "my-local-edit" } });
+    view.rerender(
+      <TaskContinuation task={newerTask} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("my-local-edit");
+    expect(screen.getByRole("alert").textContent).toMatch(/conflict/i);
+    expect((screen.getByRole("button", { name: "Save task context" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("my-local-edit");
+    expect((screen.getByRole("button", { name: "Save task context" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(apiMock.updateTaskContext).toHaveBeenCalledWith("task-1", expect.anything(), 3));
+  });
+
+  it("keeps the local draft, shows a conflict, and saves with the server revision on 409", async () => {
+    const conflictError = Object.assign(new Error("conflict"), {
+      status: 409,
+      currentTask: { ...task, context_revision: 2, context: { ...task.context, goal: "saved elsewhere" } },
+    });
+    apiMock.updateTaskContext.mockRejectedValueOnce(conflictError);
+    renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "my-typed-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/conflict|saved elsewhere/i);
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("my-typed-draft");
+    fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(apiMock.updateTaskContext).toHaveBeenCalledWith("task-1", expect.objectContaining({ goal: "my-typed-draft" }), 2));
+  });
+
+  it("clears the stored draft after a successful save", async () => {
+    const firstView = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "saved-goal-edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save task context" }));
+    await waitFor(() => expect(onTaskUpdated).toHaveBeenCalled());
+    const savedTask = onTaskUpdated.mock.calls[0][0] as Task;
+    firstView.unmount();
+    const view = render(
+      <TaskContinuation task={savedTask} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    openContextEditor();
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("saved-goal-edit");
+    expect(localStorage.getItem(draftKey)).toBeNull();
+    view.unmount();
+  });
+
+  it("retains a raw malformed stored draft until the user discards it", () => {
+    localStorage.setItem(draftKey, "{bad");
+    renderComponent();
+    openContextEditor();
+    expect(screen.getByRole("alert").textContent).toMatch(/storage|draft/i);
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe(task.context!.goal);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "fresh-edit" } });
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("fresh-edit");
+    expect(localStorage.getItem(draftKey)).toBe("{bad");
+    fireEvent.click(screen.getByRole("button", { name: "Discard stored draft" }));
+    expect(localStorage.getItem(draftKey)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "fresh-edit-2" } });
+    expect(localStorage.getItem(draftKey)).not.toBeNull();
+  });
+
+  it("resolves the conflict via Use saved context and restores the saved goal", () => {
+    const newerTask = { ...task, context_revision: 3 } as unknown as Task;
+    const view = renderComponent();
+    openContextEditor();
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "my-local-edit" } });
+    view.rerender(
+      <TaskContinuation task={newerTask} run={sourceRun} agents={agents} sourceBusy={false} onTaskUpdated={onTaskUpdated} onContinued={onContinued} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use saved context" }));
+    expect((screen.getByLabelText("Goal") as HTMLInputElement).value).toBe("Ship SSO login");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("applies a saved workflow to the constraints draft and saves everything in one update", async () => {
     localStorage.clear();
     saveProfile("repo", {
@@ -306,6 +479,7 @@ describe("TaskContinuation", () => {
         next_action: "existingdraftnext",
         constraints: expect.stringContaining("unsavedconstraint"),
       }),
+      0,
     );
     const savedConstraints = apiMock.updateTaskContext.mock.calls[0][1].constraints as string;
     expect(savedConstraints).toContain("Workflow: Review");

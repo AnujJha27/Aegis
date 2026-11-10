@@ -13,7 +13,7 @@ inline nlohmann::json toJson(const TaskContext &context) {
 }
 
 inline nlohmann::json toJson(const Task &task) {
-    return {{"id", task.id}, {"prompt", task.prompt}, {"repository", task.repository}, {"status", task.status}, {"created_at", task.createdAt}, {"context", toJson(task.context)}};
+    return {{"id", task.id}, {"prompt", task.prompt}, {"repository", task.repository}, {"status", task.status}, {"created_at", task.createdAt}, {"context_revision", task.contextRevision}, {"context", toJson(task.context)}};
 }
 
 inline nlohmann::json toJson(const AgentRun &run) {

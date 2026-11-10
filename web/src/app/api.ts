@@ -35,7 +35,10 @@ export type Task = {
   status: string;
   createdAt: number;
   context?: TaskContext;
+  context_revision?: number;
 };
+
+export type ApiError = Error & { status: number; currentTask?: Task };
 
 export type Agent = {
   name: string;
@@ -116,7 +119,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error?.message ?? `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error: ApiError = Object.assign(new Error(body.error?.message ?? `Request failed (${response.status})`), { status: response.status });
+    if (body.current_task) error.currentTask = task(body.current_task);
+    throw error;
+  }
   return body as T;
 }
 
@@ -125,7 +132,10 @@ const normalizeContext = (value: unknown): TaskContext => {
   const source = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   return Object.fromEntries(contextFields.map((field) => [field, typeof source[field] === "string" ? source[field] as string : ""])) as TaskContext;
 };
-const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0), context: normalizeContext(value.context) });
+const normalizeRevision = (value: unknown): number | undefined => {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+};
+const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0), context: normalizeContext(value.context), context_revision: normalizeRevision(value.context_revision) });
 const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0), externalSessionId: typeof value.external_session_id === "string" ? value.external_session_id : undefined, model: typeof value.model === "string" ? value.model : undefined, turnStatus: ["turn.started", "turn.completed", "turn.interrupted"].includes(String(value.turn_status)) ? value.turn_status as AgentRun["turnStatus"] : undefined });
 export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0) });
 const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt), freshness: ["current", "stale", "unknown"].includes(String(value.freshness)) ? value.freshness as VerificationRun["freshness"] : "unknown", repositoryFingerprint: typeof value.repository_fingerprint === "string" ? value.repository_fingerprint : null });
@@ -171,7 +181,7 @@ export const api = {
   provenance: (taskId: string) => request<{ task_id: string; records: ProvenanceRecord[]; truncated?: boolean }>(`/api/tasks/${taskId}/provenance`),
   importCodex: async (payload: ImportCodexPayload) => task(await request<Record<string, unknown>>("/api/imports/codex", { method: "POST", body: JSON.stringify(payload) })),
   createTask: async (prompt: string) => task(await request<Record<string, unknown>>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })),
-  updateTaskContext: async (taskId: string, context: TaskContext) => task(await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/context`, { method: "PATCH", body: JSON.stringify(context) })),
+  updateTaskContext: async (taskId: string, context: TaskContext, expectedRevision?: number) => task(await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/context`, { method: "PATCH", body: JSON.stringify({ ...context, ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}) }) })),
   continueTask: async (taskId: string, agent: string, sourceRunId: string, prompt: string, requestId?: string, expectedFingerprint?: string | null, model?: string) => run(await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/continue`, { method: "POST", body: JSON.stringify({ agent, source_run_id: sourceRunId, prompt, ...(requestId ? { request_id: requestId } : {}), ...(expectedFingerprint !== undefined ? { repository_fingerprint: expectedFingerprint } : {}), ...(model ? { model } : {}) }) })),
   launch: async (taskId: string, agent: string, model?: string) => run(await request<Record<string, unknown>>(`/api/tasks/${taskId}/runs`, { method: "POST", body: JSON.stringify(model ? { agent, model } : { agent }) })),
   deleteRun: (runId: string) => request<void>(`/api/runs/${runId}`, { method: "DELETE" }),

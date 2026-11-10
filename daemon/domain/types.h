@@ -22,6 +22,7 @@ struct Task {
     std::string repository;
     std::string status = "open";
     std::int64_t createdAt = 0;
+    std::int64_t contextRevision = 0;
     TaskContext context{};
 };
 
