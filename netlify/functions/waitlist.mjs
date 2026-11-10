@@ -1,8 +1,7 @@
 // Aegis waitlist — Netlify function (Web-standard, v2 runtime).
-// Storage: Netlify Blobs (auto-provisioned, persists across deploys).
-// Signups: GET /api/waitlist/list?key=ADMIN_KEY  (set ADMIN_KEY env to enable)
-
-import { getStore } from "@netlify/blobs";
+// Storage: Netlify Blobs — a single "signups" blob holding the list.
+// Robust across @netlify/blobs versions (no list() pagination API used).
+// Signups: GET /api/waitlist/list?key=ADMIN_KEY
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const json = (status, obj) =>
@@ -10,6 +9,21 @@ const json = (status, obj) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+async function getStoreSafe() {
+  const { getStore } = await import("@netlify/blobs");
+  return getStore({ name: "waitlist", consistency: "strong" });
+}
+
+async function readEntries(store) {
+  try {
+    const raw = await store.get("signups");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export default async (req) => {
   const url = new URL(req.url);
@@ -23,21 +37,9 @@ export default async (req) => {
     if (!process.env.ADMIN_KEY || key !== process.env.ADMIN_KEY) {
       return json(403, { ok: false, error: "Forbidden" });
     }
-    const store = getStore({ name: "waitlist", consistency: "strong" });
-    const list = await store.list();
-    const out = [];
-    for (const item of list.items) {
-      const raw = await store.get(item.key);
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          out.push(parsed);
-        } else {
-          out.push({ email: item.key });
-        }
-      } catch { out.push({ email: item.key }); }
-    }
-    return json(200, { ok: true, count: out.length, signups: out });
+    const store = await getStoreSafe();
+    const entries = await readEntries(store);
+    return json(200, { ok: true, count: entries.length, signups: entries });
   }
 
   if (req.method !== "POST") {
@@ -56,13 +58,15 @@ export default async (req) => {
   }
 
   try {
-    const store = getStore({ name: "waitlist", consistency: "strong" });
-    const existing = await store.get(email);
-    if (existing) return json(200, { ok: true, duplicate: true });
-    const list = await store.list();
-    const position = (list.items?.length || 0) + 1;
-    await store.setJSON(email, { email, ts: Date.now() });
-    return json(200, { ok: true, position });
+    const store = await getStoreSafe();
+    const entries = await readEntries(store);
+    const existing = entries.findIndex((e) => e.email === email);
+    if (existing > -1) {
+      return json(200, { ok: true, duplicate: true, position: existing + 1 });
+    }
+    entries.push({ email, ts: Date.now() });
+    await store.setJSON("signups", entries);
+    return json(200, { ok: true, position: entries.length });
   } catch (err) {
     return json(500, { ok: false, error: "Store unavailable." });
   }
