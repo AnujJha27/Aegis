@@ -4,7 +4,7 @@ import type { Agent, AgentRun, Task, TaskContext, ApiError } from "../../app/api
 import { api } from "../../app/api";
 import { useContextDraft } from "./useContextDraft";
 import { formatHandoff } from "../review/handoffText";
-import { loadProfile, formatProfile, formatWorkflow } from "../workflow/workingProfile";
+import { formatProfile, formatWorkflow } from "../workflow/workingProfile";
 import { WorkingProfile } from "../workflow/WorkingProfilePanel";
 import HandoffRecovery from "./HandoffRecovery";
 import { savePendingHandoff, removePendingHandoff } from "./pendingHandoff";
@@ -143,8 +143,9 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
     }
     let working = "";
     try {
-      const profile = loadProfile(taskRef.current.repository ?? "");
-      if (profile) working = formatProfile(profile.instructions);
+      const profile = await api.workingProfile();
+      if (genRef.current !== gen || taskRef.current.id !== taskId || runRef.current?.id !== sourceRunId) return;
+      working = formatProfile(profile.instructions);
     } catch (err) {
       if (genRef.current === gen) setError(err instanceof Error ? err.message : String(err));
       setPendingState(false);

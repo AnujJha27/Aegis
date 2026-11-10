@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <set>
@@ -10,9 +11,115 @@
 
 namespace aegis::daemon::api::routes {
 
+namespace {
+
+bool validProfileString(const nlohmann::json &value, std::size_t maxBytes, bool requireNonBlank = false) {
+    if (!value.is_string()) return false;
+    const auto &text = value.get_ref<const std::string &>();
+    if (text.size() > maxBytes || text.find('\0') != std::string::npos) return false;
+    if (requireNonBlank) {
+        for (unsigned char c : text)
+            if (!std::isspace(c)) return true;
+        return false;
+    }
+    return true;
+}
+
+bool validProfile(const nlohmann::json &profile) {
+    if (!profile.is_object() || profile.size() != 3 || !profile.contains("version") ||
+        !profile.contains("instructions") || !profile.contains("workflows"))
+        return false;
+    if (!profile.at("version").is_number_integer() || profile.at("version").get<long long>() != 1)
+        return false;
+    const auto &instructions = profile.at("instructions");
+    if (!instructions.is_array() || instructions.size() > 20) return false;
+    for (const auto &entry : instructions) {
+        if (!entry.is_object() || entry.size() != 2 || !entry.contains("text") || !entry.contains("source"))
+            return false;
+        if (!validProfileString(entry.at("text"), 1000, true) || !validProfileString(entry.at("source"), 500))
+            return false;
+    }
+    const auto &workflows = profile.at("workflows");
+    if (!workflows.is_array() || workflows.size() > 5) return false;
+    for (const auto &workflow : workflows) {
+        if (!workflow.is_object() || workflow.size() != 2 || !workflow.contains("name") || !workflow.contains("steps"))
+            return false;
+        if (!validProfileString(workflow.at("name"), 500)) return false;
+        const auto &steps = workflow.at("steps");
+        if (!steps.is_array() || steps.size() > 10) return false;
+        for (const auto &step : steps) {
+            if (!step.is_object() || step.size() != 5) return false;
+            for (const auto *key : {"purpose", "context", "agent", "result", "evidenceNeeded"})
+                if (!step.contains(key) || !validProfileString(step.at(key), 500))
+                    return false;
+        }
+    }
+    return profile.dump().size() <= 8000;
+}
+
+}  // namespace
 
 std::optional<Response> tasks(const Request &request, const Context &context) {
     const auto target = std::string(request.target());
+    if (request.method() == boost::beast::http::verb::get && target == "/api/profile") {
+        std::error_code canonicalError;
+        const auto canonicalRepository = std::filesystem::weakly_canonical(context.repository, canonicalError);
+        if (canonicalError)
+            return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a valid directory");
+        const auto [profileJson, revision] = context.store->workingProfile(canonicalRepository.string());
+        nlohmann::json result = nlohmann::json::parse(profileJson);
+        result["revision"] = revision;
+        return jsonResponse(boost::beast::http::status::ok, result);
+    }
+    if (request.method() == boost::beast::http::verb::put && target == "/api/profile") {
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            if (!body.is_object() || !body.contains("expected_revision"))
+                return error(boost::beast::http::status::bad_request, "invalid_profile",
+                             "profile must be an object with version, instructions, workflows and expected_revision");
+            const auto &expected = body.at("expected_revision");
+            if (!expected.is_number_integer())
+                return error(boost::beast::http::status::bad_request, "invalid_revision",
+                             "expected_revision must be an integer between 0 and 9007199254740991");
+            std::int64_t expectedRevision = 0;
+            if (expected.is_number_unsigned()) {
+                if (expected.get<std::uint64_t>() > 9007199254740991ULL)
+                    return error(boost::beast::http::status::bad_request, "invalid_revision",
+                                 "expected_revision must be an integer between 0 and 9007199254740991");
+                expectedRevision = static_cast<std::int64_t>(expected.get<std::uint64_t>());
+            } else {
+                const auto value = expected.get<std::int64_t>();
+                if (value < 0 || value > 9007199254740991LL)
+                    return error(boost::beast::http::status::bad_request, "invalid_revision",
+                                 "expected_revision must be an integer between 0 and 9007199254740991");
+                expectedRevision = value;
+            }
+            nlohmann::json profile = body;
+            profile.erase("expected_revision");
+            if (!validProfile(profile))
+                return error(boost::beast::http::status::bad_request, "invalid_profile",
+                             "profile must contain version 1, at most 20 instructions and 5 workflows with fields within size limits");
+            std::error_code canonicalError;
+            const auto canonicalRepository = std::filesystem::weakly_canonical(context.repository, canonicalError);
+            if (canonicalError)
+                return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a valid directory");
+            const auto revision = context.store->saveWorkingProfile(canonicalRepository.string(), profile.dump(), expectedRevision);
+            if (revision) {
+                nlohmann::json result = profile;
+                result["revision"] = *revision;
+                return jsonResponse(boost::beast::http::status::ok, result);
+            }
+            const auto [currentJson, currentRevision] = context.store->workingProfile(canonicalRepository.string());
+            nlohmann::json currentProfile = nlohmann::json::parse(currentJson);
+            currentProfile["revision"] = currentRevision;
+            return jsonResponse(boost::beast::http::status::conflict,
+                                {{"error", {{"code", "profile_conflict"},
+                                            {"message", "Profile changed; review the saved version before saving."}}},
+                                 {"current_profile", currentProfile}});
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        }
+    }
     if (request.method() == boost::beast::http::verb::get && target == "/api/tasks") {
         nlohmann::json result = nlohmann::json::array();
         for (const auto &task : context.store->tasks()) result.push_back(protocol::toJson(task));

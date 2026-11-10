@@ -81,6 +81,46 @@ int main() {
     assert(version.result() == http::status::ok);
     assert(nlohmann::json::parse(version.body()).at("schema_version") == aegis::daemon::Store::currentSchemaVersion);
 
+    // Regression: B1 profile API — initial revision, optimistic CAS updates, and validation.
+    const auto profileInitial = request(context, http::verb::get, "/api/profile");
+    assert(profileInitial.result() == http::status::ok);
+    const auto profileInitialJson = nlohmann::json::parse(profileInitial.body());
+    assert(profileInitialJson.at("revision") == 0);
+    assert(profileInitialJson.at("instructions").is_array());
+    const auto profileSave = request(context, http::verb::put, "/api/profile",
+        nlohmann::json{{"version", 1},
+                       {"instructions", nlohmann::json::array({nlohmann::json{{"text", "Small changes"}, {"source", "manual"}}})},
+                       {"workflows", nlohmann::json::array()},
+                       {"expected_revision", 0}}.dump());
+    assert(profileSave.result() == http::status::ok);
+    const auto profileSavedJson = nlohmann::json::parse(profileSave.body());
+    assert(profileSavedJson.at("revision") == 1);
+    const auto profileAfterSave = nlohmann::json::parse(request(context, http::verb::get, "/api/profile").body());
+    assert(profileAfterSave.at("revision") == 1);
+    assert(profileAfterSave.at("instructions").size() == 1);
+    assert(profileAfterSave.at("instructions")[0].at("text") == "Small changes");
+    const auto profileStale = request(context, http::verb::put, "/api/profile",
+        nlohmann::json{{"version", 1},
+                       {"instructions", nlohmann::json::array({nlohmann::json{{"text", "Small changes"}, {"source", "manual"}}})},
+                       {"workflows", nlohmann::json::array()},
+                       {"expected_revision", 0}}.dump());
+    assert(profileStale.result() == http::status::conflict);
+    assert(nlohmann::json::parse(profileStale.body()).at("error").at("code") == "profile_conflict");
+    assert(nlohmann::json::parse(request(context, http::verb::get, "/api/profile").body()).at("instructions")[0].at("text") == "Small changes");
+    const auto expectProfileRejected = [&](const nlohmann::json &body) {
+        const auto response = request(context, http::verb::put, "/api/profile", body.dump());
+        assert(response.result() == http::status::bad_request);
+    };
+    expectProfileRejected(nlohmann::json{{"version", 1},
+        {"instructions", nlohmann::json::array({nlohmann::json{{"text", std::string(1001, 'x')}, {"source", "manual"}}})},
+        {"workflows", nlohmann::json::array()}, {"expected_revision", 1}});
+    expectProfileRejected(nlohmann::json{{"version", 1},
+        {"instructions", nlohmann::json::array({{"text", "ok"}, {"source", "manual"}})}, {"expected_revision", 1}});
+    assert(request(context, http::verb::put, "/api/profile", "not-json").result() == http::status::bad_request);
+    expectProfileRejected(nlohmann::json{{"version", 1},
+        {"instructions", nlohmann::json::array({{"text", "ok"}, {"source", "manual"}})},
+        {"workflows", nlohmann::json::array()}, {"expected_revision", 1.5}});
+
     // Regression: durable task context optimistic revision (context_revision).
     const auto revCreated = request(context, http::verb::post, "/api/tasks", R"({"prompt":"context revision"})");
     assert(revCreated.result() == http::status::created);

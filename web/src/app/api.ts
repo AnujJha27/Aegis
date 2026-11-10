@@ -40,6 +40,8 @@ export type Task = {
 
 export type ApiError = Error & { status: number; currentTask?: Task };
 
+export type WorkingProfileEnvelope = import("../features/workflow/workingProfile").WorkingProfile & { revision: number };
+
 export type Agent = {
   name: string;
   available: boolean;
@@ -142,6 +144,8 @@ const verification = (value: Record<string, unknown>): VerificationRun => ({ id:
 
 export const api = {
   repository: () => request<Repository>("/api/repository"),
+  workingProfile: () => request<WorkingProfileEnvelope>("/api/profile"),
+  saveWorkingProfile: async (profile: import("../features/workflow/workingProfile").WorkingProfile, expectedRevision: number) => request<WorkingProfileEnvelope>("/api/profile", { method: "PUT", body: JSON.stringify({ version: 1, instructions: profile.instructions, workflows: profile.workflows, expected_revision: expectedRevision }) }),
   tasks: async () => (await request<Record<string, unknown>[]>("/api/tasks")).map(task),
   agents: () => request<Agent[]>("/api/agents"),
   events: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/events?task_id=${encodeURIComponent(taskId)}`)).map(agentEvent),

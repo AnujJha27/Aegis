@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Task, type TaskContext } from "../../app/api";
 import { evidenceCards, parseCodexLog, type CodexLog, type EvidenceCard } from "./codexLog";
-import { loadProfile, saveProfile } from "../workflow/workingProfile";
+import { validateProfile } from "../workflow/workingProfile";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 const truncate = (s: string, max: number) => {
@@ -60,24 +60,34 @@ export function ImportConversation({ repository, onImported }: { repository?: st
     setSelected(next);
   }
 
-  function retainInstruction(card: EvidenceCard) {
+  async function retainInstruction(card: EvidenceCard) {
     setRetained("");
     setError("");
-    if (!repository) return;
+    if (!repository || pending) return;
+    const gen = generation.current;
     const source = `Codex ${log?.sessionId ?? "unknown"} ${card.source_name}:${card.source_line}`;
-    let profile;
+    if (bytes(card.text) > 1000) return setError("Card text exceeds the 1000-byte working instruction limit; edit it via Working style instead (it will not be truncated)");
+    if (bytes(source) > 500) return setError("Card source exceeds the 500-byte limit; edit it via Working style instead (it will not be truncated)");
+    setPending(true);
     try {
-      profile = loadProfile(repository) ?? { version: 1 as const, instructions: [], workflows: [] };
-      if (bytes(card.text) > 1000) return setError("Card text exceeds the 1000-byte working instruction limit; edit it via Working style instead (it will not be truncated)");
-      if (bytes(source) > 500) return setError("Card source exceeds the 500-byte limit; edit it via Working style instead (it will not be truncated)");
-      if (profile.instructions.some((i) => i.text === card.text && i.source === source)) return setError("This instruction is already retained in the working profile");
-      profile = { ...profile, instructions: [...profile.instructions, { text: card.text, source }] };
-      saveProfile(repository, profile);
+      const profile = await api.workingProfile();
+      if (gen !== generation.current) return;
+      if (profile.instructions.some((i) => i.text === card.text && i.source === source)) {
+        setError("This instruction is already retained in the working profile");
+        return;
+      }
+      const merged = { ...profile, instructions: [...profile.instructions, { text: card.text, source }] };
+      validateProfile(merged);
+      await api.saveWorkingProfile(merged, profile.revision);
+      if (gen !== generation.current) return;
+      setRetained(`Retained as working instruction (source card ${card.source_name}:${card.source_line} selected for import, so provenance is saved with the task if you confirm import)`);
+      if (!selected.has(`${card.source_name}:${card.source_line}`)) toggleCard(card);
     } catch (reason) {
-      return setError(reason instanceof Error ? reason.message : "Could not retain instruction");
+      if (gen !== generation.current) return;
+      setError(reason instanceof Error ? reason.message : "Could not retain instruction");
+    } finally {
+      if (gen === generation.current) setPending(false);
     }
-    setRetained(`Retained as working instruction (source card ${card.source_name}:${card.source_line} selected for import, so provenance is saved with the task if you confirm import)`);
-    if (!selected.has(`${card.source_name}:${card.source_line}`)) toggleCard(card);
   }
 
   function appendEvidence(card: EvidenceCard, target: "next_action" | "decisions") {

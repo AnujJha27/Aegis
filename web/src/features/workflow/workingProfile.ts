@@ -32,10 +32,12 @@ export function validateProfile(candidate: unknown): WorkingProfile {
   if (profile.workflows.length > 5) throw new Error("At most 5 workflows per profile");
   for (const workflow of profile.workflows) {
     if (!workflow || typeof workflow.name !== "string" || !Array.isArray(workflow.steps)) throw new Error("Each workflow needs a name and a steps array");
+    if (workflow.name.includes("\u0000") || byteLen(workflow.name) > 500) throw new Error("Workflow name must be at most 500 UTF-8 bytes with no NUL characters");
     if (workflow.steps.length > 10) throw new Error(`Workflow "${workflow.name}" has more than 10 steps`);
     for (const step of workflow.steps) {
       for (const key of ["purpose", "context", "agent", "result", "evidenceNeeded"] as const) {
         if (typeof step?.[key] !== "string") throw new Error(`Workflow "${workflow.name}" step field ${key} must be a string`);
+        if (step[key].includes("\u0000")) throw new Error(`Workflow "${workflow.name}" step field ${key} must not contain NUL characters`);
         if (byteLen(step[key]) > 500) throw new Error(`Workflow "${workflow.name}" step field ${key} exceeds 500 UTF-8 bytes`);
       }
     }
@@ -81,7 +83,7 @@ export function clipUtf8(value: string, maxBytes: number, marker = "\n[truncated
 export function formatProfile(instructions: ProfileInstruction[]): string {
   if (!instructions.length) return "";
   return [
-    "Working style profile (user-owned; saved in this browser's local storage only):",
+    "Working style profile (user-owned; saved locally in the Aegis daemon):",
     ...instructions.map((instruction) => `- ${instruction.text} (source: ${instruction.source})`),
     "These are user guidance only; normal permissions and approvals still apply.",
   ].join("\n");
