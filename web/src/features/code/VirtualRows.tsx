@@ -25,7 +25,9 @@ export function VirtualRows({ count, width, identity, renderRow, jump = 0, copy,
     if (jump && viewport.current) { viewport.current.scrollTop = Math.max(0, jump - 1) * 22; setCurrent(jump - 1); update(); }
   }, [jump]);
   const rows = [];
-  for (let i = window.first; i < window.end; i++) rows.push(<div key={i} data-row={i} className={`virtual-row ${i === current ? "current" : ""}`} style={{ height: 22 }} onMouseDown={(event) => {
+  const safeFirst = Math.max(0, Math.min(window.first, count));
+  const safeEnd = Math.max(safeFirst, Math.min(window.end, count));
+  for (let i = safeFirst; i < safeEnd; i++) rows.push(<div key={i} data-row={i} className={`virtual-row ${i === current ? "current" : ""}`} style={{ height: 22 }} onMouseDown={(event) => {
     selectAll.current = false;
     if (event.shiftKey && selectedRange.current) selectedRange.current.end = i;
     else selectedRange.current = { anchor: i, end: i };

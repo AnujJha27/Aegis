@@ -114,3 +114,19 @@ dialog[aria-label="Continue with another agent"]::backdrop { background: rgba(4,
 .working-profile button, .import-conversation button { padding: 7px 10px; border: 1px solid #344154; border-radius: 6px; background: #18202c; color: #c8d4e3; font-size: 12px; cursor: pointer; }
 .working-profile button:hover:not(:disabled), .import-conversation button:hover:not(:disabled) { border-color: #6c8eb2; background: #202b3a; }
 .working-profile button:disabled, .import-conversation button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Import details accordion */
+.import-details { padding: 12px; margin: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.import-details[open] { border-color: #3a5578; }
+.import-details summary { clear: both; padding: 8px 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.import-details > .import-conversation,
+.import-details > .task-bundle { display: grid; gap: 10px; padding-top: 10px; }
+.import-details input[type="file"] { width: 100%; min-width: 0; font-size: 11px; color: var(--muted); }
+.import-details input[type="file"]::file-selector-button { margin-right: 8px; padding: 6px 10px; border: 1px solid #344154; border-radius: 6px; background: #18202c; color: #c8d4e3; font-size: 11px; cursor: pointer; }
+.import-details input[type="file"]::file-selector-button:hover { border-color: #6c8eb2; background: #202b3a; }
+.import-details button { padding: 8px 12px; border: 1px solid #344154; border-radius: 6px; background: #18202c; color: #c8d4e3; cursor: pointer; }
+.import-details button:hover:not(:disabled) { border-color: #6c8eb2; background: #202b3a; }
+.import-details .muted { overflow-wrap: anywhere; }
+.import-details > .import-conversation,
+.import-details > .task-bundle { max-height: 45vh; overflow: auto; }
+.task-rail { min-height: 0; overflow-y: auto; }

@@ -48,3 +48,9 @@ button, select, textarea, .task-item, .file-row, .review-side-section, .code-too
 .code-editor .monaco-editor .margin, .code-editor .monaco-editor-background { background-color: #0a0c0f !important; }
 .monaco-editor .scroll-decoration { box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+.app-shell { height: 100dvh; overflow: hidden; }
+.workspace, .session { min-height: 0; }
+.output-surface { min-height: 0; flex: 1; overflow-y: auto; padding: clamp(16px, 3vw, 32px); }
+.session .event-card { max-width: 900px; margin: 0 auto 14px; padding: 18px 20px; border-radius: 10px; background: #141a22; border: 1px solid #29333f; }
+.session .event-card pre { font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.65; }
+.session .event-meta { font-size: 10px; letter-spacing: .04em; }
