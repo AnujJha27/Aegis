@@ -338,6 +338,42 @@ int main() {
         assert(saved.has_value() && saved->first == expectedPayload);
         assert(saved->second.has_value() && *saved->second == firstRunId);
     }
+
+    // Receipt endpoint: GET /api/tasks/:taskId/continuations/:requestId
+    {
+        const auto runsBeforeReceipt = store.runs(task.id).size();
+        const auto firstRunId = *store.continuation(idemKey)->second;
+        const auto receipt = api::handle(
+            req(http::verb::get, "/api/tasks/" + task.id + "/continuations/" + idemKey, Json::object()), context);
+        assert(receipt.result() == http::status::ok);
+        const Json receiptBody = Json::parse(receipt.body());
+        assert(receiptBody.at("request_id") == idemKey);
+        assert(receiptBody.at("task_id") == task.id);
+        assert(receiptBody.at("state") == "delivered");
+        assert(receiptBody.at("run_id") == firstRunId);
+        const auto receiptRun = store.run(firstRunId);
+        assert(receiptRun.has_value());
+        assert(Json::parse(receiptBody.at("payload").get<std::string>()).at("prompt") == payload);
+
+        // Wrong task id must not leak the receipt.
+        const auto wrongTask = api::handle(
+            req(http::verb::get, "/api/tasks/" + fresh.id + "/continuations/" + idemKey, Json::object()), context);
+        assert(wrongTask.result() == http::status::not_found);
+
+        // Unknown request id.
+        const auto unknown = api::handle(
+            req(http::verb::get, "/api/tasks/" + task.id + "/continuations/no-such-request-id", Json::object()), context);
+        assert(unknown.result() == http::status::not_found);
+
+        // Legacy reserved/pending receipt: delivery state is uncertain, so only
+        // require that the lookup never launches another run.
+        api::handle(
+            req(http::verb::get, "/api/tasks/" + task.id + "/continuations/idem-pending-1", Json::object()), context);
+        api::handle(
+            req(http::verb::get, "/api/tasks/" + task.id + "/continuations/seeded-pending", Json::object()), context);
+
+        assert(store.runs(task.id).size() == runsBeforeReceipt);
+    }
     {
         const std::string pendingKey = "idem-pending-1";
         assert(store.reserveContinuation(pendingKey, "seeded-pending"));

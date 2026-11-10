@@ -43,6 +43,21 @@ inline std::optional<std::string> pathId(const std::string &target, const std::s
     return id.empty() || id.find('/') != std::string::npos ? std::nullopt : std::optional{id};
 }
 
+inline std::optional<std::pair<std::string, std::string>> continuationPathIds(const std::string &target) {
+    constexpr std::string_view prefix = "/api/tasks/";
+    constexpr std::string_view middle = "/continuations/";
+    const auto path = target.substr(0, target.find('?'));
+    if (!path.starts_with(prefix)) return std::nullopt;
+    const auto middlePos = path.find(middle, prefix.size());
+    if (middlePos == std::string::npos) return std::nullopt;
+    const auto taskId = path.substr(prefix.size(), middlePos - prefix.size());
+    const auto requestId = path.substr(middlePos + middle.size());
+    if (taskId.empty() || requestId.empty()) return std::nullopt;
+    if (taskId.find('/') != std::string::npos || requestId.find('/') != std::string::npos) return std::nullopt;
+    if (requestId.find('%') != std::string::npos || requestId.find('?') != std::string::npos) return std::nullopt;
+    return std::optional{std::pair{taskId, requestId}};
+}
+
 inline std::optional<std::string> runPathId(const std::string &target, const std::string &suffix) {
     constexpr std::string_view prefix = "/api/runs/";
     const auto path = target.substr(0, target.find('?'));

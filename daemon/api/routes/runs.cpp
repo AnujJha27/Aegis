@@ -39,6 +39,38 @@ std::optional<Response> runs(const Request &request, const Context &context) {
             }
             return jsonResponse(boost::beast::http::status::ok, result);
         }
+        if (const auto ids = continuationPathIds(target)) {
+            const auto &taskId = ids->first;
+            const auto &requestId = ids->second;
+            const auto task = context.store->task(taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(task->repository, context.repository))
+                return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            const auto saved = context.store->continuation(requestId);
+            if (!saved) return error(boost::beast::http::status::not_found, "request_not_found", "continuation request not found");
+            nlohmann::json payload;
+            try {
+                payload = nlohmann::json::parse(saved->first);
+            } catch (const nlohmann::json::exception &) {
+                return error(boost::beast::http::status::not_found, "request_not_found", "continuation request not found");
+            }
+            if (!payload.is_object() || !payload.contains("task_id") || !payload["task_id"].is_string() ||
+                payload["task_id"].get<std::string>() != taskId)
+                return error(boost::beast::http::status::not_found, "request_not_found", "continuation request not found");
+            std::string state = "uncertain";
+            std::optional<std::string> runId;
+            if (saved->second) {
+                const auto run = context.store->run(*saved->second);
+                if (run && run->taskId == taskId) {
+                    state = "delivered";
+                    runId = *saved->second;
+                }
+            }
+            nlohmann::json result{{"request_id", requestId}, {"task_id", taskId}, {"state", state},
+                                  {"run_id", runId ? nlohmann::json(*runId) : nlohmann::json(nullptr)},
+                                  {"payload", saved->first}};
+            return jsonResponse(boost::beast::http::status::ok, result);
+        }
     }
     if (method == boost::beast::http::verb::delete_) {
         const auto runId = runPathId(target, "");
