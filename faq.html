@@ -1063,7 +1063,7 @@
         });
         const j = await r.json();
         if (j.ok) {
-          note.textContent = (j.duplicate ? "ALREADY ON THE LIST — YOU'RE #" : "YOU'RE #") + j.position + " · WE'LL EMAIL YOU AT LAUNCH";
+          note.textContent = (j.duplicate ? "ALREADY ON THE LIST · WE'LL EMAIL AT LAUNCH" : "YOU'RE ON THE LIST · WE'LL EMAIL AT LAUNCH");
           note.classList.add("ok");
           wlForm.reset();
         } else {
