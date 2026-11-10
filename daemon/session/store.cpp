@@ -54,6 +54,7 @@ ReviewFinding readFinding(sqlite3_stmt *statement) {
     result.updatedAt = sqlite3_column_int64(statement, 9);
     if (sqlite3_column_type(statement, 10) != SQLITE_NULL) result.repositoryFingerprint = columnText(statement, 10);
     result.freshness = "unknown";
+    if (sqlite3_column_type(statement, 11) != SQLITE_NULL) result.dispositionReason = columnText(statement, 11);
     return result;
 }
 
@@ -127,7 +128,7 @@ Store::Store(const std::filesystem::path &path) {
             execute("ALTER TABLE runs ADD COLUMN external_session_id TEXT;");
         execute("CREATE TABLE IF NOT EXISTS verifications (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, command_json TEXT NOT NULL, exit_code INTEGER NOT NULL, output TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER NOT NULL);");
         execute("CREATE INDEX IF NOT EXISTS verifications_task_finished ON verifications(task_id, finished_at DESC);");
-        execute("CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line));");
+        execute("CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'not_applicable')), repository_fingerprint TEXT, disposition_reason TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line), CHECK(status != 'not_applicable' OR disposition_reason IS NOT NULL));");
         execute("CREATE INDEX IF NOT EXISTS findings_task_created ON findings(task_id, created_at DESC);");
         execute("UPDATE runs SET status = 'interrupted', finished_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) WHERE status IN ('starting', 'running') AND finished_at = 0;");
         if (previousVersion < 3) execute("PRAGMA user_version = 3;");
@@ -200,6 +201,21 @@ Store::Store(const std::filesystem::path &path) {
                 execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
                 execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('store_origin', lower(hex(randomblob(16))));");
                 execute("PRAGMA user_version = 14;");
+                execute("COMMIT;");
+            } catch (...) {
+                execute("ROLLBACK;");
+                throw;
+            }
+        }
+        if (previousVersion < 15) {
+            execute("BEGIN IMMEDIATE;");
+            try {
+                execute("ALTER TABLE findings RENAME TO findings_legacy;");
+                execute("CREATE TABLE findings (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, file_path TEXT NOT NULL, start_line INTEGER, end_line INTEGER, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'not_applicable')), repository_fingerprint TEXT, disposition_reason TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK(start_line IS NULL OR start_line > 0), CHECK(end_line IS NULL OR end_line > 0), CHECK(start_line IS NULL OR end_line IS NULL OR end_line >= start_line), CHECK(status != 'not_applicable' OR disposition_reason IS NOT NULL));");
+                execute("INSERT INTO findings (id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint) SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint FROM findings_legacy;");
+                execute("DROP TABLE findings_legacy;");
+                execute("CREATE INDEX IF NOT EXISTS findings_task_created ON findings(task_id, created_at DESC);");
+                execute("PRAGMA user_version = 15;");
                 execute("COMMIT;");
             } catch (...) {
                 execute("ROLLBACK;");
@@ -445,13 +461,21 @@ std::optional<Task> Store::updateTaskContext(const std::string &taskId, const Ta
     }
 }
 
-bool Store::updateFindingStatus(const std::string &findingId, const std::string &status) {
-    if (status != "open" && status != "resolved") return false;
+bool Store::updateFindingStatus(const std::string &findingId, const std::string &status,
+                                std::optional<std::string> reason) {
+    if (status != "open" && status != "resolved" && status != "not_applicable") return false;
+    if (status == "not_applicable") {
+        if (!reason || reason->empty() || reason->size() > 2000 || reason->find('\0') != std::string::npos) return false;
+    } else if (reason) {
+        return false;
+    }
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "UPDATE findings SET status = ?, updated_at = ? WHERE id = ?");
+    Statement statement(database_, "UPDATE findings SET status = ?, disposition_reason = ?, updated_at = ? WHERE id = ?");
     check(sqlite3_bind_text(statement.get(), 1, status.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding status");
-    check(sqlite3_bind_int64(statement.get(), 2, now()), database_, "bind finding timestamp");
-    check(sqlite3_bind_text(statement.get(), 3, findingId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding id");
+    if (reason) check(sqlite3_bind_text(statement.get(), 2, reason->c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding disposition reason");
+    else check(sqlite3_bind_null(statement.get(), 2), database_, "bind finding disposition reason");
+    check(sqlite3_bind_int64(statement.get(), 3, now()), database_, "bind finding timestamp");
+    check(sqlite3_bind_text(statement.get(), 4, findingId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding id");
     check(sqlite3_step(statement.get()), database_, "update finding status");
     return sqlite3_changes(database_) != 0;
 }
@@ -516,7 +540,7 @@ std::vector<VerificationRun> Store::verifications(const std::string &taskId, std
 
 std::vector<ReviewFinding> Store::findings(const std::string &taskId, std::size_t limit) const {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint FROM findings WHERE task_id = ? ORDER BY status = 'resolved', created_at DESC LIMIT ?");
+    Statement statement(database_, "SELECT id, task_id, run_id, file_path, start_line, end_line, message, status, created_at, updated_at, repository_fingerprint, disposition_reason FROM findings WHERE task_id = ? ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC LIMIT ?");
     check(sqlite3_bind_text(statement.get(), 1, taskId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind finding task");
     check(sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit)), database_, "bind finding limit");
     std::vector<ReviewFinding> result;

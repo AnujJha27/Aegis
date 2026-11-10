@@ -65,6 +65,22 @@ int main() {
         assert(ordered.front().id == fingerprinted.id && ordered.front().status == "open");
         assert(ordered.back().id == finding.id && ordered.back().status == "resolved");
 
+        assert(!store.updateFindingStatus(finding.id, "not_applicable"));
+        assert(!store.updateFindingStatus(finding.id, "not_applicable", std::string(2001, 'x')));
+        assert(!store.updateFindingStatus(finding.id, "not_applicable", std::string("embedded\0reason", 14)));
+        assert(!store.updateFindingStatus(finding.id, "resolved", "reason is only valid for not_applicable"));
+        assert(store.updateFindingStatus(finding.id, "not_applicable", "Superseded by the streaming parser."));
+        const auto dispositioned = store.findings(task.id);
+        assert(dispositioned.size() == 2);
+        assert(dispositioned.front().id == fingerprinted.id && dispositioned.front().status == "open");
+        assert(dispositioned.back().id == finding.id && dispositioned.back().status == "not_applicable");
+        assert(dispositioned.back().dispositionReason == "Superseded by the streaming parser.");
+        assert(store.updateFindingStatus(finding.id, "open"));
+        const auto reopened = store.findings(task.id);
+        assert(reopened.back().id == finding.id && reopened.back().status == "open");
+        assert(!reopened.back().dispositionReason);
+        assert(store.updateFindingStatus(finding.id, "resolved"));
+
         assert(store.updateRunStatus(run.id, "completed"));
         for (const auto *state : {"failed", "interrupted", "terminated"}) {
             const auto terminalRun = store.startRun(task.id, "codex");

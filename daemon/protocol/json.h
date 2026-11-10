@@ -79,7 +79,8 @@ inline nlohmann::json toJson(const ReviewFinding &finding) {
             {"message", finding.message}, {"status", finding.status},
             {"created_at", finding.createdAt}, {"updated_at", finding.updatedAt},
             {"repository_fingerprint", finding.repositoryFingerprint ? nlohmann::json(*finding.repositoryFingerprint) : nlohmann::json(nullptr)},
-            {"freshness", finding.freshness}};
+            {"freshness", finding.freshness},
+            {"disposition_reason", finding.dispositionReason ? nlohmann::json(*finding.dispositionReason) : nlohmann::json(nullptr)}};
 }
 
 inline nlohmann::json toJson(const HandoffContext &context) {

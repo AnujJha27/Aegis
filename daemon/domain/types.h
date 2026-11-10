@@ -108,6 +108,7 @@ struct ReviewFinding {
     std::int64_t updatedAt = 0;
     std::optional<std::string> repositoryFingerprint = std::nullopt;
     std::string freshness = "unknown";
+    std::optional<std::string> dispositionReason = std::nullopt;
 };
 
 struct HandoffContext {

@@ -68,3 +68,35 @@ it("does not clear a pending task1 send result into task2 state", async () => {
   expect(screen.queryByRole("checkbox", { name: "Select finding f1" })).toBeNull();
   expect(api.updateFindingStatus).not.toHaveBeenCalled();
 });
+
+it("marks an open finding not applicable with a required explanation", async () => {
+  const view = render(<ReviewFindings taskId="task1" activeRun={run1} activeRunId="run1" filePath="a.ts" />);
+  await screen.findByText("Fix the bug");
+  fireEvent.click(screen.getByRole("button", { name: "Mark finding not applicable" }));
+  const confirm = screen.getByRole("button", { name: "Confirm not applicable" }) as HTMLButtonElement;
+  expect(confirm.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Not applicable explanation"), { target: { value: "Handled upstream" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm not applicable" }));
+  await waitFor(() => expect(api.updateFindingStatus).toHaveBeenCalledWith("f1", "not_applicable", "Handled upstream"));
+  await screen.findByText("Not applicable: Handled upstream");
+  expect(view.container.querySelector("li.not_applicable")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Confirm not applicable" })).toBeNull();
+});
+
+it("blocks an empty not applicable explanation", async () => {
+  render(<ReviewFindings taskId="task1" activeRun={run1} activeRunId="run1" filePath="a.ts" />);
+  await screen.findByText("Fix the bug");
+  fireEvent.click(screen.getByRole("button", { name: "Mark finding not applicable" }));
+  fireEvent.change(screen.getByLabelText("Not applicable explanation"), { target: { value: "   " } });
+  expect((screen.getByRole("button", { name: "Confirm not applicable" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.updateFindingStatus).not.toHaveBeenCalled();
+});
+
+it("shows the recorded explanation and reopens a not applicable finding", async () => {
+  vi.spyOn(api, "findings").mockResolvedValue([{ ...f1, status: "not_applicable", disposition_reason: "Handled upstream" }]);
+  const view = render(<ReviewFindings taskId="task1" activeRun={run1} activeRunId="run1" filePath="a.ts" />);
+  await screen.findByText("Not applicable: Handled upstream");
+  fireEvent.click(screen.getByRole("button", { name: "Reopen finding" }));
+  await waitFor(() => expect(api.updateFindingStatus).toHaveBeenCalledWith("f1", "open"));
+  await waitFor(() => expect(view.container.querySelector("li.not_applicable")).toBeNull());
+});

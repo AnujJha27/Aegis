@@ -174,11 +174,24 @@ std::optional<Response> findings(const Request &request, const Context &context)
         try {
             const auto body = nlohmann::json::parse(request.body());
             if (!body.is_object() || !body.contains("status") || !body.at("status").is_string())
-                return error(boost::beast::http::status::bad_request, "invalid_status", "status must be open or resolved");
+                return error(boost::beast::http::status::bad_request, "invalid_status", "status must be open, resolved, or not_applicable");
             const auto status = body.at("status").get<std::string>();
-            if (status != "open" && status != "resolved")
-                return error(boost::beast::http::status::bad_request, "invalid_status", "status must be open or resolved");
-            if (!context.store->updateFindingStatus(*id, status))
+            if (status != "open" && status != "resolved" && status != "not_applicable")
+                return error(boost::beast::http::status::bad_request, "invalid_status", "status must be open, resolved, or not_applicable");
+            std::optional<std::string> reason;
+            if (body.contains("reason") && !body.at("reason").is_null()) {
+                if (!body.at("reason").is_string())
+                    return error(boost::beast::http::status::bad_request, "invalid_reason", "reason must be a string");
+                reason = body.at("reason").get<std::string>();
+                if (reason->empty() || reason->size() > 2000 || reason->find('\0') != std::string::npos ||
+                    std::all_of(reason->begin(), reason->end(), [](unsigned char c) { return std::isspace(c); }))
+                    return error(boost::beast::http::status::bad_request, "invalid_reason", "reason must contain 1 to 2000 non-whitespace bytes without NUL characters");
+            }
+            if (status == "not_applicable" && !reason)
+                return error(boost::beast::http::status::bad_request, "invalid_reason", "not_applicable requires a reason explaining why the finding no longer applies");
+            if (status != "not_applicable" && reason)
+                return error(boost::beast::http::status::bad_request, "invalid_reason", "reason is only valid when marking a finding not applicable");
+            if (!context.store->updateFindingStatus(*id, status, reason))
                 return error(boost::beast::http::status::not_found, "finding_not_found", "review finding not found");
             return jsonResponse(boost::beast::http::status::ok, {{"id", *id}, {"status", status}});
         } catch (const nlohmann::json::exception &) {

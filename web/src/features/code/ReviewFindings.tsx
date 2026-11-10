@@ -46,6 +46,8 @@ export function ReviewFindings({ taskId, activeRun, activeRunId, filePath }: { t
   const [preview, setPreview] = useState<{ prompt: string; runId: string; taskId: string } | null>(null);
   const [sendError, setSendError] = useState("");
   const [sending, setSending] = useState(false);
+  const [disposition, setDisposition] = useState<{ id: string; reason: string } | null>(null);
+  const [dispositionSaving, setDispositionSaving] = useState(false);
   const generationRef = useRef(0);
   const taskRef = useRef(taskId);
   const fileRef = useRef(filePath);
@@ -64,6 +66,8 @@ export function ReviewFindings({ taskId, activeRun, activeRunId, filePath }: { t
     setEnd("");
     setSaving(false);
     setSending(false);
+    setDisposition(null);
+    setDispositionSaving(false);
     if (!taskId) { setLoading(false); return; }
     setLoading(true);
     const load = () => {
@@ -141,18 +145,31 @@ export function ReviewFindings({ taskId, activeRun, activeRunId, filePath }: { t
     }
   }
 
-  async function toggleStatus(finding: ReviewFinding) {
-    const status = finding.status === "open" ? "resolved" : "open";
+  async function updateStatus(finding: ReviewFinding, status: ReviewFinding["status"], reason?: string) {
     const gen = generationRef.current;
     const taskAtStart = taskId;
     setError("");
     try {
-      await api.updateFindingStatus(finding.id, status);
+      if (reason === undefined) await api.updateFindingStatus(finding.id, status);
+      else await api.updateFindingStatus(finding.id, status, reason);
       if (generationRef.current !== gen || taskRef.current !== taskAtStart) return;
-      setFindings((current) => current.map((item) => item.id === finding.id ? { ...item, status } : item));
-    } catch (reason) {
+      setFindings((current) => current.map((item) => item.id === finding.id
+        ? { ...item, status, disposition_reason: status === "not_applicable" ? reason ?? null : null }
+        : item));
+    } catch (failure) {
       if (generationRef.current !== gen || taskRef.current !== taskAtStart) return;
-      setError(reason instanceof Error ? reason.message : "Could not update finding");
+      setError(failure instanceof Error ? failure.message : "Could not update finding");
+    }
+  }
+
+  async function markNotApplicable(finding: ReviewFinding) {
+    if (!disposition || disposition.id !== finding.id || !disposition.reason.trim()) return;
+    setDispositionSaving(true);
+    try {
+      await updateStatus(finding, "not_applicable", disposition.reason.trim());
+      setDisposition(null);
+    } finally {
+      setDispositionSaving(false);
     }
   }
 
@@ -223,7 +240,20 @@ export function ReviewFindings({ taskId, activeRun, activeRunId, filePath }: { t
         <p>{finding.message}</p>
       </div>
       <small>{(finding.status === "open" && (!filePath || finding.file_path !== filePath)) && <code className="side-file-path">{finding.file_path} · </code>}{finding.start_line ? `Line ${finding.start_line}${finding.end_line && finding.end_line !== finding.start_line ? `–${finding.end_line}` : ""}` : "File-level note"}{finding.status === "open" ? ` · ${anchorLabel(finding)}` : ""}{finding.run_id ? ` · run ${finding.run_id.slice(0, 8)}` : ""} · {finding.status}</small>
-      <button aria-label={finding.status === "open" ? "Resolve finding" : "Reopen finding"} onClick={() => void toggleStatus(finding)}>{finding.status === "open" ? "Resolve" : "Reopen"}</button>
+      {finding.status === "not_applicable" && finding.disposition_reason && <small>Not applicable: {finding.disposition_reason}</small>}
+      <div className="finding-actions">
+        {finding.status === "open"
+          ? <>
+            <button aria-label="Resolve finding" onClick={() => void updateStatus(finding, "resolved")}>Resolve</button>
+            <button aria-label="Mark finding not applicable" onClick={() => setDisposition({ id: finding.id, reason: "" })}>Not applicable</button>
+          </>
+          : <button aria-label="Reopen finding" onClick={() => void updateStatus(finding, "open")}>Reopen</button>}
+      </div>
+      {disposition?.id === finding.id && <div className="finding-disposition">
+        <input aria-label="Not applicable explanation" value={disposition.reason} maxLength={2000} placeholder="Why does this finding no longer apply?" onChange={(event) => setDisposition({ id: finding.id, reason: event.target.value })} />
+        <button aria-label="Confirm not applicable" disabled={dispositionSaving || !disposition.reason.trim()} onClick={() => void markNotApplicable(finding)}>Confirm</button>
+        <button aria-label="Cancel not applicable" onClick={() => setDisposition(null)}>Cancel</button>
+      </div>}
     </li>)}</ul>
   </section>;
 }

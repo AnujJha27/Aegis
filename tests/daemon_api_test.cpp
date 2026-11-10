@@ -610,6 +610,34 @@ int main() {
     assert(findingResolved.result() == http::status::ok && findingResolved.body().find("resolved") != std::string::npos);
     const auto findingInvalidStatus = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"critical"})");
     assert(findingInvalidStatus.result() == http::status::bad_request);
+    const auto findingMissingReason = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"not_applicable"})");
+    assert(findingMissingReason.result() == http::status::bad_request);
+    assert(nlohmann::json::parse(findingMissingReason.body()).at("error").at("code") == "invalid_reason");
+    const auto findingBlankReason = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"not_applicable","reason":"   "})");
+    assert(findingBlankReason.result() == http::status::bad_request);
+    const auto findingNulReason = request(context, http::verb::patch, "/api/findings/" + findingId,
+        nlohmann::json{{"status", "not_applicable"}, {"reason", std::string("bad\0reason", 10)}}.dump());
+    assert(findingNulReason.result() == http::status::bad_request);
+    const auto findingLongReason = request(context, http::verb::patch, "/api/findings/" + findingId,
+        nlohmann::json{{"status", "not_applicable"}, {"reason", std::string(2001, 'x')}}.dump());
+    assert(findingLongReason.result() == http::status::bad_request);
+    const auto findingStrayReason = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"open","reason":"stray explanation"})");
+    assert(findingStrayReason.result() == http::status::bad_request);
+    const auto findingNotApplicable = request(context, http::verb::patch, "/api/findings/" + findingId,
+        R"({"status":"not_applicable","reason":"Handled by the upstream auth refactor."})");
+    assert(findingNotApplicable.result() == http::status::ok);
+    assert(findingNotApplicable.body().find("not_applicable") != std::string::npos);
+    const auto findingDispositionList = request(context, http::verb::get, "/api/tasks/" + taskId + "/findings");
+    assert(findingDispositionList.result() == http::status::ok);
+    const auto findingDispositionEntries = nlohmann::json::parse(findingDispositionList.body());
+    assert(findingDispositionEntries.size() == 1);
+    assert(findingDispositionEntries[0].at("status") == "not_applicable");
+    assert(findingDispositionEntries[0].at("disposition_reason") == "Handled by the upstream auth refactor.");
+    const auto findingReopened = request(context, http::verb::patch, "/api/findings/" + findingId, R"({"status":"open"})");
+    assert(findingReopened.result() == http::status::ok);
+    const auto findingReopenedList = request(context, http::verb::get, "/api/tasks/" + taskId + "/findings");
+    assert(nlohmann::json::parse(findingReopenedList.body())[0].at("status") == "open");
+    assert(nlohmann::json::parse(findingReopenedList.body())[0].at("disposition_reason").is_null());
     const auto findingInvalidPath = request(context, http::verb::post, "/api/tasks/" + taskId + "/findings",
         R"({"file_path":"../outside.cpp","message":"unsafe reference"})");
     assert(findingInvalidPath.result() == http::status::bad_request);

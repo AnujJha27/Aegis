@@ -98,7 +98,7 @@ export type HandoffContext = {
   context?: TaskContext;
   repository_fingerprint?: string | null;
 };
-export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved"; created_at: number; updated_at: number; repository_fingerprint?: string | null; freshness?: "current" | "stale" | "unknown" };
+export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved" | "not_applicable"; disposition_reason?: string | null; created_at: number; updated_at: number; repository_fingerprint?: string | null; freshness?: "current" | "stale" | "unknown" };
 export type NewReviewFinding = { file_path: string; run_id?: string; start_line?: number; end_line?: number; message: string; source_event_id?: string };
 
 export type GraphNode = { id: string; type: string; label: string };
@@ -169,7 +169,7 @@ export const api = {
   verifications: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/tasks/${taskId}/verifications`)).map(verification),
   findings: (taskId: string) => request<ReviewFinding[]>(`/api/tasks/${encodeURIComponent(taskId)}/findings`),
   createFinding: (taskId: string, finding: NewReviewFinding) => request<ReviewFinding>(`/api/tasks/${encodeURIComponent(taskId)}/findings`, { method: "POST", body: JSON.stringify(finding) }),
-  updateFindingStatus: async (findingId: string, status: ReviewFinding["status"]) => { await request(`/api/findings/${encodeURIComponent(findingId)}`, { method: "PATCH", body: JSON.stringify({ status }) }); },
+  updateFindingStatus: async (findingId: string, status: ReviewFinding["status"], reason?: string) => { await request(`/api/findings/${encodeURIComponent(findingId)}`, { method: "PATCH", body: JSON.stringify(reason === undefined ? { status } : { status, reason }) }); },
   handoff: async (taskId: string) => {
     const context = await request<Omit<HandoffContext, "recent_events" | "verification"> & {
       recent_events: Record<string, unknown>[];

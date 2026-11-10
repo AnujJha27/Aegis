@@ -77,7 +77,7 @@ export function ImportedFinding({ taskId, event }: { taskId: string; event: Agen
 
   return <details className="imported-finding">
     <summary>Imported review finding</summary>
-    <p className="imported-origin">Original source: {parsed.source_origin ?? event.agent || "system"} · task {parsed.source_task_id ?? event.taskId} · event {parsed.source_event_id ?? event.id}</p>
+    <p className="imported-origin">Original source: {parsed.source_origin ?? (event.agent || "system")} · task {parsed.source_task_id ?? event.taskId} · event {parsed.source_event_id ?? event.id}</p>
     <p className="imported-local-ref">Local event reference: task {event.taskId} · event {event.id}</p>
     <p className="imported-location">Source location: {parsed.file_path}{parsed.start_line !== null ? `:${parsed.start_line}${parsed.end_line !== null ? `-${parsed.end_line}` : ""}` : ""}</p>
     <label>File path<input value={filePath} onChange={(e) => setFilePath(e.target.value)} /></label>
