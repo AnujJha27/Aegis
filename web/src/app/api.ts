@@ -71,7 +71,10 @@ export type AgentEvent = {
   agent: string;
   content: string;
   timestamp: number;
+  sequence?: number;
 };
+
+export type EventPage = { events: AgentEvent[]; next_cursor: number | null; has_more: boolean };
 
 export type VerificationRun = {
   id: string;
@@ -139,7 +142,7 @@ const normalizeRevision = (value: unknown): number | undefined => {
 };
 const task = (value: Record<string, unknown>): Task => ({ id: String(value.id), prompt: String(value.prompt), repository: String(value.repository), status: String(value.status), createdAt: Number(value.created_at ?? value.createdAt ?? 0), context: normalizeContext(value.context), context_revision: normalizeRevision(value.context_revision) });
 const run = (value: Record<string, unknown>): AgentRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), agent: String(value.agent), status: String(value.status), startedAt: Number(value.started_at ?? value.startedAt ?? 0), finishedAt: Number(value.finished_at ?? value.finishedAt ?? 0), externalSessionId: typeof value.external_session_id === "string" ? value.external_session_id : undefined, model: typeof value.model === "string" ? value.model : undefined, turnStatus: ["turn.started", "turn.completed", "turn.interrupted"].includes(String(value.turn_status)) ? value.turn_status as AgentRun["turnStatus"] : undefined });
-export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0) });
+export const agentEvent = (value: Record<string, unknown>): AgentEvent => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: String(value.run_id ?? value.runId), type: String(value.type), agent: String(value.agent), content: String(value.content ?? ""), timestamp: Number(value.timestamp ?? 0), ...(typeof value.sequence === "number" && Number.isSafeInteger(value.sequence) ? { sequence: value.sequence } : {}) });
 const verification = (value: Record<string, unknown>): VerificationRun => ({ id: String(value.id), taskId: String(value.task_id ?? value.taskId), runId: typeof (value.run_id ?? value.runId) === "string" ? String(value.run_id ?? value.runId) : null, command: Array.isArray(value.command) ? value.command.map(String) : [], exitCode: Number(value.exit_code ?? value.exitCode), output: String(value.output ?? ""), startedAt: Number(value.started_at ?? value.startedAt), finishedAt: Number(value.finished_at ?? value.finishedAt), freshness: ["current", "stale", "unknown"].includes(String(value.freshness)) ? value.freshness as VerificationRun["freshness"] : "unknown", repositoryFingerprint: typeof value.repository_fingerprint === "string" ? value.repository_fingerprint : null });
 
 export const api = {
@@ -149,6 +152,10 @@ export const api = {
   tasks: async () => (await request<Record<string, unknown>[]>("/api/tasks")).map(task),
   agents: () => request<Agent[]>("/api/agents"),
   events: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/events?task_id=${encodeURIComponent(taskId)}`)).map(agentEvent),
+  eventsBefore: async (taskId: string, beforeSequence: number, limit = 100) => {
+    const page = await request<{ events: Record<string, unknown>[]; next_cursor: number | null; has_more: boolean }>(`/api/events?task_id=${encodeURIComponent(taskId)}&before_sequence=${encodeURIComponent(String(beforeSequence))}&limit=${encodeURIComponent(String(limit))}`);
+    return { events: page.events.map(agentEvent), next_cursor: typeof page.next_cursor === "number" && Number.isSafeInteger(page.next_cursor) ? page.next_cursor : null, has_more: page.has_more === true } as EventPage;
+  },
   changes: () => request<{ diff: string }>("/api/changes"),
   files: (path = "", scope: "changed" | "all" = "changed", recursive = false, includeChanges = true, offset = 0) => request<{ entries: FileEntry[]; truncated: boolean; indexing?: boolean; version?: number; next_offset?: number | null }>(`/api/files?scope=${scope}&recursive=${recursive ? "1" : "0"}${includeChanges ? "" : "&include_changes=0"}${offset ? `&offset=${offset}` : ""}${path ? `&path=${encodeURIComponent(path)}` : ""}`),
   quickOpen: (query: string, signal?: AbortSignal) => request<{ entries: FileEntry[]; version: number; indexing: boolean; elapsed_us: number; error?: string }>(`/api/files/quick-open?q=${encodeURIComponent(query)}`, { signal }),

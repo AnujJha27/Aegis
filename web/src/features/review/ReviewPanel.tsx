@@ -3,6 +3,7 @@ import { CodeWorkspace } from "../code/CodeWorkspace";
 import { GraphView } from "./GraphView";
 import { HandoffPanel } from "./HandoffPanel";
 import { ProvenancePanel } from "./ProvenancePanel";
+import OlderEventHistory from "./OlderEventHistory";
 
 type Props = { view: "review" | "graphs" | "activity"; taskId?: string; activeRun?: AgentRun; activeRunId?: string; taskPrompt?: string; events: AgentEvent[]; graph?: TaskGraph; provenance: ProvenanceRecord[]; handoff?: HandoffContext; gitChanges: GitChange[]; gitStatus?: GitStatus; onGitChanged: () => Promise<void>; verification?: VerificationRun; verificationRunning: boolean; onVerify: (command?: string[]) => void; openFilePath?: string; openFileToken?: number; onOpenFile: (path: string) => void };
 
@@ -13,6 +14,7 @@ export function ReviewPanel(props: Props) {
       {props.events.filter((event) => event.type === "file.changed" && event.content.trim()).map((event) => <button key={event.id} onClick={() => props.onOpenFile(event.content.trim())}><span>{event.content.trim()}</span><small>{event.agent} · run {event.runId.slice(0, 8)} · Open diff ↗</small></button>)}
       {!props.events.some((event) => event.type === "file.changed" && event.content.trim()) && <p className="muted">No file-change events recorded for this task.</p>}
     </section>
+    {props.taskId && props.events.length === 500 && <OlderEventHistory key={props.taskId} taskId={props.taskId} beforeSequence={(() => { const seqs = props.events.map((event) => event.sequence).filter((seq): seq is number => typeof seq === "number" && Number.isSafeInteger(seq)); return seqs.length === props.events.length ? Math.min(...seqs) : undefined; })()} />}
     <ProvenancePanel records={props.provenance} />
     <details className="activity-handoff"><summary>Handoff context</summary><HandoffPanel context={props.handoff} /></details>
   </section>;
