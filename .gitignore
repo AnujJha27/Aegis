@@ -12,6 +12,10 @@
 /.frontend.md
 /.aegis-git/
 /.superpowers/
+/.local-plans/
+/.opencode/
+/.superdesign/
+/design-preview.html
 waitlist.db
 waitlist.db-wal
 waitlist.db-shm
