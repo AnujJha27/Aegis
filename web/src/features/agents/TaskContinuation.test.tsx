@@ -7,7 +7,7 @@ import { TaskContinuation } from "./TaskContinuation";
 import { profileStorageKey, saveProfile } from "../workflow/workingProfile";
 
 vi.mock("../../app/api", () => ({
-  api: { updateTaskContext: vi.fn(), handoff: vi.fn(), continueTask: vi.fn() },
+  api: { updateTaskContext: vi.fn(), handoff: vi.fn(), continueTask: vi.fn(), workingProfile: vi.fn(), saveWorkingProfile: vi.fn(), continuationReceipt: vi.fn(), runs: vi.fn() },
 }));
 
 const apiMock = vi.mocked(api, true);
@@ -76,6 +76,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.handoff.mockResolvedValue(handoffContext);
   apiMock.continueTask.mockResolvedValue(continuedRun);
+  apiMock.workingProfile.mockResolvedValue({ version: 1, revision: 1, instructions: [], workflows: [] } as never);
+  apiMock.saveWorkingProfile.mockResolvedValue({ version: 1, revision: 2, instructions: [], workflows: [] } as never);
   apiMock.updateTaskContext.mockImplementation(async (taskId: string, context: Task["context"], expectedRevision = 0) => ({ ...task, id: taskId, context, context_revision: expectedRevision + 1 }) as never);
 });
 
@@ -213,12 +215,13 @@ describe("TaskContinuation", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue with another agent/i }));
     const dialog = await screen.findByRole("dialog", { name: "Continue with another agent" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue task" }));
-    expect(await screen.findByText("continue failed")).toBeTruthy();
-    expect(apiMock.continueTask).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiMock.continueTask).toHaveBeenCalledTimes(1));
     const firstRequestId = apiMock.continueTask.mock.calls[0][4] as string;
     expect(typeof firstRequestId).toBe("string");
+    await screen.findByRole("region", { name: "Pending handoff recovery" });
+    expect(screen.queryByRole("dialog", { name: "Continue with another agent" })).toBeNull();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry same request" }));
     await waitFor(() => expect(apiMock.continueTask).toHaveBeenCalledTimes(2));
     expect(apiMock.continueTask.mock.calls[1][4]).toBe(firstRequestId);
     await waitFor(() => expect(onContinued).toHaveBeenCalledWith(continuedRun, "run-1"));
@@ -457,6 +460,7 @@ describe("TaskContinuation", () => {
     fireEvent.change(screen.getByLabelText("Constraints"), { target: { value: "unsavedconstraint" } });
 
     fireEvent.click(screen.getByText("Working style"));
+    fireEvent.click(await screen.findByRole("button", { name: "Import browser profile" }));
     const details = screen.getByText("Working style").closest("details") as HTMLElement;
     fireEvent.click(within(details).getByText("Reusable workflows"));
     const nested = within(details).getByText("Reusable workflows").closest("details") as HTMLElement;

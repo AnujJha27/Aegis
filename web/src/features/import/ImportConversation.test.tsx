@@ -38,6 +38,8 @@ describe("ImportConversation", () => {
   it("does not retain a profile after parse until Retain is clicked", async () => {
     localStorage.clear();
     vi.spyOn(api, "importCodex").mockResolvedValue({ id: "task-new" } as never);
+    vi.spyOn(api, "workingProfile").mockResolvedValue({ version: 1, revision: 1, instructions: [], workflows: [] } as never);
+    const saveProfile = vi.spyOn(api, "saveWorkingProfile").mockResolvedValue({ version: 1, revision: 2, instructions: [], workflows: [] } as never);
     render(<ImportConversation repository="/repo" />);
     const input = screen.getByLabelText("Codex JSONL log file") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [fakeFile()] } });
@@ -46,10 +48,14 @@ describe("ImportConversation", () => {
     expect(localStorage.getItem(key)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Retain as working instruction" }));
-    const stored = localStorage.getItem(key) ?? "";
-    expect(stored).toContain("s1");
-    expect(stored).toContain("log.jsonl:2");
-    expect(stored).toContain("Do the thing");
+    await screen.findByText("Retained as working instruction", { exact: false });
+    expect(saveProfile).toHaveBeenCalledTimes(1);
+    const saved = saveProfile.mock.calls[0][0];
+    expect(saved.instructions).toHaveLength(1);
+    expect(saved.instructions[0].text).toBe("Do the thing");
+    expect(saved.instructions[0].source).toContain("s1");
+    expect(saved.instructions[0].source).toContain("log.jsonl:2");
+    expect(localStorage.getItem(key)).toBeNull();
     localStorage.clear();
   });
 });
