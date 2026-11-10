@@ -12,3 +12,10 @@
 /.frontend.md
 /.aegis-git/
 /.superpowers/
+waitlist.db
+waitlist.db-wal
+waitlist.db-shm
+__pycache__/
+node_modules/
+/.netlify/
+/site-dist/

@@ -1,0 +1,11 @@
+{
+  "name": "aegis-landing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-landing.mjs"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^7.0.0"
+  }
+}
