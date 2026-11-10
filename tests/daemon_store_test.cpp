@@ -310,6 +310,41 @@ int main() {
         }
     }
 
+    {
+        const auto workingPath = fixtureDirectory / "working-profile.sqlite";
+        const auto profile = nlohmann::json{{"version", 1}, {"instructions", nlohmann::json::array()}, {"workflows", nlohmann::json::array()}}.dump();
+        {
+            aegis::daemon::Store store(workingPath);
+            const auto initial = store.workingProfile("/repo-a");
+            assert(initial.second == 0);
+            const auto parsedInitial = nlohmann::json::parse(initial.first);
+            assert(parsedInitial.at("version") == 1 && parsedInitial.at("instructions").is_array() &&
+                   parsedInitial.at("workflows").is_array());
+            const auto first = store.saveWorkingProfile("/repo-a", profile, 0);
+            assert(first && *first == 1);
+            assert(!store.saveWorkingProfile("/repo-a", profile, 0));
+            const auto afterConflict = store.workingProfile("/repo-a");
+            assert(afterConflict.second == 1 && afterConflict.first == initial.first);
+            const auto second = store.saveWorkingProfile("/repo-a", profile, 1);
+            assert(second && *second == 2);
+            const auto independent = store.workingProfile("/repo-b");
+            assert(independent.second == 0 && independent.first == initial.first);
+            bool rejected = false;
+            try {
+                store.saveWorkingProfile("/repo-a", nlohmann::json{{"version", 2}, {"instructions", nlohmann::json::array()}, {"workflows", nlohmann::json::array()}}.dump(), 2);
+            } catch (const std::invalid_argument &) { rejected = true; }
+            assert(rejected);
+        }
+        {
+            aegis::daemon::Store store(workingPath);
+            const auto persisted = store.workingProfile("/repo-a");
+            assert(persisted.second == 2);
+            const auto bump = store.saveWorkingProfile("/repo-a", profile, 2);
+            assert(bump && *bump == 3);
+            assert(store.workingProfile("/repo-b").second == 0);
+        }
+    }
+
     std::filesystem::remove_all(fixtureDirectory);
 
     {

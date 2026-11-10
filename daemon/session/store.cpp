@@ -183,6 +183,17 @@ Store::Store(const std::filesystem::path &path) {
             }
         } else if (previousVersion < 12) execute("PRAGMA user_version = 12;");
         execute("UPDATE continuations SET state = 'uncertain' WHERE state IN ('prepared', 'launching');");
+        if (previousVersion < 13) {
+            execute("BEGIN IMMEDIATE;");
+            try {
+                execute("CREATE TABLE IF NOT EXISTS working_profiles (repository TEXT PRIMARY KEY, profile_json TEXT NOT NULL, revision INTEGER NOT NULL);");
+                execute("PRAGMA user_version = 13;");
+                execute("COMMIT;");
+            } catch (...) {
+                execute("ROLLBACK;");
+                throw;
+            }
+        }
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -734,6 +745,72 @@ bool Store::linkContinuation(const std::string &requestId, const std::string &ru
         const bool linked = sqlite3_changes(database_) != 0;
         execute("COMMIT;");
         return linked;
+    } catch (...) {
+        execute("ROLLBACK;");
+        throw;
+    }
+}
+
+std::pair<std::string, std::int64_t> Store::workingProfile(const std::string &repository) const {
+    if (repository.empty() || repository.find('\0') != std::string::npos)
+        throw std::invalid_argument("invalid repository");
+    std::lock_guard lock(mutex_);
+    static const std::string emptyProfile = nlohmann::json{{"version", 1}, {"instructions", nlohmann::json::array()}, {"workflows", nlohmann::json::array()}}.dump();
+    Statement statement(database_, "SELECT profile_json, revision FROM working_profiles WHERE repository = ?");
+    check(sqlite3_bind_text(statement.get(), 1, repository.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile lookup");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) return {emptyProfile, 0};
+    return {columnText(statement.get(), 0), sqlite3_column_int64(statement.get(), 1)};
+}
+
+std::optional<std::int64_t> Store::saveWorkingProfile(const std::string &repository,
+                                                      const std::string &profileJson, std::int64_t expectedRevision) {
+    if (repository.empty() || repository.find('\0') != std::string::npos)
+        throw std::invalid_argument("invalid repository");
+    if (expectedRevision < 0 || expectedRevision > 9007199254740991LL)
+        throw std::invalid_argument("invalid working profile revision");
+    if (profileJson.size() > 8000 || profileJson.find('\0') != std::string::npos)
+        throw std::invalid_argument("invalid working profile");
+    {
+        nlohmann::json parsed;
+        try {
+            parsed = nlohmann::json::parse(profileJson);
+        } catch (const nlohmann::json::exception &) {
+            throw std::invalid_argument("invalid working profile");
+        }
+        if (!parsed.is_object() || !parsed.contains("version") || !parsed.at("version").is_number_integer() ||
+            parsed.at("version") != 1 || !parsed.contains("instructions") || !parsed.at("instructions").is_array() ||
+            !parsed.contains("workflows") || !parsed.at("workflows").is_array())
+            throw std::invalid_argument("invalid working profile");
+    }
+    std::lock_guard lock(mutex_);
+    execute("BEGIN IMMEDIATE;");
+    try {
+        std::int64_t currentRevision = -1;
+        {
+            Statement current(database_, "SELECT revision FROM working_profiles WHERE repository = ?");
+            check(sqlite3_bind_text(current.get(), 1, repository.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile lookup");
+            if (sqlite3_step(current.get()) == SQLITE_ROW) currentRevision = sqlite3_column_int64(current.get(), 0);
+        }
+        const bool exists = currentRevision >= 0;
+        if ((exists && currentRevision != expectedRevision) || (!exists && expectedRevision != 0)) {
+            execute("COMMIT;");
+            return std::nullopt;
+        }
+        if (exists) {
+            Statement statement(database_, "UPDATE working_profiles SET profile_json = ?, revision = revision + 1 WHERE repository = ? AND revision = ?");
+            check(sqlite3_bind_text(statement.get(), 1, profileJson.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile");
+            check(sqlite3_bind_text(statement.get(), 2, repository.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile repository");
+            check(sqlite3_bind_int64(statement.get(), 3, expectedRevision), database_, "bind working profile revision");
+            check(sqlite3_step(statement.get()), database_, "update working profile");
+            execute("COMMIT;");
+            return expectedRevision + 1;
+        }
+        Statement statement(database_, "INSERT INTO working_profiles (repository, profile_json, revision) VALUES (?, ?, 1)");
+        check(sqlite3_bind_text(statement.get(), 1, repository.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile repository");
+        check(sqlite3_bind_text(statement.get(), 2, profileJson.c_str(), -1, SQLITE_TRANSIENT), database_, "bind working profile");
+        check(sqlite3_step(statement.get()), database_, "insert working profile");
+        execute("COMMIT;");
+        return 1;
     } catch (...) {
         execute("ROLLBACK;");
         throw;
