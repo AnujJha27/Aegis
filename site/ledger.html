@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="google" content="notranslate">
-<meta name="description" content="One plane of control for every coding agent: packaged context, review gates, and the five-step handoff pipeline.">
-<title>The control plane — Aegis</title>
+<meta name="description" content="The audit trail: every run, finding, and check your agents record — labeled, timestamped, exportable.">
+<title>The ledger — Aegis</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 32'%3E%3Cpath d='M5 2.5h18l2.5 2.7v9.7c0 7.2-5.6 12.2-11.5 15.1C8.1 27.1 2.5 22.1 2.5 14.9V5.2L5 2.5Z' fill='%235e7891'/%3E%3Cpath d='m14 7 7 16h-4l-3-7.1-3 7.1H7L14 7Z' fill='%23e9ebee'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,7 +127,7 @@
   .colophon .t-node { left: 50%; top: 120px; }
   .chapters .t-node { left: 50%; top: 110px; }
 
-  .ch-head { display: flex; align-items: center; gap: 16px; margin-bottom: 56px; }
+  .ch-head { display: flex; align-items: center; gap: 16px; margin-bottom: 42px; }
   .ch-head .no { font: 400 15px var(--serif); font-style: italic; color: var(--verm-2); }
   .ch-head .nm { font: 500 9.5px var(--mono); letter-spacing: .3em; color: var(--muted); text-transform: uppercase; }
   .ch-head::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(212,87,74,.4), transparent); }
@@ -171,8 +171,6 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,180,84,.4); } 70% { box-shadow: 0 0 0 9px rgba(255,180,84,0); } 100% { box-shadow: 0 0 0 0 rgba(255,180,84,0); } }
   h1 { margin: 26px 0 0; font: 340 clamp(52px, 6.6vw, 96px)/1.04 var(--serif); letter-spacing: -.015em; }
   h1 .it { font-style: italic; color: var(--verm-2); }
-  .hl { display: block; overflow: hidden; padding-bottom: .1em; margin-bottom: -.1em; }
-  .hl span { display: block; transform: translateY(115%); animation: rise .9s var(--ease) forwards; animation-delay: var(--d, 0s); }
   @keyframes rise { to { transform: none; } }
   .hero-sub { margin: 28px 0 0; max-width: 460px; font: 400 15.5px/1.85 var(--mono); color: var(--sub); }
   .hero-ctas { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 38px; }
@@ -439,7 +437,7 @@
   .ph-lead { margin: 22px 0 0; max-width: 580px; font: 400 15px/1.85 var(--mono); color: var(--muted); }
   .gov { padding: 30px 0 90px; }
   .gov-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .gcard, .ex { padding: 26px 26px 24px; border: 1px solid var(--line); border-radius: 6px; background: rgba(21,26,31,.45); transition: border-color .3s ease, transform .35s var(--ease); }
+  .gcard, .ex { padding: 22px 22px 20px; border: 1px solid var(--line); border-radius: 6px; background: rgba(21,26,31,.45); transition: border-color .3s ease, transform .35s var(--ease); }
   .gcard:hover, .ex:hover { transform: translateY(-3px); border-color: rgba(212,87,74,.5); }
   .gcard h3, .ex h3 { margin: 0 0 8px; font: 600 17px var(--sans); letter-spacing: -.01em; }
   .gcard p, .ex p { margin: 0; font-size: 13.5px; line-height: 1.7; color: var(--muted); }
@@ -512,7 +510,7 @@
   .hero .hero-meta { color: rgba(236,231,221,.5); }
   .hero .btn-ghost { border-color: rgba(236,231,221,.25); color: var(--text); background: rgba(12,14,17,.35); backdrop-filter: blur(4px); }
   .hero .btn-ghost:hover { border-color: rgba(236,231,221,.55); background: rgba(12,14,17,.6); }
-  .inksec { position: relative; padding: 140px 0; background: var(--bg); }
+  .inksec { position: relative; padding: 110px 0; background: var(--bg); }
   .panel .ch-head::after { background: linear-gradient(90deg, rgba(212,87,74,.45), transparent); }
   .panel .zsub { color: #b3ada2; }
   .panel { min-height: 72vh; }
@@ -545,7 +543,7 @@
   .hero .hero-sub { color: #c9c4ba; }
   .hero .hero-meta { color: rgba(236,231,221,.5); }
   .hero .btn-ghost { border-color: rgba(236,231,221,.25); background: rgba(12,14,17,.35); backdrop-filter: blur(4px); }
-  .inksec { position: relative; padding: 140px 0; background: var(--bg); }
+  .inksec { position: relative; padding: 110px 0; background: var(--bg); }
   #wl-hp { position: absolute; left: -5000px; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
   .receipt { box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 50px 100px -30px rgba(0,0,0,.85); }
   .r-stamp {
@@ -558,6 +556,17 @@
     transition: transform .45s cubic-bezier(.2, 1.6, .3, 1), opacity .3s ease; transition-delay: 1s;
   }
   .receipt.in .r-stamp { opacity: .95; transform: rotate(7deg) scale(1); }
+
+  .panel-story { min-height: 100vh; display: block; padding: 140px 0 120px; }
+  .panel-story .panel-fade { background: linear-gradient(180deg, rgba(12,14,17,.26) 0%, rgba(12,14,17,0) 30%, rgba(12,14,17,0) 56%, rgba(12,14,17,.3) 78%, rgba(12,14,17,.7) 92%, #0c0e11 100%); }
+  .scrim { position: relative; z-index: 2; max-width: 470px; margin: 170px auto 0; }
+  .scrim::before { content: ""; position: absolute; inset: -80px -130px; background: radial-gradient(ellipse at center, rgba(8,10,13,.8) 0%, rgba(8,10,13,.48) 46%, rgba(8,10,13,0) 73%); pointer-events: none; }
+  .scrim > * { position: relative; z-index: 2; }
+
+  .cap-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 48px; }
+  .cap-list p { margin: 0; padding: 8px 0 8px 20px; position: relative; font-size: 15px; color: var(--sub); }
+  .cap-list p::before { content: ""; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: var(--verm-2); }
+  @media (max-width: 760px) { .cap-list { grid-template-columns: 1fr; } }
 
   .panel-story .scrim.reveal, .panel-story .receipt.reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease) .25s, transform .7s var(--ease) .25s; }
   .panel-story.in .scrim.reveal, .panel-story.in .receipt.reveal { opacity: 1; transform: none; }
@@ -578,17 +587,50 @@
   }
 
   .enso-bg { position: absolute; inset: 0; background: url("art-enso.png") center/contain no-repeat; opacity: .5; filter: invert(1); pointer-events: none; }
+  .panel-story.in .receipt { animation: receiptshake .3s ease 1.42s 1; }
+  @keyframes receiptshake { 0% { translate: 0 0; } 30% { translate: -3px 1px; } 55% { translate: 2px -1px; } 80% { translate: -1px 1px; } 100% { translate: 0 0; } }
+  .panel-story .r-stamp::after { content: ""; position: absolute; inset: -7px; border-radius: 6px; border: 2px solid rgba(212,87,74,.5); opacity: 0; }
+  .panel-story.in .r-stamp::after { animation: splatring .5s ease 1.44s 1; }
+  @keyframes splatring { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.6); } }
+  .panel-story .r-stamp::before { content: ""; position: absolute; right: -24px; top: -6px; width: 5px; height: 5px; border-radius: 50%; background: var(--verm-2); opacity: 0; }
+  .panel-story.in .r-stamp::before { animation: splatdot .45s ease 1.46s 1; }
+  @keyframes splatdot { from { opacity: .9; transform: translate(0,0) scale(1); } to { opacity: 0; transform: translate(14px,-10px) scale(.4); } }
+  .inksec.in .enso-bg, .waitlist-scene.in .enso-bg, .panel-console.in .enso-bg { animation: ensodraw .9s var(--ease) .25s both; }
+  @keyframes ensodraw { from { clip-path: circle(0% at 50% 50%); opacity: .15; transform: rotate(-80deg); } to { clip-path: circle(42% at 50% 50%); opacity: .3; transform: rotate(0deg); } }
+  .wipe { position: fixed; top: 0; bottom: 0; left: -20vw; width: 140vw; z-index: 300; pointer-events: none;
+    background: linear-gradient(90deg, #0c0e11 0%, #10141a 78%, #241513 88%, #6a2a24 97%, #3a1a17 100%);
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 100' preserveAspectRatio='none'><filter id='r'><feTurbulence type='fractalNoise' baseFrequency='.08 .9' numOctaves='2' seed='3'/><feDisplacementMap in='SourceGraphic' scale='3'/></filter><g filter='url(%23r)'><rect x='19' y='0' width='102' height='100'/><rect x='120' y='0.00' width='3.43' height='1.18' rx='0.59' opacity='0.59'/><rect x='5.59' y='0.00' width='14.41' height='1.18' rx='0.59' opacity='0.52'/><rect x='120' y='1.12' width='10.82' height='0.73' rx='0.36' opacity='0.98'/><rect x='5.06' y='1.12' width='14.94' height='0.73' rx='0.36' opacity='0.79'/><rect x='120' y='1.81' width='10.42' height='2.36' rx='1.18' opacity='0.79'/><rect x='5.72' y='1.81' width='14.28' height='2.36' rx='1.18' opacity='0.55'/><rect x='120' y='4.17' width='6.39' height='0.94' rx='0.47' opacity='0.64'/><rect x='15.43' y='4.17' width='4.57' height='0.94' rx='0.47' opacity='0.73'/><rect x='120' y='5.22' width='12.24' height='1.25' rx='0.62' opacity='0.81'/><rect x='12.75' y='5.22' width='7.25' height='1.25' rx='0.62' opacity='0.64'/><rect x='120' y='6.65' width='16.81' height='0.81' rx='0.41' opacity='0.74'/><rect x='17.53' y='6.65' width='2.47' height='0.81' rx='0.41' opacity='0.67'/><rect x='120' y='7.40' width='10.62' height='1.49' rx='0.74' opacity='0.76'/><rect x='17.64' y='7.40' width='2.36' height='1.49' rx='0.74' opacity='0.82'/><rect x='120' y='9.11' width='12.56' height='2.08' rx='1.04' opacity='0.97'/><rect x='14.33' y='9.11' width='5.67' height='2.08' rx='1.04' opacity='0.53'/><rect x='120' y='11.33' width='12.23' height='0.83' rx='0.41' opacity='0.62'/><rect x='7.58' y='11.33' width='12.42' height='0.83' rx='0.41' opacity='0.91'/><rect x='120' y='12.25' width='13.74' height='1.1' rx='0.55' opacity='0.62'/><rect x='10.06' y='12.25' width='9.94' height='1.1' rx='0.55' opacity='0.51'/><rect x='120' y='13.45' width='6.21' height='0.93' rx='0.47' opacity='0.8'/><rect x='1.52' y='13.45' width='18.48' height='0.93' rx='0.47' opacity='0.73'/><rect x='120' y='14.48' width='15.03' height='2.31' rx='1.16' opacity='0.6'/><rect x='5.02' y='14.48' width='14.98' height='2.31' rx='1.16' opacity='0.99'/><rect x='120' y='16.68' width='6.40' height='0.8' rx='0.40' opacity='0.6'/><rect x='8.00' y='16.68' width='12.00' height='0.8' rx='0.40' opacity='0.81'/><rect x='120' y='17.36' width='13.28' height='1.05' rx='0.53' opacity='1.0'/><rect x='6.87' y='17.36' width='13.13' height='1.05' rx='0.53' opacity='0.57'/><rect x='120' y='18.48' width='14.31' height='1.93' rx='0.96' opacity='0.98'/><rect x='6.19' y='18.48' width='13.81' height='1.93' rx='0.96' opacity='0.88'/><rect x='120' y='20.22' width='10.82' height='1.76' rx='0.88' opacity='0.71'/><rect x='14.75' y='20.22' width='5.25' height='1.76' rx='0.88' opacity='0.82'/><rect x='120' y='22.01' width='11.76' height='2.02' rx='1.01' opacity='0.88'/><rect x='14.89' y='22.01' width='5.11' height='2.02' rx='1.01' opacity='0.87'/><rect x='120' y='24.32' width='11.74' height='2.02' rx='1.01' opacity='0.75'/><rect x='12.07' y='24.32' width='7.93' height='2.02' rx='1.01' opacity='0.54'/><rect x='120' y='26.01' width='8.91' height='1.45' rx='0.72' opacity='0.93'/><rect x='6.73' y='26.01' width='13.27' height='1.45' rx='0.72' opacity='0.92'/><rect x='120' y='27.23' width='11.79' height='1.3' rx='0.65' opacity='0.91'/><rect x='13.20' y='27.23' width='6.80' height='1.3' rx='0.65' opacity='0.73'/><rect x='120' y='28.61' width='3.17' height='0.75' rx='0.38' opacity='0.96'/><rect x='17.12' y='28.61' width='2.88' height='0.75' rx='0.38' opacity='0.83'/><rect x='120' y='29.30' width='8.83' height='1.59' rx='0.80' opacity='0.6'/><rect x='3.76' y='29.30' width='16.24' height='1.59' rx='0.80' opacity='0.91'/><rect x='120' y='30.69' width='12.16' height='1.05' rx='0.53' opacity='0.79'/><rect x='17.63' y='30.69' width='2.37' height='1.05' rx='0.53' opacity='0.95'/><rect x='120' y='31.78' width='14.65' height='2.07' rx='1.03' opacity='0.79'/><rect x='17.89' y='31.78' width='2.11' height='2.07' rx='1.03' opacity='0.89'/><rect x='120' y='33.87' width='11.35' height='2.0' rx='1.00' opacity='0.8'/><rect x='14.89' y='33.87' width='5.11' height='2.0' rx='1.00' opacity='0.89'/><rect x='120' y='35.55' width='7.63' height='1.61' rx='0.81' opacity='0.75'/><rect x='11.69' y='35.55' width='8.31' height='1.61' rx='0.81' opacity='0.72'/><rect x='120' y='37.18' width='5.71' height='1.51' rx='0.76' opacity='0.91'/><rect x='16.51' y='37.18' width='3.49' height='1.51' rx='0.76' opacity='0.96'/><rect x='120' y='38.86' width='13.75' height='0.96' rx='0.48' opacity='0.58'/><rect x='17.56' y='38.86' width='2.44' height='0.96' rx='0.48' opacity='0.89'/><rect x='120' y='39.93' width='16.45' height='0.88' rx='0.44' opacity='0.99'/><rect x='12.28' y='39.93' width='7.72' height='0.88' rx='0.44' opacity='0.94'/><rect x='120' y='40.68' width='16.36' height='1.8' rx='0.90' opacity='0.7'/><rect x='16.09' y='40.68' width='3.91' height='1.8' rx='0.90' opacity='0.51'/><rect x='120' y='42.47' width='6.74' height='1.39' rx='0.69' opacity='0.98'/><rect x='10.76' y='42.47' width='9.24' height='1.39' rx='0.69' opacity='0.99'/><rect x='120' y='43.64' width='10.36' height='1.08' rx='0.54' opacity='0.92'/><rect x='13.94' y='43.64' width='6.06' height='1.08' rx='0.54' opacity='0.7'/><rect x='120' y='44.70' width='4.67' height='1.53' rx='0.77' opacity='0.63'/><rect x='2.15' y='44.70' width='17.85' height='1.53' rx='0.77' opacity='0.82'/><rect x='120' y='46.36' width='10.60' height='0.75' rx='0.38' opacity='0.56'/><rect x='15.49' y='46.36' width='4.51' height='0.75' rx='0.38' opacity='0.81'/><rect x='120' y='46.97' width='18.44' height='1.88' rx='0.94' opacity='0.64'/><rect x='8.57' y='46.97' width='11.43' height='1.88' rx='0.94' opacity='0.64'/><rect x='120' y='48.80' width='13.12' height='0.92' rx='0.46' opacity='0.56'/><rect x='12.13' y='48.80' width='7.87' height='0.92' rx='0.46' opacity='0.62'/><rect x='120' y='49.68' width='15.91' height='1.78' rx='0.89' opacity='0.99'/><rect x='8.61' y='49.68' width='11.39' height='1.78' rx='0.89' opacity='0.67'/><rect x='120' y='51.62' width='15.72' height='1.87' rx='0.94' opacity='0.93'/><rect x='14.25' y='51.62' width='5.75' height='1.87' rx='0.94' opacity='0.72'/><rect x='120' y='53.16' width='8.83' height='1.8' rx='0.90' opacity='0.66'/><rect x='8.78' y='53.16' width='11.22' height='1.8' rx='0.90' opacity='0.63'/><rect x='120' y='54.60' width='12.96' height='1.26' rx='0.63' opacity='0.98'/><rect x='8.59' y='54.60' width='11.41' height='1.26' rx='0.63' opacity='0.67'/><rect x='120' y='55.64' width='15.90' height='1.1' rx='0.55' opacity='0.67'/><rect x='11.01' y='55.64' width='8.99' height='1.1' rx='0.55' opacity='0.7'/><rect x='120' y='56.64' width='10.76' height='1.73' rx='0.86' opacity='0.85'/><rect x='12.73' y='56.64' width='7.27' height='1.73' rx='0.86' opacity='0.88'/><rect x='120' y='58.46' width='3.87' height='1.49' rx='0.74' opacity='0.95'/><rect x='5.10' y='58.46' width='14.90' height='1.49' rx='0.74' opacity='0.95'/><rect x='120' y='60.04' width='7.12' height='1.62' rx='0.81' opacity='0.86'/><rect x='4.37' y='60.04' width='15.63' height='1.62' rx='0.81' opacity='0.52'/><rect x='120' y='61.70' width='13.39' height='2.33' rx='1.17' opacity='0.83'/><rect x='4.51' y='61.70' width='15.49' height='2.33' rx='1.17' opacity='0.73'/><rect x='120' y='63.62' width='6.16' height='2.28' rx='1.14' opacity='0.88'/><rect x='17.55' y='63.62' width='2.45' height='2.28' rx='1.14' opacity='0.62'/><rect x='120' y='66.05' width='15.85' height='1.02' rx='0.51' opacity='0.77'/><rect x='4.48' y='66.05' width='15.52' height='1.02' rx='0.51' opacity='0.54'/><rect x='120' y='66.92' width='16.69' height='1.06' rx='0.53' opacity='0.77'/><rect x='6.66' y='66.92' width='13.34' height='1.06' rx='0.53' opacity='0.85'/><rect x='120' y='68.02' width='14.65' height='1.12' rx='0.56' opacity='1.0'/><rect x='5.96' y='68.02' width='14.04' height='1.12' rx='0.56' opacity='0.97'/><rect x='120' y='68.92' width='18.71' height='1.43' rx='0.71' opacity='0.72'/><rect x='1.92' y='68.92' width='18.08' height='1.43' rx='0.71' opacity='0.79'/><rect x='120' y='70.13' width='7.92' height='1.54' rx='0.77' opacity='0.68'/><rect x='15.81' y='70.13' width='4.19' height='1.54' rx='0.77' opacity='0.95'/><rect x='120' y='71.63' width='14.43' height='0.64' rx='0.32' opacity='0.88'/><rect x='7.42' y='71.63' width='12.58' height='0.64' rx='0.32' opacity='0.92'/><rect x='120' y='72.14' width='8.56' height='1.95' rx='0.97' opacity='0.56'/><rect x='3.86' y='72.14' width='16.14' height='1.95' rx='0.97' opacity='0.7'/><rect x='120' y='74.38' width='13.25' height='1.66' rx='0.83' opacity='0.68'/><rect x='11.43' y='74.38' width='8.57' height='1.66' rx='0.83' opacity='0.62'/><rect x='120' y='75.86' width='11.71' height='1.52' rx='0.76' opacity='0.92'/><rect x='5.06' y='75.86' width='14.94' height='1.52' rx='0.76' opacity='0.86'/><rect x='120' y='77.11' width='16.77' height='1.92' rx='0.96' opacity='0.77'/><rect x='1.97' y='77.11' width='18.03' height='1.92' rx='0.96' opacity='0.74'/><rect x='120' y='78.87' width='4.56' height='1.14' rx='0.57' opacity='0.66'/><rect x='6.68' y='78.87' width='13.32' height='1.14' rx='0.57' opacity='0.58'/><rect x='120' y='79.85' width='14.47' height='0.97' rx='0.48' opacity='1.0'/><rect x='7.05' y='79.85' width='12.95' height='0.97' rx='0.48' opacity='0.62'/><rect x='120' y='80.69' width='12.87' height='1.6' rx='0.80' opacity='0.95'/><rect x='15.52' y='80.69' width='4.48' height='1.6' rx='0.80' opacity='0.87'/><rect x='120' y='82.08' width='14.48' height='1.09' rx='0.55' opacity='0.61'/><rect x='6.46' y='82.08' width='13.54' height='1.09' rx='0.55' opacity='0.55'/><rect x='120' y='83.30' width='15.81' height='1.29' rx='0.65' opacity='0.61'/><rect x='13.42' y='83.30' width='6.58' height='1.29' rx='0.65' opacity='0.98'/><rect x='120' y='84.55' width='18.35' height='0.73' rx='0.36' opacity='0.99'/><rect x='9.27' y='84.55' width='10.73' height='0.73' rx='0.36' opacity='0.58'/><rect x='120' y='85.38' width='16.31' height='0.8' rx='0.40' opacity='0.59'/><rect x='3.45' y='85.38' width='16.55' height='0.8' rx='0.40' opacity='0.62'/><rect x='120' y='86.28' width='4.51' height='1.76' rx='0.88' opacity='0.75'/><rect x='17.40' y='86.28' width='2.60' height='1.76' rx='0.88' opacity='0.76'/><rect x='120' y='88.05' width='15.41' height='1.3' rx='0.65' opacity='1.0'/><rect x='8.94' y='88.05' width='11.06' height='1.3' rx='0.65' opacity='0.74'/><rect x='120' y='89.19' width='18.65' height='1.04' rx='0.52' opacity='0.64'/><rect x='2.27' y='89.19' width='17.73' height='1.04' rx='0.52' opacity='0.63'/><rect x='120' y='90.27' width='10.31' height='2.27' rx='1.14' opacity='0.71'/><rect x='17.96' y='90.27' width='2.04' height='2.27' rx='1.14' opacity='0.87'/><rect x='120' y='92.49' width='18.73' height='0.97' rx='0.48' opacity='0.76'/><rect x='9.08' y='92.49' width='10.92' height='0.97' rx='0.48' opacity='0.98'/><rect x='120' y='93.43' width='6.99' height='0.94' rx='0.47' opacity='0.62'/><rect x='7.67' y='93.43' width='12.33' height='0.94' rx='0.47' opacity='0.71'/><rect x='120' y='94.42' width='14.05' height='0.93' rx='0.47' opacity='1.0'/><rect x='1.75' y='94.42' width='18.25' height='0.93' rx='0.47' opacity='0.83'/><rect x='120' y='95.33' width='16.53' height='1.44' rx='0.72' opacity='0.75'/><rect x='10.80' y='95.33' width='9.20' height='1.44' rx='0.72' opacity='0.68'/><rect x='120' y='96.96' width='11.87' height='0.82' rx='0.41' opacity='0.92'/><rect x='17.70' y='96.96' width='2.30' height='0.82' rx='0.41' opacity='0.6'/><rect x='120' y='97.78' width='5.85' height='1.4' rx='0.70' opacity='0.73'/><rect x='3.07' y='97.78' width='16.93' height='1.4' rx='0.70' opacity='0.69'/><rect x='120' y='99.12' width='3.38' height='2.05' rx='1.02' opacity='0.7'/><rect x='9.00' y='99.12' width='11.00' height='2.05' rx='1.02' opacity='0.63'/></g></svg>") 0 0 / 100% 100% no-repeat; mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 100' preserveAspectRatio='none'><filter id='r'><feTurbulence type='fractalNoise' baseFrequency='.08 .9' numOctaves='2' seed='3'/><feDisplacementMap in='SourceGraphic' scale='3'/></filter><g filter='url(%23r)'><rect x='19' y='0' width='102' height='100'/><rect x='120' y='0.00' width='3.43' height='1.18' rx='0.59' opacity='0.59'/><rect x='5.59' y='0.00' width='14.41' height='1.18' rx='0.59' opacity='0.52'/><rect x='120' y='1.12' width='10.82' height='0.73' rx='0.36' opacity='0.98'/><rect x='5.06' y='1.12' width='14.94' height='0.73' rx='0.36' opacity='0.79'/><rect x='120' y='1.81' width='10.42' height='2.36' rx='1.18' opacity='0.79'/><rect x='5.72' y='1.81' width='14.28' height='2.36' rx='1.18' opacity='0.55'/><rect x='120' y='4.17' width='6.39' height='0.94' rx='0.47' opacity='0.64'/><rect x='15.43' y='4.17' width='4.57' height='0.94' rx='0.47' opacity='0.73'/><rect x='120' y='5.22' width='12.24' height='1.25' rx='0.62' opacity='0.81'/><rect x='12.75' y='5.22' width='7.25' height='1.25' rx='0.62' opacity='0.64'/><rect x='120' y='6.65' width='16.81' height='0.81' rx='0.41' opacity='0.74'/><rect x='17.53' y='6.65' width='2.47' height='0.81' rx='0.41' opacity='0.67'/><rect x='120' y='7.40' width='10.62' height='1.49' rx='0.74' opacity='0.76'/><rect x='17.64' y='7.40' width='2.36' height='1.49' rx='0.74' opacity='0.82'/><rect x='120' y='9.11' width='12.56' height='2.08' rx='1.04' opacity='0.97'/><rect x='14.33' y='9.11' width='5.67' height='2.08' rx='1.04' opacity='0.53'/><rect x='120' y='11.33' width='12.23' height='0.83' rx='0.41' opacity='0.62'/><rect x='7.58' y='11.33' width='12.42' height='0.83' rx='0.41' opacity='0.91'/><rect x='120' y='12.25' width='13.74' height='1.1' rx='0.55' opacity='0.62'/><rect x='10.06' y='12.25' width='9.94' height='1.1' rx='0.55' opacity='0.51'/><rect x='120' y='13.45' width='6.21' height='0.93' rx='0.47' opacity='0.8'/><rect x='1.52' y='13.45' width='18.48' height='0.93' rx='0.47' opacity='0.73'/><rect x='120' y='14.48' width='15.03' height='2.31' rx='1.16' opacity='0.6'/><rect x='5.02' y='14.48' width='14.98' height='2.31' rx='1.16' opacity='0.99'/><rect x='120' y='16.68' width='6.40' height='0.8' rx='0.40' opacity='0.6'/><rect x='8.00' y='16.68' width='12.00' height='0.8' rx='0.40' opacity='0.81'/><rect x='120' y='17.36' width='13.28' height='1.05' rx='0.53' opacity='1.0'/><rect x='6.87' y='17.36' width='13.13' height='1.05' rx='0.53' opacity='0.57'/><rect x='120' y='18.48' width='14.31' height='1.93' rx='0.96' opacity='0.98'/><rect x='6.19' y='18.48' width='13.81' height='1.93' rx='0.96' opacity='0.88'/><rect x='120' y='20.22' width='10.82' height='1.76' rx='0.88' opacity='0.71'/><rect x='14.75' y='20.22' width='5.25' height='1.76' rx='0.88' opacity='0.82'/><rect x='120' y='22.01' width='11.76' height='2.02' rx='1.01' opacity='0.88'/><rect x='14.89' y='22.01' width='5.11' height='2.02' rx='1.01' opacity='0.87'/><rect x='120' y='24.32' width='11.74' height='2.02' rx='1.01' opacity='0.75'/><rect x='12.07' y='24.32' width='7.93' height='2.02' rx='1.01' opacity='0.54'/><rect x='120' y='26.01' width='8.91' height='1.45' rx='0.72' opacity='0.93'/><rect x='6.73' y='26.01' width='13.27' height='1.45' rx='0.72' opacity='0.92'/><rect x='120' y='27.23' width='11.79' height='1.3' rx='0.65' opacity='0.91'/><rect x='13.20' y='27.23' width='6.80' height='1.3' rx='0.65' opacity='0.73'/><rect x='120' y='28.61' width='3.17' height='0.75' rx='0.38' opacity='0.96'/><rect x='17.12' y='28.61' width='2.88' height='0.75' rx='0.38' opacity='0.83'/><rect x='120' y='29.30' width='8.83' height='1.59' rx='0.80' opacity='0.6'/><rect x='3.76' y='29.30' width='16.24' height='1.59' rx='0.80' opacity='0.91'/><rect x='120' y='30.69' width='12.16' height='1.05' rx='0.53' opacity='0.79'/><rect x='17.63' y='30.69' width='2.37' height='1.05' rx='0.53' opacity='0.95'/><rect x='120' y='31.78' width='14.65' height='2.07' rx='1.03' opacity='0.79'/><rect x='17.89' y='31.78' width='2.11' height='2.07' rx='1.03' opacity='0.89'/><rect x='120' y='33.87' width='11.35' height='2.0' rx='1.00' opacity='0.8'/><rect x='14.89' y='33.87' width='5.11' height='2.0' rx='1.00' opacity='0.89'/><rect x='120' y='35.55' width='7.63' height='1.61' rx='0.81' opacity='0.75'/><rect x='11.69' y='35.55' width='8.31' height='1.61' rx='0.81' opacity='0.72'/><rect x='120' y='37.18' width='5.71' height='1.51' rx='0.76' opacity='0.91'/><rect x='16.51' y='37.18' width='3.49' height='1.51' rx='0.76' opacity='0.96'/><rect x='120' y='38.86' width='13.75' height='0.96' rx='0.48' opacity='0.58'/><rect x='17.56' y='38.86' width='2.44' height='0.96' rx='0.48' opacity='0.89'/><rect x='120' y='39.93' width='16.45' height='0.88' rx='0.44' opacity='0.99'/><rect x='12.28' y='39.93' width='7.72' height='0.88' rx='0.44' opacity='0.94'/><rect x='120' y='40.68' width='16.36' height='1.8' rx='0.90' opacity='0.7'/><rect x='16.09' y='40.68' width='3.91' height='1.8' rx='0.90' opacity='0.51'/><rect x='120' y='42.47' width='6.74' height='1.39' rx='0.69' opacity='0.98'/><rect x='10.76' y='42.47' width='9.24' height='1.39' rx='0.69' opacity='0.99'/><rect x='120' y='43.64' width='10.36' height='1.08' rx='0.54' opacity='0.92'/><rect x='13.94' y='43.64' width='6.06' height='1.08' rx='0.54' opacity='0.7'/><rect x='120' y='44.70' width='4.67' height='1.53' rx='0.77' opacity='0.63'/><rect x='2.15' y='44.70' width='17.85' height='1.53' rx='0.77' opacity='0.82'/><rect x='120' y='46.36' width='10.60' height='0.75' rx='0.38' opacity='0.56'/><rect x='15.49' y='46.36' width='4.51' height='0.75' rx='0.38' opacity='0.81'/><rect x='120' y='46.97' width='18.44' height='1.88' rx='0.94' opacity='0.64'/><rect x='8.57' y='46.97' width='11.43' height='1.88' rx='0.94' opacity='0.64'/><rect x='120' y='48.80' width='13.12' height='0.92' rx='0.46' opacity='0.56'/><rect x='12.13' y='48.80' width='7.87' height='0.92' rx='0.46' opacity='0.62'/><rect x='120' y='49.68' width='15.91' height='1.78' rx='0.89' opacity='0.99'/><rect x='8.61' y='49.68' width='11.39' height='1.78' rx='0.89' opacity='0.67'/><rect x='120' y='51.62' width='15.72' height='1.87' rx='0.94' opacity='0.93'/><rect x='14.25' y='51.62' width='5.75' height='1.87' rx='0.94' opacity='0.72'/><rect x='120' y='53.16' width='8.83' height='1.8' rx='0.90' opacity='0.66'/><rect x='8.78' y='53.16' width='11.22' height='1.8' rx='0.90' opacity='0.63'/><rect x='120' y='54.60' width='12.96' height='1.26' rx='0.63' opacity='0.98'/><rect x='8.59' y='54.60' width='11.41' height='1.26' rx='0.63' opacity='0.67'/><rect x='120' y='55.64' width='15.90' height='1.1' rx='0.55' opacity='0.67'/><rect x='11.01' y='55.64' width='8.99' height='1.1' rx='0.55' opacity='0.7'/><rect x='120' y='56.64' width='10.76' height='1.73' rx='0.86' opacity='0.85'/><rect x='12.73' y='56.64' width='7.27' height='1.73' rx='0.86' opacity='0.88'/><rect x='120' y='58.46' width='3.87' height='1.49' rx='0.74' opacity='0.95'/><rect x='5.10' y='58.46' width='14.90' height='1.49' rx='0.74' opacity='0.95'/><rect x='120' y='60.04' width='7.12' height='1.62' rx='0.81' opacity='0.86'/><rect x='4.37' y='60.04' width='15.63' height='1.62' rx='0.81' opacity='0.52'/><rect x='120' y='61.70' width='13.39' height='2.33' rx='1.17' opacity='0.83'/><rect x='4.51' y='61.70' width='15.49' height='2.33' rx='1.17' opacity='0.73'/><rect x='120' y='63.62' width='6.16' height='2.28' rx='1.14' opacity='0.88'/><rect x='17.55' y='63.62' width='2.45' height='2.28' rx='1.14' opacity='0.62'/><rect x='120' y='66.05' width='15.85' height='1.02' rx='0.51' opacity='0.77'/><rect x='4.48' y='66.05' width='15.52' height='1.02' rx='0.51' opacity='0.54'/><rect x='120' y='66.92' width='16.69' height='1.06' rx='0.53' opacity='0.77'/><rect x='6.66' y='66.92' width='13.34' height='1.06' rx='0.53' opacity='0.85'/><rect x='120' y='68.02' width='14.65' height='1.12' rx='0.56' opacity='1.0'/><rect x='5.96' y='68.02' width='14.04' height='1.12' rx='0.56' opacity='0.97'/><rect x='120' y='68.92' width='18.71' height='1.43' rx='0.71' opacity='0.72'/><rect x='1.92' y='68.92' width='18.08' height='1.43' rx='0.71' opacity='0.79'/><rect x='120' y='70.13' width='7.92' height='1.54' rx='0.77' opacity='0.68'/><rect x='15.81' y='70.13' width='4.19' height='1.54' rx='0.77' opacity='0.95'/><rect x='120' y='71.63' width='14.43' height='0.64' rx='0.32' opacity='0.88'/><rect x='7.42' y='71.63' width='12.58' height='0.64' rx='0.32' opacity='0.92'/><rect x='120' y='72.14' width='8.56' height='1.95' rx='0.97' opacity='0.56'/><rect x='3.86' y='72.14' width='16.14' height='1.95' rx='0.97' opacity='0.7'/><rect x='120' y='74.38' width='13.25' height='1.66' rx='0.83' opacity='0.68'/><rect x='11.43' y='74.38' width='8.57' height='1.66' rx='0.83' opacity='0.62'/><rect x='120' y='75.86' width='11.71' height='1.52' rx='0.76' opacity='0.92'/><rect x='5.06' y='75.86' width='14.94' height='1.52' rx='0.76' opacity='0.86'/><rect x='120' y='77.11' width='16.77' height='1.92' rx='0.96' opacity='0.77'/><rect x='1.97' y='77.11' width='18.03' height='1.92' rx='0.96' opacity='0.74'/><rect x='120' y='78.87' width='4.56' height='1.14' rx='0.57' opacity='0.66'/><rect x='6.68' y='78.87' width='13.32' height='1.14' rx='0.57' opacity='0.58'/><rect x='120' y='79.85' width='14.47' height='0.97' rx='0.48' opacity='1.0'/><rect x='7.05' y='79.85' width='12.95' height='0.97' rx='0.48' opacity='0.62'/><rect x='120' y='80.69' width='12.87' height='1.6' rx='0.80' opacity='0.95'/><rect x='15.52' y='80.69' width='4.48' height='1.6' rx='0.80' opacity='0.87'/><rect x='120' y='82.08' width='14.48' height='1.09' rx='0.55' opacity='0.61'/><rect x='6.46' y='82.08' width='13.54' height='1.09' rx='0.55' opacity='0.55'/><rect x='120' y='83.30' width='15.81' height='1.29' rx='0.65' opacity='0.61'/><rect x='13.42' y='83.30' width='6.58' height='1.29' rx='0.65' opacity='0.98'/><rect x='120' y='84.55' width='18.35' height='0.73' rx='0.36' opacity='0.99'/><rect x='9.27' y='84.55' width='10.73' height='0.73' rx='0.36' opacity='0.58'/><rect x='120' y='85.38' width='16.31' height='0.8' rx='0.40' opacity='0.59'/><rect x='3.45' y='85.38' width='16.55' height='0.8' rx='0.40' opacity='0.62'/><rect x='120' y='86.28' width='4.51' height='1.76' rx='0.88' opacity='0.75'/><rect x='17.40' y='86.28' width='2.60' height='1.76' rx='0.88' opacity='0.76'/><rect x='120' y='88.05' width='15.41' height='1.3' rx='0.65' opacity='1.0'/><rect x='8.94' y='88.05' width='11.06' height='1.3' rx='0.65' opacity='0.74'/><rect x='120' y='89.19' width='18.65' height='1.04' rx='0.52' opacity='0.64'/><rect x='2.27' y='89.19' width='17.73' height='1.04' rx='0.52' opacity='0.63'/><rect x='120' y='90.27' width='10.31' height='2.27' rx='1.14' opacity='0.71'/><rect x='17.96' y='90.27' width='2.04' height='2.27' rx='1.14' opacity='0.87'/><rect x='120' y='92.49' width='18.73' height='0.97' rx='0.48' opacity='0.76'/><rect x='9.08' y='92.49' width='10.92' height='0.97' rx='0.48' opacity='0.98'/><rect x='120' y='93.43' width='6.99' height='0.94' rx='0.47' opacity='0.62'/><rect x='7.67' y='93.43' width='12.33' height='0.94' rx='0.47' opacity='0.71'/><rect x='120' y='94.42' width='14.05' height='0.93' rx='0.47' opacity='1.0'/><rect x='1.75' y='94.42' width='18.25' height='0.93' rx='0.47' opacity='0.83'/><rect x='120' y='95.33' width='16.53' height='1.44' rx='0.72' opacity='0.75'/><rect x='10.80' y='95.33' width='9.20' height='1.44' rx='0.72' opacity='0.68'/><rect x='120' y='96.96' width='11.87' height='0.82' rx='0.41' opacity='0.92'/><rect x='17.70' y='96.96' width='2.30' height='0.82' rx='0.41' opacity='0.6'/><rect x='120' y='97.78' width='5.85' height='1.4' rx='0.70' opacity='0.73'/><rect x='3.07' y='97.78' width='16.93' height='1.4' rx='0.70' opacity='0.69'/><rect x='120' y='99.12' width='3.38' height='2.05' rx='1.02' opacity='0.7'/><rect x='9.00' y='99.12' width='11.00' height='2.05' rx='1.02' opacity='0.63'/></g></svg>") 0 0 / 100% 100% no-repeat;
+    transform: translateX(-140vw); will-change: transform; }
+  .wipe.run { transition: transform .5s cubic-bezier(.7, 0, .3, 1); transform: translateX(0); }
+  html.wiping .wipe { transform: translateX(0); }
+  html.wiping body { animation: none; }
+  html.wiping .hl span { animation-delay: calc(var(--d, 0s) + .45s); }
+  html .wipe.out { transition: transform .6s cubic-bezier(.7, 0, .3, 1); transform: translateX(140vw); }
+  .force-static h2.big.reveal, .force-static .ph-title.reveal, .force-static .hl span, .force-static .panel-story .receipt { clip-path: none !important; filter: none !important; }
+
+  @keyframes inkwipe {
+    from { clip-path: polygon(-8% -12%, -8% -12%, -7% 10%, -9% 30%, -6% 50%, -8% 70%, -7% 90%, -8% 120%, -8% 120%); transform: translateY(22%); }
+    to   { clip-path: polygon(-8% -12%, 108% -12%, 110% 10%, 106% 30%, 109% 50%, 107% 70%, 110% 90%, 108% 120%, -8% 120%); transform: translateY(0); }
+  }
+  .hl { display: block; padding-bottom: .1em; margin-bottom: -.1em; }
+  .hl span { display: inline-block; clip-path: polygon(-8% -12%, -8% -12%, -7% 10%, -9% 30%, -6% 50%, -8% 70%, -7% 90%, -8% 120%, -8% 120%); transform: translateY(22%); animation: inkwipe .9s var(--ease) forwards; animation-delay: var(--d, 0s); }
+  h2.big.reveal, .ph-title.reveal { opacity: 1; transform: translateY(22%); clip-path: polygon(-8% -12%, -8% -12%, -7% 10%, -9% 30%, -6% 50%, -8% 70%, -7% 90%, -8% 120%, -8% 120%); transition: none; }
+  h2.big.reveal.in, .ph-title.reveal.in { animation: inkwipe .8s var(--ease) both; }
+
   .force-static { scroll-behavior: auto; }
   .force-static *, .force-static *::before, .force-static *::after { animation: none !important; transition: none !important; }
   .force-static .hl span, .force-static .reveal, .force-static .tl, .force-static .item, .force-static .f .val, .force-static .ev li, .force-static .r-stamp, .force-static .tl.ok { opacity: 1 !important; transform: none !important; }
   .force-static .r-stamp { transform: rotate(8deg) !important; }
+  .force-static .panel-story .scrim.reveal, .force-static .panel-story .receipt.reveal, .force-static .panel-story .receipt .item { opacity: 1 !important; transform: none !important; }
   .force-static #petals { display: none; }
 </style>
+<script>try{if(sessionStorage.getItem("wipe"))document.documentElement.classList.add("wiping")}catch(e){}</script>
 </head>
 <body>
 
 <div class="grain" aria-hidden="true"></div>
 <div class="progress" aria-hidden="true"><span id="progress"></span></div>
+<div class="wipe" id="wipe" aria-hidden="true"></div>
 <div class="plate l" aria-hidden="true"></div>
 <div class="plate r" aria-hidden="true"></div>
 <div class="tick tl" aria-hidden="true"></div>
@@ -608,8 +650,8 @@
     </a>
     <nav class="nav-links" aria-label="Primary">
       <a href="index.html">PROLOGUE</a>
-      <a href="plane.html" class="on">CONTROL PLANE</a>
-      <a href="ledger.html">LEDGER</a>
+      <a href="plane.html">CONTROL PLANE</a>
+      <a href="ledger.html" class="on">LEDGER</a>
       <a href="faq.html">FOOTNOTES</a>
     </nav>
     <a class="nav-cta" href="faq.html#waitlist">Early access <span class="arr">&#8594;</span></a>
@@ -628,174 +670,86 @@
     <path id="threadPath" d="" fill="none" stroke="url(#threadGrad)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="0.5 9"/>
   </svg>
   <div class="packet-dot" id="packetDot" aria-hidden="true"></div>
-  <section class="ch panel pagehead" style="--art:url(art-night.jpg)">
+  <section class="ch panel panel-story" style="--art:url(art-dawn.jpg)" data-chapter="04 · THE LEDGER" data-io>
     <div class="panel-art" aria-hidden="true"></div>
     <div class="panel-fade deep" aria-hidden="true"></div>
-    <div class="wrap panel-inner"><p class="crumb reveal">AEGIS · CONTROL PLANE</p><h2 class="ph-title reveal" style="--d:.08s">Every agent, one <span class="it">plane of control.</span></h2><p class="ph-lead reveal" style="--d:.16s">Aegis is the local-first control plane for coding agents: it packages context, governs every handoff, and records everything — so the work continues and the reasoning survives.</p></div>
+    <div class="wrap panel-inner"><p class="crumb reveal" style="color:var(--sage-ink)">AEGIS · THE LEDGER</p>
+      <div class="ch-head reveal"><span class="no">iv.</span><span class="nm">Filed, stamped, kept</span></div><h2 class="ph-title reveal" style="--d:.08s;color:#26241e">The audit trail, <span class="it">kept on record.</span></h2><p class="ph-lead reveal" style="--d:.16s;color:rgba(30,28,22,.7)">Every run, decision, finding, and delivery — recorded locally, labeled, and exportable. When you need to know why the code looks this way, the ledger answers.</p>
+      <div class="scrim reveal" style="--d:.35s">
+        <div class="receipt reveal" style="--d:.2s" id="receipt">
+        <div class="r-stamp">RECORDED · NOT DELIVERED</div>
+        <div class="r-head"><span>AEGIS CONTROL PLANE — LEDGER</span><span class="dim">NO. 0042-A</span></div>
+        <div class="r-body">
+          <div class="item" style="--d:.25s"><span>CONTEXT — the goal, as recorded</span><span class="dots"></span><span class="qty">×1</span></div>
+          <div class="item" style="--d:.4s"><span>DECISIONS</span><span class="dots"></span><span class="qty">×2</span></div>
+          <div class="item" style="--d:.55s"><span>FINDINGS — 2 open</span><span class="dots"></span><span class="qty">×2</span></div>
+          <div class="item" style="--d:.7s"><span>NEXT ACTION</span><span class="dots"></span><span class="qty">×1</span></div>
+          <div class="item" style="--d:.85s"><span>WORKING STYLE</span><span class="dots"></span><span class="qty">×1</span></div>
+          <div class="item" style="--d:1s"><span>AGENT RUNS</span><span class="dots"></span><span class="qty">LOGGED</span></div>
+          <div class="r-total"><span>TOTAL — MOMENTUM</span><span class="dots"></span><span class="qty">PRESERVED</span></div>
+        </div>
+        <div class="r-foot">
+          <div>
+            <div class="barcode" aria-hidden="true"></div>
+            <div class="r-num">0·0·4·2·A</div>
+          </div>
+          <div class="r-num" style="letter-spacing:.14em">DIFF · auth.ts — 1 fix</div>
+        </div>
+      </div>
+      </div></div>
   </section>
+
+
 
   <section class="ch inksec" data-io>
     <div class="wrap">
-      <div class="ch-head reveal"><span class="no">—</span><span class="nm">The plane, live</span></div>
-      <div class="console-wrap reveal" style="--d:.2s">
-        <div class="console" id="console" data-tilt>
-          <div class="c-head">
-            <div class="c-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-            <span class="c-title">CONTROL PLANE · LIVE</span>
-            <span class="c-tag"><i></i>LIVE DEMO</span>
+      <div class="ch-head reveal"><span class="no">a.</span><span class="nm">The run table</span></div>
+      <div class="lt reveal" style="--d:.1s">
+        <div class="lt-head">TASK 0042 · FINISH THE AUTH MIGRATION · LOCAL LEDGER</div>
+        <div class="lt-row" style="--d:.15s"><span class="lt-time">14:02:11</span><span class="lt-ev">RUN STARTED</span><span class="lt-det">codex run 4f2a91 · session resumed</span><span class="lt-ag">CODEX</span></div>
+        <div class="lt-row" style="--d:.22s"><span class="lt-time">14:06:40</span><span class="lt-ev">FILE CHANGED</span><span class="lt-det">daemon/auth/token.rs · +34 −12</span><span class="lt-ag">CODEX</span></div>
+        <div class="lt-row" style="--d:.29s"><span class="lt-time">14:09:02</span><span class="lt-ev">DECISION</span><span class="lt-det">keep existing session format</span><span class="lt-ag">YOU</span></div>
+        <div class="lt-row" style="--d:.36s"><span class="lt-time">14:11:26</span><span class="lt-ev">CHECK PASSED</span><span class="lt-det">ctest auth_api · 6 / 6</span><span class="lt-ag">CODEX</span></div>
+        <div class="lt-row" style="--d:.43s"><span class="lt-time">14:14:58</span><span class="lt-ev">FINDING · OPEN</span><span class="lt-det">token expiry path not covered</span><span class="lt-ag">AEGIS</span></div>
+        <div class="lt-row" style="--d:.5s"><span class="lt-time">14:18:33</span><span class="lt-ev">PACKET SEALED</span><span class="lt-det">6 evidence links attached</span><span class="lt-ag">AEGIS</span></div>
+        <div class="lt-row" style="--d:.57s"><span class="lt-time">14:19:04</span><span class="lt-ev">REVIEW</span><span class="lt-det">packet approved by you</span><span class="lt-ag">YOU</span></div>
+        <div class="lt-row" style="--d:.64s"><span class="lt-time">14:19:40</span><span class="lt-ev">DELIVERED</span><span class="lt-det">claude chosen as next agent</span><span class="lt-ag">AEGIS</span></div>
+        <div class="lt-row" style="--d:.71s"><span class="lt-time">14:26:12</span><span class="lt-ev">RUN STARTED</span><span class="lt-det">claude session resumed from packet</span><span class="lt-ag">CLAUDE</span></div>
+      </div>
+      <div class="ch-head reveal" style="margin-top:90px"><span class="no">b.</span><span class="nm">The capabilities</span></div>
+      <div class="capcard reveal">
+          <h3>What the plane gives you</h3>
+          <div class="cap-list">
+            <p>Agent handoffs with review gates</p>
+            <p>Read-only review — working tree, staged, and unstaged diffs</p>
+            <p>Agent terminal with PTY transport</p>
+            <p>Session import with thread resumption</p>
+            <p>Task and run registry — multiple runs per task</p>
+            <p>Verification tracking</p>
+            <p>Git integration — staging and three-way comparisons</p>
+            <p>Everything in local SQLite — exportable, no cloud</p>
           </div>
-          <div class="c-task f" id="fTask">
-            <label>TASK · PRESERVED</label>
-            <span class="val"><span id="tTask"></span><span class="caret" aria-hidden="true"></span></span>
-          </div>
-          <div class="c-route" aria-hidden="true">
-            <div class="node2" id="nodeA">
-              <span class="n-glyph">C</span>
-              <span><span class="n-name">Codex</span><span class="n-role">SOURCE</span></span>
-            </div>
-            <div class="route-line">
-              <span class="route-mid">CONTEXT PACKET</span>
-              <span class="packet" id="packet"></span>
-            </div>
-            <div class="node2" id="nodeB">
-              <span class="n-glyph">A</span>
-              <span><span class="n-name">Claude</span><span class="n-role">CHOSEN</span></span>
-            </div>
-          </div>
-          <div class="c-fields">
-            <div class="c-col">
-              <div class="f" id="fGoal">
-                <label>CONTEXT</label>
-                <p class="val" id="tGoal"></p>
-              </div>
-              <div class="f" id="fDec">
-                <label>DECISION</label>
-                <p class="val">Keep the <b>existing session format</b>.</p>
-              </div>
-            </div>
-            <div class="c-col">
-              <div class="f" id="fNext">
-                <label>NEXT ACTION</label>
-                <p class="val">Cover <b>token expiry</b>, then rerun checks.</p>
-              </div>
-              <div class="f" id="fRev">
-                <label>REVIEW</label>
-                <p class="val">Nothing moves without <b>your approval</b>.</p>
-              </div>
-            </div>
-            <div class="c-col">
-              <div class="f" id="fEv">
-                <label>EVIDENCE</label>
-                <ul class="ev">
-                  <li>2 open findings on token expiry</li>
-                  <li>Recorded checks refer to earlier code</li>
-                  <li>Working style: small changes, focused checks</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          <div class="c-foot">
-            <span class="c-status" id="cStatus">PACKAGING CONTEXT</span>
-            <span class="c-note">SHOWN AS RECORDED — NOT DELIVERED</span>
-          </div>
+        </div>
+      <div class="ch-head reveal" style="margin-top:90px"><span class="no">c.</span><span class="nm">Yours, literally</span></div>
+      <div class="ex-grid">
+        <div class="ex reveal" style="--d:0s">
+          <p class="g-k">LOCAL STORE</p>
+          <h3>SQLite, in your project</h3>
+          <p>The ledger lives in a local database inside the repo — inspect it, back it up, or delete it. It is a file, not a service.</p>
+        </div>
+        <div class="ex reveal" style="--d:.1s">
+          <p class="g-k">EXPORTS</p>
+          <h3>Markdown &amp; JSON</h3>
+          <p>Packets and ledgers export to plain formats your agents and teammates can read — no proprietary lock-in.</p>
+        </div>
+        <div class="ex reveal" style="--d:.2s">
+          <p class="g-k">NO TELEMETRY</p>
+          <h3>Nothing phones home</h3>
+          <p>Aegis has no cloud component. The only network traffic is whatever your chosen agents and providers already do.</p>
         </div>
       </div>
     </div>
     <div class="t-node" aria-hidden="true"></div>
-  </section>
-
-  <section class="ch inksec" data-io>
-    <div class="wrap"><div class="ch-head reveal"><span class="no">a.</span><span class="nm">What the plane governs</span></div><div class="gov-grid">
-        <div class="gcard reveal" style="--d:0s">
-          <p class="g-k">CONTEXT PACKAGING</p>
-          <h3>Goal, decisions, next action</h3>
-          <p>Per task: the goal as recorded, decisions made along the way, the current next action, and your working-style notes — packaged as one reviewable bundle.</p>
-        </div>
-        <div class="gcard reveal" style="--d:.08s">
-          <p class="g-k">REVIEW GATES</p>
-          <h3>Nothing moves unseen</h3>
-          <p>Every packet is previewed before delivery. You approve what travels to the next agent — or you strip it and send nothing.</p>
-        </div>
-        <div class="gcard reveal" style="--d:.16s">
-          <p class="g-k">RUN RECORDS</p>
-          <h3>Every run, on the ledger</h3>
-          <p>Agent runs are logged locally with timestamps, the files they touched, and the checks they ran — attributed to the agent that did them.</p>
-        </div>
-        <div class="gcard reveal" style="--d:0s">
-          <p class="g-k">FINDINGS &amp; CHECKS</p>
-          <h3>Labeled, linked, tracked</h3>
-          <p>Findings carry labels when they refer to earlier code, stay linked to recorded checks, and track open or resolved over time.</p>
-        </div>
-        <div class="gcard reveal" style="--d:.08s">
-          <p class="g-k">WORKING STYLE</p>
-          <h3>Your rules, inherited</h3>
-          <p>Instructions like "small changes, focused checks" travel with the task — and stay editable by you, sourced, versioned.</p>
-        </div>
-        <div class="gcard reveal" style="--d:.16s">
-          <p class="g-k">LOCAL STORAGE</p>
-          <h3>Your disk, your data</h3>
-          <p>Everything lives in a local store inside your project — exportable, inspectable, no cloud lock-in, no telemetry.</p>
-        </div>
-      </div></div>
-  </section>
-
-  <section class="ch inksec" data-io>
-    <div class="wrap"><div class="ch-head reveal"><span class="no">b.</span><span class="nm">How a handoff executes</span></div><div class="pipe-wrap">
-        <div class="pstep reveal" style="--d:0s">
-          <p class="p-k">01 · CAPTURE</p>
-          <h3>Work in your agent as usual</h3>
-          <p>Aegis records the goal, decisions, and findings as they happen — no copy-paste, no summary rituals at the end.</p>
-        </div>
-        <div class="pstep reveal" style="--d:.06s">
-          <p class="p-k">02 · PACKAGE</p>
-          <h3>The context packet assembles</h3>
-          <p>Before a handoff, task state, evidence, and working style are bundled into one packet — shown to you exactly as recorded.</p>
-        </div>
-        <div class="pstep reveal" style="--d:.12s">
-          <p class="p-k">03 · REVIEW</p>
-          <h3>You approve what travels</h3>
-          <p>Preview the packet line by line. Edit, strip, or approve. Nothing is delivered without your sign-off.</p>
-        </div>
-        <div class="pstep reveal" style="--d:.18s">
-          <p class="p-k">04 · DELIVER</p>
-          <h3>Handed to the agent you choose</h3>
-          <p>The approved packet goes to the next agent — Codex, Claude, whatever you pick. Nothing else goes with it.</p>
-        </div>
-        <div class="pstep reveal" style="--d:.24s">
-          <p class="p-k">05 · RESUME</p>
-          <h3>The record continues</h3>
-          <p>The next agent starts from the record — reasoning included — and its run is written back to the same ledger.</p>
-        </div>
-      </div></div>
-  </section>
-
-  <section class="ch inksec" data-io>
-    <div class="wrap"><div class="ch-head reveal"><span class="no">iii.</span><span class="nm">The method</span></div><div class="mrows">
-        <div class="mrow reveal" style="--d:0s">
-          <span class="mnum">01</span>
-          <div class="mr-in">
-            <h3>Capture <span class="it">context</span></h3>
-            <p>Record the goal, decisions, and next action. Add findings and working-style instructions you want the next agent to carry.</p>
-          </div>
-          <svg class="mglyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3"/><circle cx="12" cy="12" r="3.2"/></svg>
-        </div>
-        <div class="mrow reveal" style="--d:.1s">
-          <span class="mnum">02</span>
-          <div class="mr-in">
-            <h3>Govern <span class="it">what travels</span></h3>
-            <p>Nothing moves between agents without your approval. Preview the packet, set the policy, keep the authority where it belongs — with you.</p>
-          </div>
-          <svg class="mglyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>
-        </div>
-        <div class="mrow reveal" style="--d:.2s">
-          <span class="mnum">03</span>
-          <div class="mr-in">
-            <h3>Continue <span class="it">deliberately</span></h3>
-            <p>Pick the next agent and pick up where the last one left off — with the reasoning, not just the diff.</p>
-          </div>
-          <svg class="mglyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12h6m0 0-2.5-2.5M14.5 12 12 14.5"/></svg>
-        </div>
-      </div></div>
   </section>
 </main>
 
@@ -822,10 +776,11 @@
   if (hasIO) {
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) {
-        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+        if (e.isIntersecting) { (e.target.__rv || e.target).classList.add("in"); io.unobserve(e.target); }
       }
     }, { threshold: 0.15, rootMargin: "0px 0px -6% 0px" });
-    revealables.forEach((el) => io.observe(el));
+    // clip-hidden headings have ~no visible area, so watch their parent instead
+    revealables.forEach((el) => { if (el.matches("h2.big, .ph-title")) { el.parentElement.__rv = el; io.observe(el.parentElement); } else io.observe(el); });
   } else {
     revealables.forEach((el) => el.classList.add("in"));
   }
@@ -1052,12 +1007,14 @@
     const tick = () => {
       pt += 0.016;
       px.clearRect(0, 0, pw, ph);
-      const wind = Math.sin(pt * 0.3) * 0.4 + Math.sin(pt * 0.07) * 0.3;
+      const cyc = pt % 9;
+      const gust = cyc < 1.3 ? Math.sin((cyc / 1.3) * 3.14) * 2.4 : 0;
+      const wind = Math.sin(pt * 0.3) * 0.4 + Math.sin(pt * 0.07) * 0.3 + gust;
       for (const p of petals) {
         p.ph += 0.012;
         p.y += p.vy;
         p.x += Math.sin(p.ph) * p.sw + wind;
-        p.rot += p.vr + Math.sin(p.ph) * 0.004;
+        p.rot += p.vr + Math.sin(p.ph) * 0.004 + gust * 0.002;
         const dx = p.x - cx, dy = p.y - cy;
         const d2 = dx * dx + dy * dy;
         if (d2 < 16900 && d2 > 1) {
@@ -1089,6 +1046,7 @@
     addEventListener("resize", resize);
     resize();
     startP();
+    window.__stopPetals = stopP;
   }
 
   if (fine && !reduced) {
@@ -1161,16 +1119,48 @@
   }
 
 
+  const wipeEl = byId("wipe");
   document.addEventListener("click", (e) => {
-    if (reduced) return;
+    if (reduced || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey) return;
     const a = e.target.closest("a");
     if (!a) return;
     const href = a.getAttribute("href") || "";
     if (!href || href.startsWith("#") || a.target === "_blank" || /^(https?:|mailto:)/.test(href)) return;
     e.preventDefault();
-    document.body.classList.add("leaving");
-    setTimeout(() => { location.href = href; }, 180);
+    if (!wipeEl) { location.href = href; return; }
+    wipeEl.classList.remove("out");
+    void wipeEl.offsetWidth;
+    wipeEl.classList.add("run");
+    go(a.href, true);
   });
+  // No-reload nav: fetch the page while the brush covers, then swap the whole document in place.
+  // document.open() drops this page's window/document listeners, so the new page's script re-binds cleanly.
+  async function go(url, push) {
+    const [html] = await Promise.all([
+      fetch(url).then((r) => (r.ok ? r.text() : Promise.reject())).catch(() => null),
+      new Promise((r) => setTimeout(r, 520)),
+    ]);
+    try { sessionStorage.setItem("wipe", "1"); } catch {}
+    if (!html) { location.href = url; return; }
+    if (push) history.pushState(null, "", url);
+    if (window.__stopPetals) window.__stopPetals();
+    document.open(); document.write(html); document.close();
+    const hash = new URL(url).hash;
+    const target = hash && document.getElementById(hash.slice(1));
+    target ? target.scrollIntoView() : scrollTo(0, 0);
+  }
+  addEventListener("popstate", () => {
+    if (reduced || !wipeEl) { location.reload(); return; }
+    wipeEl.classList.remove("out"); void wipeEl.offsetWidth; wipeEl.classList.add("run");
+    go(location.href, false);
+  });
+  if (wipeEl && document.documentElement.classList.contains("wiping")) {
+    try { sessionStorage.removeItem("wipe"); } catch {}
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      wipeEl.classList.add("out");
+    }));
+  }
+  addEventListener("pageshow", (e) => { if (e.persisted && wipeEl) { wipeEl.className = "wipe"; document.documentElement.classList.remove("wiping"); } });
 
   $$(".qa").forEach((qa) => {
     const btn = qa.querySelector(".qa-q");

@@ -7,4 +7,4 @@
   node_bundler = "esbuild"
 
 # /api/waitlist and /api/health are routed by the function's config.path.
-# Static pages are served from the repo root.
+# Static pages are copied from site/ into site-dist by scripts/build-landing.mjs.
