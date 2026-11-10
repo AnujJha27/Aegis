@@ -210,6 +210,38 @@ std::optional<Response> tasks(const Request &request, const Context &context) {
             }
         }
     }
+    if (request.method() == boost::beast::http::verb::get) {
+        const auto taskId = pathId(target, "/bundle");
+        if (taskId) {
+            const auto existing = context.store->task(*taskId);
+            if (!existing) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(existing->repository, context.repository))
+                return error(boost::beast::http::status::bad_request, "repository_mismatch", "task repository does not match daemon repository");
+            try {
+                const auto bundle = nlohmann::json::parse(context.store->exportTaskBundle(*taskId));
+                return jsonResponse(boost::beast::http::status::ok, bundle);
+            } catch (const std::invalid_argument &) {
+                return error(boost::beast::http::status::bad_request, "invalid_bundle", "task bundle could not be exported");
+            }
+        }
+    }
+    if (request.method() == boost::beast::http::verb::post && target == "/api/imports/task-bundle") {
+        try {
+            const auto body = nlohmann::json::parse(request.body());
+            std::error_code canonicalError;
+            const auto canonicalRepository = std::filesystem::weakly_canonical(context.repository, canonicalError);
+            if (canonicalError)
+                return error(boost::beast::http::status::bad_request, "invalid_repository", "repository must be a valid directory");
+            const auto task = context.store->importTaskBundle(body.dump(), canonicalRepository.string());
+            return jsonResponse(boost::beast::http::status::created, protocol::toJson(task));
+        } catch (const std::invalid_argument &) {
+            return error(boost::beast::http::status::bad_request, "invalid_bundle", "task bundle is invalid");
+        } catch (const nlohmann::json::exception &) {
+            return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+        } catch (const std::exception &) {
+            return error(boost::beast::http::status::internal_server_error, "import_failed", "could not persist import");
+        }
+    }
     if (request.method() == boost::beast::http::verb::post && target == "/api/tasks") {
         try {
             const auto body = nlohmann::json::parse(request.body());

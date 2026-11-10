@@ -193,5 +193,7 @@ export const api = {
   terminate: (runId: string) => request<{ status: string }>(`/api/runs/${runId}/terminate`, { method: "POST", body: "{}" }),
   send: (runId: string, message: string) => request<{ status: string }>(`/api/runs/${runId}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
   verify: async (taskId: string, command: string[], runId?: string) => verification(await request<Record<string, unknown>>("/api/verify", { method: "POST", body: JSON.stringify({ task_id: taskId, run_id: runId ?? null, command }) })),
+  exportTaskBundle: (taskId: string) => request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/bundle`),
+  importTaskBundle: async (bundle: unknown) => task(await request<Record<string, unknown>>("/api/imports/task-bundle", { method: "POST", body: JSON.stringify(bundle) })),
   continuationReceipt: (taskId: string, requestId: string) => request<{ request_id: string; task_id: string; state: "delivered" | "uncertain"; run_id: string | null; payload: string }>(`/api/tasks/${encodeURIComponent(taskId)}/continuation-receipt?request_id=${encodeURIComponent(requestId)}`),
 };
