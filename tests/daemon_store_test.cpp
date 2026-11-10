@@ -399,6 +399,65 @@ int main() {
         assert(store.continuationState("req-1") == "delivered");
     }
 
+    {
+        aegis::daemon::Store source(":memory:");
+        const auto task = source.createTask("bundle roundtrip", "/repo-src");
+        const aegis::daemon::TaskContext ctx{"bg", "bc", "bd", "ba", "bu", "bn"};
+        assert(source.updateTaskContext(task.id, ctx));
+        const auto run = source.startRun(task.id, "codex");
+        source.appendEvent({"bundle-user-1", task.id, run.id, "user.message", "codex", "hello bundle", 1});
+        assert(source.updateRunStatus(run.id, "completed"));
+
+        const auto bundleJson = source.exportTaskBundle(task.id);
+        const auto parsed = nlohmann::json::parse(bundleJson);
+        assert(parsed.at("format") == "aegis-task" && parsed.at("version") == 1);
+
+        aegis::daemon::Store destination(":memory:");
+        assert(destination.tasks().empty());
+        const auto importedTask = destination.importTaskBundle(bundleJson, "/repo-dst");
+        assert(!importedTask.id.empty() && importedTask.id != task.id);
+        assert(importedTask.context.goal == "bg" && importedTask.context.constraints == "bc" &&
+               importedTask.context.decisions == "bd" && importedTask.context.attempts == "ba" &&
+               importedTask.context.unfinished == "bu" && importedTask.context.nextAction == "bn");
+        assert(destination.verifications(importedTask.id).empty());
+        const auto importedRuns = destination.runs(importedTask.id);
+        assert(importedRuns.size() == 1 && importedRuns.front().status == "completed" &&
+               importedRuns.front().agent == "import");
+        const auto importedEvents = destination.events(importedTask.id);
+        bool sawUserMessage = false;
+        bool sawProvenance = false;
+        for (const auto &item : importedEvents) {
+            if (item.type == "import.message") {
+                const auto payload = nlohmann::json::parse(item.content);
+                if (payload.at("role") == "user" && payload.value("text", "") == "hello bundle")
+                    sawUserMessage = true;
+            }
+            if (item.type == "import.source") sawProvenance = true;
+        }
+        assert(sawUserMessage && sawProvenance);
+
+        const auto reimported = destination.importTaskBundle(bundleJson, "/repo-dst");
+        assert(reimported.id == importedTask.id);
+        assert(destination.events(importedTask.id).size() == importedEvents.size());
+        assert(destination.runs(importedTask.id).size() == 1);
+        assert(destination.tasks().size() == 1);
+
+        const auto taskCountBefore = destination.tasks().size();
+        bool rejected = false;
+        auto malformed = nlohmann::json::parse(bundleJson);
+        malformed["version"] = 2;
+        try {
+            destination.importTaskBundle(malformed.dump(), "/repo-dst");
+        } catch (const std::invalid_argument &) { rejected = true; }
+        assert(rejected);
+        assert(destination.tasks().size() == taskCountBefore);
+
+        const auto importedProfile = destination.workingProfile("/repo-dst");
+        assert(importedProfile.second == 0);
+        const auto parsedProfile = nlohmann::json::parse(importedProfile.first);
+        assert(parsedProfile.at("version") == 1 && parsedProfile.at("instructions").is_array());
+    }
+
     aegis::daemon::EventHub hub;
     const auto subscription = hub.subscribe();
     hub.publish({"event-3", "task", "run", "agent.finished", "shell", "ok", 3});

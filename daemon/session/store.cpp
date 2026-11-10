@@ -194,6 +194,18 @@ Store::Store(const std::filesystem::path &path) {
                 throw;
             }
         }
+        if (previousVersion < 14) {
+            execute("BEGIN IMMEDIATE;");
+            try {
+                execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+                execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('store_origin', lower(hex(randomblob(16))));");
+                execute("PRAGMA user_version = 14;");
+                execute("COMMIT;");
+            } catch (...) {
+                execute("ROLLBACK;");
+                throw;
+            }
+        }
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -587,6 +599,142 @@ std::vector<AgentEvent> Store::terminalOutput(const std::string &runId, std::siz
     return result;
 }
 
+Task Store::importTaskBundle(const std::string &bundleJson, const std::string &destinationRepository) {
+    if (bundleJson.size() > 1024 * 1024) throw std::invalid_argument("task bundle exceeds size limit");
+    if (destinationRepository.empty() || destinationRepository.find('\0') != std::string::npos)
+        throw std::invalid_argument("invalid destination repository");
+    nlohmann::json bundle;
+    try {
+        bundle = nlohmann::json::parse(bundleJson);
+    } catch (const nlohmann::json::exception &) {
+        throw std::invalid_argument("invalid task bundle JSON");
+    }
+    const auto requireString = [](const nlohmann::json &parent, const char *key, std::size_t maxLength,
+                                  bool nonBlank) {
+        if (!parent.is_object() || !parent.contains(key) || !parent.at(key).is_string())
+            throw std::invalid_argument(std::string("invalid task bundle field: ") + key);
+        const auto value = parent.at(key).get<std::string>();
+        if (value.size() > maxLength || value.find('\0') != std::string::npos ||
+            (nonBlank && value.find_first_not_of(" \t\r\n") == std::string::npos))
+            throw std::invalid_argument(std::string("invalid task bundle field: ") + key);
+        return value;
+    };
+    if (!bundle.is_object() || !bundle.contains("format") || !bundle.at("format").is_string() ||
+        bundle.at("format").get<std::string>() != "aegis-task" || !bundle.contains("version") ||
+        !bundle.at("version").is_number_integer() || bundle.at("version") != 1)
+        throw std::invalid_argument("invalid task bundle format or version");
+    const auto origin = requireString(bundle, "source_origin", 200, true);
+    const auto sourceTaskId = requireString(bundle, "source_task_id", 200, true);
+    const auto sourceRepository = requireString(bundle, "source_repository", 4000, false);
+    const auto prompt = requireString(bundle, "prompt", 8000, true);
+    if (!bundle.contains("context") || !bundle.at("context").is_object())
+        throw std::invalid_argument("invalid task bundle context");
+    const auto &contextJson = bundle.at("context");
+    if (contextJson.size() != 6 || !contextJson.contains("goal") || !contextJson.contains("constraints") ||
+        !contextJson.contains("decisions") || !contextJson.contains("attempts") ||
+        !contextJson.contains("unfinished") || !contextJson.contains("next_action"))
+        throw std::invalid_argument("invalid task bundle context");
+    TaskContext context;
+    context.goal = requireString(contextJson, "goal", 4000, false);
+    context.constraints = requireString(contextJson, "constraints", 4000, false);
+    context.decisions = requireString(contextJson, "decisions", 4000, false);
+    context.attempts = requireString(contextJson, "attempts", 4000, false);
+    context.unfinished = requireString(contextJson, "unfinished", 4000, false);
+    context.nextAction = requireString(contextJson, "next_action", 4000, false);
+    if (!bundle.contains("messages") || !bundle.at("messages").is_array() ||
+        bundle.at("messages").size() > 1000)
+        throw std::invalid_argument("invalid task bundle messages");
+    for (const auto &message : bundle.at("messages")) {
+        if (!message.is_object()) throw std::invalid_argument("invalid task bundle message record");
+        requireString(message, "id", 4000, true);
+        requireString(message, "run_id", 4000, false);
+        requireString(message, "agent", 200, false);
+        const auto messageType = requireString(message, "type", 200, true);
+        if (messageType != "user.message" && messageType != "assistant.message" && messageType != "import.message")
+            throw std::invalid_argument("invalid task bundle message type");
+        requireString(message, "content", 65536, false);
+        if (!message.contains("timestamp") || !message.at("timestamp").is_number_integer())
+            throw std::invalid_argument("invalid task bundle message timestamp");
+        if (message.contains("sequence") && !message.at("sequence").is_number_integer())
+            throw std::invalid_argument("invalid task bundle message sequence");
+    }
+    if (!bundle.contains("findings") || !bundle.at("findings").is_array() ||
+        bundle.at("findings").size() > 100)
+        throw std::invalid_argument("invalid task bundle findings");
+    for (const auto &finding : bundle.at("findings")) {
+        if (!finding.is_object()) throw std::invalid_argument("invalid task bundle finding record");
+        requireString(finding, "id", 4000, true);
+        requireString(finding, "file_path", 4000, false);
+        requireString(finding, "message", 8000, true);
+        requireString(finding, "status", 100, false);
+    }
+    if (!bundle.contains("verifications") || !bundle.at("verifications").is_array() ||
+        bundle.at("verifications").size() > 20)
+        throw std::invalid_argument("invalid task bundle verifications");
+    for (const auto &verification : bundle.at("verifications")) {
+        if (!verification.is_object()) throw std::invalid_argument("invalid task bundle verification record");
+        if (verification.dump().size() > 8000) throw std::invalid_argument("task bundle verification too large");
+    }
+    nlohmann::json profile = nlohmann::json{{"version", 1}, {"instructions", nlohmann::json::array()},
+                                            {"workflows", nlohmann::json::array()}};
+    if (bundle.contains("profile")) {
+        const auto &supplied = bundle.at("profile");
+        if (!supplied.is_object() || !supplied.contains("version") ||
+            !supplied.at("version").is_number_integer() || supplied.at("version") != 1 ||
+            !supplied.contains("instructions") || !supplied.at("instructions").is_array() ||
+            !supplied.contains("workflows") || !supplied.at("workflows").is_array())
+            throw std::invalid_argument("invalid task bundle profile");
+        profile = supplied;
+        if (profile.dump().size() > 8000) throw std::invalid_argument("task bundle profile too large");
+    }
+    std::vector<ImportedMessage> imported;
+    imported.reserve(bundle.at("messages").size() + bundle.at("findings").size() +
+                     bundle.at("verifications").size() + 1);
+    std::size_t index = 0;
+    for (const auto &message : bundle.at("messages")) {
+        ImportedMessage record;
+        record.id = "message:" + message.at("id").get<std::string>();
+        const auto type = message.at("type").get<std::string>();
+        record.role = type == "assistant.message" ? "assistant"
+                      : (type == "import.message" ? "tool" : "user");
+        record.text = message.at("content").get<std::string>();
+        record.sourceName = "Aegis " + origin + " run " + message.at("run_id").get<std::string>();
+        record.sourceLine = message.at("sequence").is_number_integer() &&
+                                    message.at("sequence").get<std::int64_t>() > 0
+                                ? message.at("sequence").get<std::int64_t>()
+                                : static_cast<std::int64_t>(index + 1);
+        imported.push_back(std::move(record));
+        ++index;
+    }
+    const auto evidence = [&](const nlohmann::json &original, const char *kind) {
+        ImportedMessage record;
+        record.id = "message:" + origin + ":" + sourceTaskId + ":" + kind + ":" +
+                    std::to_string(imported.size());
+        record.role = "tool";
+        nlohmann::json annotated = original;
+        annotated["source_origin"] = origin;
+        annotated["source_task_id"] = sourceTaskId;
+        annotated["kind"] = kind;
+        record.text = annotated.dump();
+        record.sourceName = "Aegis " + origin + " task " + sourceTaskId;
+        record.sourceLine = static_cast<std::int64_t>(imported.size() + 1);
+        imported.push_back(std::move(record));
+    };
+    for (const auto &finding : bundle.at("findings")) evidence(finding, "finding");
+    for (const auto &verification : bundle.at("verifications")) evidence(verification, "verification");
+    ImportedMessage metadata;
+    metadata.id = "message:" + origin + ":" + sourceTaskId + ":bundle";
+    metadata.role = "tool";
+    metadata.text = nlohmann::json{{"kind", "bundle"}, {"source_origin", origin},
+        {"source_task_id", sourceTaskId}, {"source_repository", sourceRepository},
+        {"profile", profile}, {"omissions", nlohmann::json::array()}, {"historical", true}}.dump();
+    metadata.sourceName = "Aegis " + origin + " task " + sourceTaskId;
+    metadata.sourceLine = static_cast<std::int64_t>(imported.size() + 1);
+    imported.push_back(std::move(metadata));
+    const auto sourceKey = nlohmann::json{"aegis-task", origin, sourceTaskId, destinationRepository}.dump();
+    return importTask(sourceKey, prompt, destinationRepository, context, imported);
+}
+
 Task Store::importTask(const std::string &sourceKey, std::string prompt, std::string repository,
                        const TaskContext &context, const std::vector<ImportedMessage> &messages) {
     std::lock_guard lock(mutex_);
@@ -665,6 +813,93 @@ Task Store::importTask(const std::string &sourceKey, std::string prompt, std::st
         execute("ROLLBACK;");
         throw;
     }
+}
+
+std::string Store::exportTaskBundle(const std::string &taskId) const {
+    std::string storeOrigin;
+    {
+        std::lock_guard lock(mutex_);
+        Statement statement(database_, "SELECT value FROM metadata WHERE key = 'store_origin'");
+        if (sqlite3_step(statement.get()) == SQLITE_ROW) storeOrigin = columnText(statement.get(), 0);
+    }
+    const auto taskOpt = task(taskId);
+    if (!taskOpt) throw std::invalid_argument("task not found: " + taskId);
+    const auto &source = *taskOpt;
+    if (source.prompt.size() > 8000) throw std::invalid_argument("task prompt exceeds 8000 bytes");
+    const auto contextField = [](const std::string &value) { return value.size() <= 4000; };
+    if (!contextField(source.context.goal) || !contextField(source.context.constraints) ||
+        !contextField(source.context.decisions) || !contextField(source.context.attempts) ||
+        !contextField(source.context.unfinished) || !contextField(source.context.nextAction))
+        throw std::invalid_argument("task context field exceeds 4000 bytes");
+
+    auto recentEvents = events(taskId, 1001, false);
+    const bool eventsOmitted = recentEvents.size() > 1000;
+    if (eventsOmitted) recentEvents.erase(recentEvents.begin());
+    nlohmann::json messages = nlohmann::json::array();
+    for (const auto &event : recentEvents) {
+        if (event.type != "user.message" && event.type != "assistant.message" && event.type != "import.message")
+            continue;
+        messages.push_back({{"id", event.id}, {"run_id", event.runId}, {"agent", event.agent},
+            {"type", event.type}, {"content", event.content}, {"timestamp", event.timestamp},
+            {"sequence", event.sequence}});
+    }
+
+    const auto allFindings = findings(taskId, 101);
+    const bool findingsOmitted = allFindings.size() > 100;
+    nlohmann::json findingsJson = nlohmann::json::array();
+    for (std::size_t index = 0; index < allFindings.size() && index < 100; ++index) {
+        const auto &finding = allFindings[index];
+        findingsJson.push_back({{"id", finding.id},
+            {"file_path", finding.filePath},
+            {"start_line", finding.startLine ? nlohmann::json(*finding.startLine) : nlohmann::json(nullptr)},
+            {"end_line", finding.endLine ? nlohmann::json(*finding.endLine) : nlohmann::json(nullptr)},
+            {"message", finding.message}, {"status", finding.status},
+            {"repository_fingerprint", finding.repositoryFingerprint ? nlohmann::json(*finding.repositoryFingerprint) : nlohmann::json(nullptr)},
+            {"freshness", "historical"}});
+    }
+
+    const auto allVerifications = verifications(taskId, 21);
+    const bool verificationsOmitted = allVerifications.size() > 20;
+    nlohmann::json verificationsJson = nlohmann::json::array();
+    for (std::size_t index = 0; index < allVerifications.size() && index < 20; ++index) {
+        const auto &verification = allVerifications[index];
+        verificationsJson.push_back({{"id", verification.id}, {"command", verification.command},
+            {"exit_code", verification.exitCode}, {"output", verification.output},
+            {"repository_fingerprint", verification.repositoryFingerprint ? nlohmann::json(*verification.repositoryFingerprint) : nlohmann::json(nullptr)},
+            {"freshness", "historical"}});
+    }
+
+    nlohmann::json profile = nlohmann::json::object();
+    try {
+        profile = nlohmann::json::parse(workingProfile(source.repository).first);
+    } catch (const nlohmann::json::exception &) {
+        profile = nlohmann::json::object();
+    }
+
+    nlohmann::json omissions = nlohmann::json::array();
+    if (eventsOmitted) omissions.push_back("History bounded to most recent 1000 semantic events");
+    if (findingsOmitted) omissions.push_back("Findings bounded to most recent 100");
+    if (verificationsOmitted) omissions.push_back("Verifications bounded to most recent 20");
+
+    nlohmann::json bundle{
+        {"format", "aegis-task"},
+        {"version", 1},
+        {"source_origin", storeOrigin},
+        {"source_task_id", source.id},
+        {"source_repository", source.repository},
+        {"prompt", source.prompt},
+        {"context", {{"goal", source.context.goal}, {"constraints", source.context.constraints},
+            {"decisions", source.context.decisions}, {"attempts", source.context.attempts},
+            {"unfinished", source.context.unfinished}, {"next_action", source.context.nextAction}}},
+        {"profile", profile},
+        {"messages", messages},
+        {"findings", findingsJson},
+        {"verifications", verificationsJson},
+        {"omissions", omissions},
+        {"historical", true}};
+    const auto serialized = bundle.dump();
+    if (serialized.size() > 1048576) throw std::invalid_argument("task bundle exceeds 1048576 bytes");
+    return serialized;
 }
 
 bool Store::reserveContinuation(const std::string &requestId, const std::string &payload) {

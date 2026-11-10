@@ -15,7 +15,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 13;
+    static constexpr int currentSchemaVersion = 14;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();
@@ -56,6 +56,8 @@ public:
     std::optional<std::string> continuationState(const std::string &requestId) const;
     bool linkContinuation(const std::string &requestId, const std::string &runId);
     bool failContinuation(const std::string &requestId);
+    std::string exportTaskBundle(const std::string &taskId) const;
+    Task importTaskBundle(const std::string &raw, const std::string &destRepository);
     std::pair<std::string, std::int64_t> workingProfile(const std::string &repository) const;
     std::optional<std::int64_t> saveWorkingProfile(const std::string &repository,
                                                    const std::string &profileJson, std::int64_t expectedRevision);
