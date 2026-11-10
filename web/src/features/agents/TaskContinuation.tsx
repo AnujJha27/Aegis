@@ -6,6 +6,9 @@ import { useContextDraft } from "./useContextDraft";
 import { formatHandoff } from "../review/handoffText";
 import { loadProfile, formatProfile, formatWorkflow } from "../workflow/workingProfile";
 import { WorkingProfile } from "../workflow/WorkingProfilePanel";
+import HandoffRecovery from "./HandoffRecovery";
+import { savePendingHandoff, removePendingHandoff } from "./pendingHandoff";
+import type { PendingHandoffTarget } from "./pendingHandoff";
 import type { HandoffContext } from "../../app/api";
 
 type Props = {
@@ -31,6 +34,8 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   const [target, setTarget] = useState("");
   const [targetModel, setTargetModel] = useState("");
   const [pending, setPending] = useState(false);
+  const [recoveryEpoch, setRecoveryEpoch] = useState(0);
+  const [hasPendingHandoff, setHasPendingHandoff] = useState(false);
   const genRef = useRef(0);
   const retryRef = useRef<{ target: string; model: string; key: string } | null>(null);
   const fingerprintRef = useRef<string | null | undefined>(undefined);
@@ -40,6 +45,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   const revisionRef = useRef(0);
   const targetRef = useRef("");
   const pendingRef = useRef(false);
+  const hasPendingRef = useRef(false);
   const sourceBusyRef = useRef(sourceBusy);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const focusRef = useRef<HTMLElement | null>(null);
@@ -53,6 +59,11 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   const setPendingState = (value: boolean) => {
     pendingRef.current = value;
     setPending(value);
+  };
+
+  const setHasPendingState = (value: boolean) => {
+    hasPendingRef.current = value;
+    setHasPendingHandoff(value);
   };
 
   useEffect(() => {
@@ -119,7 +130,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   };
 
   const startHandoff = async () => {
-    if (sourceBusyRef.current || pendingRef.current || !run || targets.length === 0) return;
+    if (sourceBusyRef.current || pendingRef.current || hasPendingRef.current || !run || targets.length === 0) return;
     const gen = genRef.current;
     const taskId = taskRef.current.id;
     const sourceRunId = runRef.current?.id;
@@ -172,7 +183,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
   };
 
   const confirmContinue = async () => {
-    if (pendingRef.current || sourceBusyRef.current) return;
+    if (pendingRef.current || hasPendingRef.current || sourceBusyRef.current) return;
     const gen = genRef.current;
     const taskId = taskRef.current.id;
     const sourceRunId = runRef.current?.id;
@@ -189,14 +200,29 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
     try {
       const requestId = retryRef.current?.target === target && retryRef.current?.model === targetModel ? retryRef.current.key : crypto.randomUUID();
       retryRef.current = { target, model: targetModel, key: requestId };
-      const newRun = await api.continueTask(taskId, target, sourceRunId, preview, requestId, fingerprintRef.current, targetModel || undefined);
+      savePendingHandoff({ version: 1, taskId, repository: taskRef.current.repository, sourceRunId, target: target as PendingHandoffTarget, model: targetModel, prompt: preview, fingerprint: fingerprintRef.current ?? null, requestId });
+      const newRun = await api.continueTask(taskId, target, sourceRunId, preview, requestId, fingerprintRef.current ?? null, targetModel || undefined);
       if (genRef.current === gen && taskRef.current.id === taskId && runRef.current?.id === sourceRunId) {
-        onContinued?.(newRun, sourceRunId);
+        try {
+          removePendingHandoff(taskRef.current.repository, taskId, requestId);
+        } catch {
+          setHasPendingState(true);
+          setRecoveryEpoch((epoch) => epoch + 1);
+          setDialogOpen(false);
+          setError("Delivered but local recovery record could not be cleared; check delivery before retrying.");
+          return;
+        }
+        setHasPendingState(false);
         setDialogOpen(false);
         retryRef.current = null;
+        onContinued?.(newRun, sourceRunId);
       }
     } catch (err) {
-      if (genRef.current === gen) setError(err instanceof Error ? err.message : String(err));
+      if (genRef.current === gen) {
+        setError(err instanceof Error ? err.message : String(err));
+        setDialogOpen(false);
+        setRecoveryEpoch((epoch) => epoch + 1);
+      }
     } finally {
       if (genRef.current === gen) setPendingState(false);
     }
@@ -262,6 +288,13 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
           });
         }}
       />
+      <HandoffRecovery
+        key={`${task.repository}/${task.id}/${recoveryEpoch}`}
+        task={task}
+        sourceBusy={sourceBusy}
+        onContinued={onContinued}
+        onPendingChange={setHasPendingState}
+      />
       {error && !dialogOpen && !contextDraft.conflict && !contextDraft.storageError ? <div role="alert">{error}</div> : null}
       <button
         type="button"
@@ -278,7 +311,7 @@ export function TaskContinuation({ task, run, agents, sourceBusy, onTaskUpdated,
       >
         <div>
           <label htmlFor="continue-agent">Continue with</label>
-          <select id="continue-agent" value={target} onChange={(event) => changeTarget(event.target.value)}>
+          <select id="continue-agent" value={target} onChange={(event) => changeTarget(event.target.value)} disabled={pending}>
             {targets.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
           <label htmlFor="continue-model">Model (applies to the new run only)</label>
