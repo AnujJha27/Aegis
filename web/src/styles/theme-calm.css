@@ -54,3 +54,24 @@ button, select, textarea, .task-item, .file-row, .review-side-section, .code-too
 .session .event-card { max-width: 900px; margin: 0 auto 14px; padding: 18px 20px; border-radius: 10px; background: #141a22; border: 1px solid #29333f; }
 .session .event-card pre { font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.65; }
 .session .event-meta { font-size: 10px; letter-spacing: .04em; }
+.topbar { flex-shrink: 0; }
+.session { background: radial-gradient(circle at 100% 0%, #1b2531 0%, transparent 55%); }
+.composer { width: min(960px, calc(100% - 40px)); align-self: center; margin: 0 20px 20px; padding: 16px; border: 1px solid #354151; border-radius: 14px; background: #171d25; box-shadow: 0 12px 32px #00000026; }
+.composer-tools { max-width: none; display: grid; gap: 10px; margin: 0 0 12px; }
+.agent-dock { flex-wrap: wrap; gap: 8px; }
+.task-continuation { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.task-continuation > details[open], .task-continuation > .working-profile[open] { flex-basis: 100%; max-height: min(36vh, 360px); overflow: auto; }
+.task-continuation summary { padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+.task-continuation > button { margin-left: auto; }
+.prompt-row { max-width: none; }
+.prompt-row textarea { min-height: 76px; font-size: 14px; border-radius: 9px; background: #10151c; }
+.send-button { border-radius: 9px; }
+.composer-hint { max-width: none; margin: 8px 0 0; }
+.task-tools { flex-shrink: 0; padding: 14px; border-top: 1px solid var(--line); }
+.task-tools-heading { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.task-tools .import-details { margin: 6px 0; padding: 6px 10px; background: #141a22; }
+.task-tools .import-details summary { font-size: 12px; }
+.task-item { border-radius: 8px; }
+.task-item.selected { border: 1px solid #36475a; background: #1c2733; }
+.new-task button { border-radius: 8px; }
+.new-task textarea { border-radius: 8px; }
