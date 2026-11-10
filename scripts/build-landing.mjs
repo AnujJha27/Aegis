@@ -8,6 +8,7 @@ const dist = join(repo, 'site-dist');
 
 const allowlist = [
   'index.html',
+  'art-hero.webp',
   'plane.html',
   'ledger.html',
   'faq.html',

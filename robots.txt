@@ -1,2 +1,3 @@
 User-agent: *
 Allow: /
+Sitemap: https://aegiswork.netlify.app/sitemap.xml
