@@ -1,8 +1,10 @@
 #include "daemon/api/route_handlers.h"
 #include "daemon/api/route_helpers.h"
+#include "daemon/agents/event_id.h"
 #include "daemon/repository/git.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <filesystem>
 #include <limits>
@@ -24,6 +26,10 @@ bool validFilePath(const std::string &value) {
     for (const auto &part : path)
         if (part == ".." || part == ".git" || part == ".aegis" || part == "node_modules") return false;
     return true;
+}
+
+bool validSourceEventId(const std::string &value) {
+    return !value.empty() && value.size() <= 200 && value.find('\0') == std::string::npos;
 }
 
 std::optional<int> lineValue(const nlohmann::json &body, const char *key, bool &valid) {
@@ -88,6 +94,74 @@ std::optional<Response> findings(const Request &request, const Context &context)
                 const auto run = context.store->run(*runId);
                 if (!run || run->taskId != *taskId) return error(boost::beast::http::status::not_found, "run_not_found", "run not found for task");
             }
+            std::optional<std::string> sourceEventId;
+            if (body.contains("source_event_id") && !body.at("source_event_id").is_null()) {
+                if (!body.at("source_event_id").is_string())
+                    return error(boost::beast::http::status::bad_request, "invalid_source_event_id", "source_event_id must be a string");
+                sourceEventId = body.at("source_event_id").get<std::string>();
+                if (!validSourceEventId(*sourceEventId))
+                    return error(boost::beast::http::status::bad_request, "invalid_source_event_id", "source_event_id must contain 1 to 200 bytes without NUL characters");
+            }
+
+            if (sourceEventId) {
+                std::optional<nlohmann::json> inner;
+                std::optional<std::string> sourceRunId;
+                for (const auto &event : context.store->events(*taskId)) {
+                    if (event.type != "import.message" || event.id != *sourceEventId) continue;
+                    sourceRunId = event.runId;
+                    nlohmann::json content;
+                    try { content = nlohmann::json::parse(event.content); }
+                    catch (const nlohmann::json::exception &) { break; }
+                    if (!content.is_object()) break;
+                    const auto &envelope = content;
+                    if (!envelope.is_object() || !envelope.value("historical", false) ||
+                        !envelope.contains("text") || !envelope.at("text").is_string()) break;
+                    nlohmann::json parsed;
+                    try { parsed = nlohmann::json::parse(envelope.at("text").get<std::string>()); }
+                    catch (const nlohmann::json::exception &) { break; }
+                    if (!parsed.is_object() || parsed.value("kind", std::string()) != "finding" ||
+                        !parsed.contains("source_origin") || !parsed.contains("source_task_id") || !parsed.contains("id")) break;
+                    inner = parsed;
+                    break;
+                }
+                if (!inner)
+                    return error(boost::beast::http::status::not_found, "source_event_not_found", "matching historical import source event not found");
+
+                for (const auto &event : context.store->events(*taskId)) {
+                    if (event.type != "finding.promoted") continue;
+                    nlohmann::json content;
+                    try { content = nlohmann::json::parse(event.content); }
+                    catch (const nlohmann::json::exception &) { continue; }
+                    if (!content.is_object()) continue;
+                    if (!content.contains("source_event_id") || !content.at("source_event_id").is_string() ||
+                        content.at("source_event_id").get<std::string>() != *sourceEventId) continue;
+                    if (!content.contains("finding_id") || !content.at("finding_id").is_string()) continue;
+                    const auto promotedId = content.at("finding_id").get<std::string>();
+                    for (auto existing : context.store->findings(*taskId, 10000))
+                        if (existing.id == promotedId)
+                            return jsonResponse(boost::beast::http::status::ok, protocol::toJson(existing));
+                }
+
+                const std::string suffix = "\n\nImported source event: " + *sourceEventId + " (historical location; unverified).";
+                const auto promotedMessage = message + suffix;
+                if (promotedMessage.size() > 8000)
+                    return error(boost::beast::http::status::bad_request, "invalid_message", "message must not exceed 8000 bytes after promotion suffix");
+                const auto finding = context.store->createFinding(*taskId, std::move(runId), filePath, startLine, endLine, promotedMessage, std::nullopt);
+                const nlohmann::json promotedContent{{"source_event_id", *sourceEventId}, {"finding_id", finding.id}, {"original_source", *inner}};
+                AgentEvent promotionEvent;
+                promotionEvent.id = agents::newEventId();
+                promotionEvent.taskId = *taskId;
+                promotionEvent.runId = sourceRunId.value_or(std::string{});
+                promotionEvent.type = "finding.promoted";
+                promotionEvent.agent = "import";
+                promotionEvent.content = promotedContent.dump();
+                promotionEvent.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                context.store->appendEvent(promotionEvent);
+                if (context.events) context.events->publish(promotionEvent);
+                return jsonResponse(boost::beast::http::status::created, protocol::toJson(finding));
+            }
+
             const auto finding = context.store->createFinding(*taskId, std::move(runId), filePath, startLine, endLine, message,
                 context.git ? context.git->verificationFingerprint() : std::nullopt);
             return jsonResponse(boost::beast::http::status::created, protocol::toJson(finding));

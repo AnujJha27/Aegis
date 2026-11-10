@@ -99,7 +99,7 @@ export type HandoffContext = {
   repository_fingerprint?: string | null;
 };
 export type ReviewFinding = { id: string; task_id: string; run_id: string | null; file_path: string; start_line: number | null; end_line: number | null; message: string; status: "open" | "resolved"; created_at: number; updated_at: number; repository_fingerprint?: string | null; freshness?: "current" | "stale" | "unknown" };
-export type NewReviewFinding = { file_path: string; run_id?: string; start_line?: number; end_line?: number; message: string };
+export type NewReviewFinding = { file_path: string; run_id?: string; start_line?: number; end_line?: number; message: string; source_event_id?: string };
 
 export type GraphNode = { id: string; type: string; label: string };
 export type GraphEdge = { from: string; to: string };

@@ -551,6 +551,39 @@ int main() {
     assert(legacyFindingEntries.size() == 1 && legacyFindingEntries[0].at("id") == legacyFindingId);
     assert(legacyFindingEntries[0].at("freshness") == "unknown");
 
+    // Regression: imported findings must be promotable to first-class findings with
+    // unknown freshness (no baseline fingerprint) and idempotent duplicate promotion.
+    const nlohmann::json importFindingPayload{{"kind", "finding"}, {"source_origin", "origin"},
+        {"source_task_id", "oldtask"}, {"id", "oldfinding"}, {"file_path", "src/auth.cpp"},
+        {"message", "review this"}, {"status", "open"}};
+    const auto promotedTask = store.importTask("promote-source-unique", "promote",
+        handoffFixture.root().string(), aegis::daemon::TaskContext{},
+        std::vector<aegis::daemon::ImportedMessage>{{"finding-source", "tool", importFindingPayload.dump(), 1, "bundle"}});
+    std::string importEventId;
+    for (const auto &event : store.events(promotedTask.id))
+        if (event.type == "import.message") importEventId = event.id;
+    assert(!importEventId.empty());
+    const auto promoteCreated = request(handoffContext, http::verb::post,
+        "/api/tasks/" + promotedTask.id + "/findings",
+        nlohmann::json{{"file_path", "src/auth.cpp"}, {"message", "review this"},
+                       {"source_event_id", importEventId}}.dump());
+    assert(promoteCreated.result() == http::status::created);
+    const auto promotedFinding = nlohmann::json::parse(promoteCreated.body());
+    assert(promotedFinding.at("repository_fingerprint").is_null());
+    const auto promoteList = request(handoffContext, http::verb::get,
+        "/api/tasks/" + promotedTask.id + "/findings");
+    assert(nlohmann::json::parse(promoteList.body())[0].at("freshness") == "unknown");
+    const auto promoteDuplicate = request(handoffContext, http::verb::post,
+        "/api/tasks/" + promotedTask.id + "/findings",
+        nlohmann::json{{"file_path", "src/auth.cpp"}, {"message", "review this"},
+                       {"source_event_id", importEventId}}.dump());
+    assert(promoteDuplicate.result() == http::status::ok);
+    assert(nlohmann::json::parse(promoteDuplicate.body()).at("id") == promotedFinding.at("id"));
+    assert(request(handoffContext, http::verb::post,
+        "/api/tasks/" + promotedTask.id + "/findings",
+        nlohmann::json{{"file_path", "src/auth.cpp"}, {"message", "review this"},
+                       {"source_event_id", "missing-import-event"}}.dump()).result() == http::status::not_found);
+
     const auto created = request(context, http::verb::post, "/api/tasks", R"({"prompt":"inspect this"})");
     assert(created.result() == http::status::created);
     assert(created.body().find("inspect this") != std::string::npos);
