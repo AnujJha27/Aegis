@@ -15,7 +15,7 @@ namespace aegis::daemon {
 
 class Store final {
 public:
-    static constexpr int currentSchemaVersion = 11;
+    static constexpr int currentSchemaVersion = 12;
 
     explicit Store(const std::filesystem::path &path);
     ~Store();
@@ -53,6 +53,9 @@ public:
     bool reserveContinuation(const std::string &requestId, const std::string &payload);
     std::optional<std::pair<std::string, std::optional<std::string>>> continuation(const std::string &requestId) const;
     bool completeContinuation(const std::string &requestId, const std::string &runId);
+    std::optional<std::string> continuationState(const std::string &requestId) const;
+    bool linkContinuation(const std::string &requestId, const std::string &runId);
+    bool failContinuation(const std::string &requestId);
 
 private:
     void execute(const char *sql) const;

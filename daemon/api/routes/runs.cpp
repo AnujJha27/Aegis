@@ -59,11 +59,13 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 return error(boost::beast::http::status::not_found, "request_not_found", "continuation request not found");
             std::string state = "uncertain";
             std::optional<std::string> runId;
+            if (const auto persisted = context.store->continuationState(requestId)) state = *persisted;
             if (saved->second) {
                 const auto run = context.store->run(*saved->second);
                 if (run && run->taskId == taskId) {
-                    state = "delivered";
                     runId = *saved->second;
+                } else if (state == "delivered") {
+                    state = "uncertain";
                 }
             }
             nlohmann::json result{{"request_id", requestId}, {"task_id", taskId}, {"state", state},
@@ -148,8 +150,13 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 if (!saved) return std::nullopt;
                 if (saved->first != payload)
                     return error(boost::beast::http::status::conflict, "request_id_conflict", "request_id was already used with a different continuation payload");
-                if (!saved->second)
+                const auto state = context.store->continuationState(*requestId);
+                if (state == "failed")
+                    return error(boost::beast::http::status::conflict, "delivery_failed", "the continuation delivery failed; refresh run history instead of retrying");
+                if (state != "delivered")
                     return error(boost::beast::http::status::conflict, "delivery_uncertain", "a matching continuation is pending; refresh run history instead of retrying");
+                if (!saved->second)
+                    return error(boost::beast::http::status::conflict, "delivery_uncertain", "the continuation run is missing; refresh run history instead of retrying");
                 const auto existing = context.store->run(*saved->second);
                 if (!existing)
                     return error(boost::beast::http::status::conflict, "delivery_uncertain", "the continuation run is missing; refresh run history instead of retrying");
@@ -190,9 +197,8 @@ std::optional<Response> runs(const Request &request, const Context &context) {
                 if (const auto raced = replay()) return *raced;
                 return error(boost::beast::http::status::conflict, "delivery_uncertain", "a matching continuation is pending; refresh run history instead of retrying");
             }
-            const auto run = context.agentManager->launch(taskId, agent, prompt, model);
+            const auto run = context.agentManager->launch(taskId, agent, prompt, model, requestId);
             if (!run) return error(boost::beast::http::status::bad_request, "agent_start_failed", "agent could not be started");
-            if (requestId) context.store->completeContinuation(*requestId, run->id);
             const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
             const aegis::daemon::AgentEvent continued{agents::newEventId(), run->taskId, run->id, "run.continued", run->agent, sourceRunId, nowMs};

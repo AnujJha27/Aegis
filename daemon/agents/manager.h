@@ -34,7 +34,11 @@ public:
     bool isTurnBusy(const std::string &runId) const;
     std::optional<AgentRun> launch(const std::string &taskId, const std::string &agent,
                                    const std::optional<std::string> &initialPrompt = std::nullopt,
-                                   const std::optional<std::string> &model = std::nullopt);
+                                   const std::optional<std::string> &model = std::nullopt,
+                                   const std::optional<std::string> &continuationRequestId = std::nullopt);
+    bool linkContinuation(const std::string &requestId, const std::string &runId);
+    bool failContinuation(const std::string &requestId);
+    std::optional<std::string> continuationState(const std::string &requestId) const;
     SendResult send(const std::string &runId, std::string_view message);
     bool sendPty(const std::string &runId, std::string_view input);
     bool resizePty(const std::string &runId, unsigned short cols, unsigned short rows);

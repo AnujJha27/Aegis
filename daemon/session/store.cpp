@@ -153,7 +153,7 @@ Store::Store(const std::filesystem::path &path) {
         execute("CREATE TABLE IF NOT EXISTS imports (source_key TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id));");
         if (previousVersion < 8) execute("PRAGMA user_version = 8;");
         execute("CREATE INDEX IF NOT EXISTS events_run_type_sequence ON events(run_id, type, sequence DESC);");
-        execute("CREATE TABLE IF NOT EXISTS continuations (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL);");
+        execute("CREATE TABLE IF NOT EXISTS continuations (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, run_id TEXT REFERENCES runs(id) ON DELETE SET NULL, state TEXT NOT NULL DEFAULT 'prepared');");
         if (previousVersion < 9) execute("PRAGMA user_version = 9;");
         if (!hasColumn(database_, "runs", "model"))
             execute("ALTER TABLE runs ADD COLUMN model TEXT;");
@@ -170,6 +170,19 @@ Store::Store(const std::filesystem::path &path) {
                 throw;
             }
         }
+        if (!hasColumn(database_, "continuations", "state")) {
+            execute("BEGIN IMMEDIATE;");
+            try {
+                execute("ALTER TABLE continuations ADD COLUMN state TEXT NOT NULL DEFAULT 'uncertain';");
+                execute("UPDATE continuations SET state = CASE WHEN run_id IS NOT NULL THEN 'delivered' ELSE 'uncertain' END;");
+                execute("PRAGMA user_version = 12;");
+                execute("COMMIT;");
+            } catch (...) {
+                execute("ROLLBACK;");
+                throw;
+            }
+        } else if (previousVersion < 12) execute("PRAGMA user_version = 12;");
+        execute("UPDATE continuations SET state = 'uncertain' WHERE state IN ('prepared', 'launching');");
     } catch (const std::exception &error) {
         sqlite3_close(database_);
         database_ = nullptr;
@@ -645,7 +658,7 @@ Task Store::importTask(const std::string &sourceKey, std::string prompt, std::st
 
 bool Store::reserveContinuation(const std::string &requestId, const std::string &payload) {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "INSERT OR IGNORE INTO continuations (request_id, payload) VALUES (?, ?)");
+    Statement statement(database_, "INSERT OR IGNORE INTO continuations (request_id, payload, state) VALUES (?, ?, 'prepared')");
     check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
     check(sqlite3_bind_text(statement.get(), 2, payload.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation payload");
     check(sqlite3_step(statement.get()), database_, "insert continuation");
@@ -664,10 +677,74 @@ std::optional<std::pair<std::string, std::optional<std::string>>> Store::continu
 
 bool Store::completeContinuation(const std::string &requestId, const std::string &runId) {
     std::lock_guard lock(mutex_);
-    Statement statement(database_, "UPDATE continuations SET run_id = ? WHERE request_id = ?");
+    Statement statement(database_, "UPDATE continuations SET run_id = ?, state = 'delivered' WHERE request_id = ? AND state IN ('prepared', 'launching')");
     check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation run");
     check(sqlite3_bind_text(statement.get(), 2, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
     check(sqlite3_step(statement.get()), database_, "update continuation run");
+    return sqlite3_changes(database_) != 0;
+}
+
+std::optional<std::string> Store::continuationState(const std::string &requestId) const {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "SELECT state FROM continuations WHERE request_id = ?");
+    check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation lookup");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    return columnText(statement.get(), 0);
+}
+
+bool Store::linkContinuation(const std::string &requestId, const std::string &runId) {
+    std::lock_guard lock(mutex_);
+    execute("BEGIN IMMEDIATE;");
+    try {
+        std::string payload;
+        {
+            Statement statement(database_, "SELECT payload FROM continuations WHERE request_id = ? AND state = 'prepared'");
+            check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation lookup");
+            if (sqlite3_step(statement.get()) != SQLITE_ROW) {
+                execute("COMMIT;");
+                return false;
+            }
+            payload = columnText(statement.get(), 0);
+        }
+        std::string taskId;
+        try {
+            const auto parsed = nlohmann::json::parse(payload);
+            if (parsed.is_object() && parsed.contains("task_id") && parsed.at("task_id").is_string())
+                taskId = parsed.at("task_id").get<std::string>();
+        } catch (const nlohmann::json::exception &) {
+            execute("COMMIT;");
+            return false;
+        }
+        if (taskId.empty()) {
+            execute("COMMIT;");
+            return false;
+        }
+        {
+            Statement run(database_, "SELECT task_id FROM runs WHERE id = ?");
+            check(sqlite3_bind_text(run.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind run lookup");
+            if (sqlite3_step(run.get()) != SQLITE_ROW || columnText(run.get(), 0) != taskId) {
+                execute("COMMIT;");
+                return false;
+            }
+        }
+        Statement statement(database_, "UPDATE continuations SET run_id = ?, state = 'launching' WHERE request_id = ? AND state = 'prepared'");
+        check(sqlite3_bind_text(statement.get(), 1, runId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation run");
+        check(sqlite3_bind_text(statement.get(), 2, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
+        check(sqlite3_step(statement.get()), database_, "update continuation link");
+        const bool linked = sqlite3_changes(database_) != 0;
+        execute("COMMIT;");
+        return linked;
+    } catch (...) {
+        execute("ROLLBACK;");
+        throw;
+    }
+}
+
+bool Store::failContinuation(const std::string &requestId) {
+    std::lock_guard lock(mutex_);
+    Statement statement(database_, "UPDATE continuations SET state = 'failed' WHERE request_id = ? AND state IN ('prepared', 'launching')");
+    check(sqlite3_bind_text(statement.get(), 1, requestId.c_str(), -1, SQLITE_TRANSIENT), database_, "bind continuation id");
+    check(sqlite3_step(statement.get()), database_, "fail continuation");
     return sqlite3_changes(database_) != 0;
 }
 

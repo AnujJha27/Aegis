@@ -289,6 +289,27 @@ int main() {
     std::ifstream preserved(corruptPath, std::ios::binary);
     assert(std::string(std::istreambuf_iterator<char>(preserved), {}) == corruptContents);
 
+    {
+        const auto continuationPath = fixtureDirectory / "continuation-restart.sqlite";
+        {
+            aegis::daemon::Store store(continuationPath);
+            const auto task = store.createTask("continuation restart", "/repo");
+            const auto firstRun = store.startRun(task.id, "codex");
+            assert(store.reserveContinuation("restart-1", nlohmann::json{{"prompt", "p"}, {"task_id", task.id}}.dump()));
+            assert(store.linkContinuation("restart-1", firstRun.id));
+            assert(store.completeContinuation("restart-2", firstRun.id) == false);
+            assert(store.reserveContinuation("restart-2", nlohmann::json{{"prompt", "p"}, {"task_id", task.id}}.dump()));
+            assert(store.linkContinuation("restart-2", firstRun.id));
+            assert(store.completeContinuation("restart-2", firstRun.id));
+        }
+        {
+            aegis::daemon::Store store(continuationPath);
+            assert(store.continuationState("restart-1") == "uncertain");
+            assert(store.continuation("restart-1")->second.has_value());
+            assert(store.continuationState("restart-2") == "delivered");
+        }
+    }
+
     std::filesystem::remove_all(fixtureDirectory);
 
     {
@@ -322,6 +343,25 @@ int main() {
         const auto branch = store.importTask("key-b", "branch import", "/repo", ctx, messages);
         assert(branch.id != task.id);
         assert(store.tasks().size() == 2);
+    }
+
+    {
+        aegis::daemon::Store store(":memory:");
+        const auto task = store.createTask("continuation delivery state", "/repo");
+        assert(store.continuationState("req-missing") == std::nullopt);
+        assert(store.reserveContinuation("req-1", nlohmann::json{{"prompt", "p"}, {"task_id", task.id}}.dump()));
+        assert(store.continuationState("req-1") == "prepared");
+        const auto run = store.startRun(task.id, "codex");
+        assert(store.linkContinuation("req-1", run.id));
+        assert(store.continuationState("req-1") == "launching");
+        assert(store.completeContinuation("req-1", run.id));
+        assert(store.continuationState("req-1") == "delivered");
+        assert(store.reserveContinuation("req-2", "{}"));
+        const auto otherRun = store.startRun(task.id, "codex");
+        assert(!otherRun.id.empty());
+        assert(store.failContinuation("req-2"));
+        assert(store.continuationState("req-2") == "failed");
+        assert(store.continuationState("req-1") == "delivered");
     }
 
     aegis::daemon::EventHub hub;

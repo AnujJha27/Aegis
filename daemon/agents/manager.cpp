@@ -112,7 +112,8 @@ bool Manager::isTurnBusy(const std::string &runId) const {
 
 std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::string &agent,
                                         const std::optional<std::string> &initialPrompt,
-                                        const std::optional<std::string> &model) {
+                                        const std::optional<std::string> &model,
+                                        const std::optional<std::string> &continuationRequestId) {
     if (model) {
         if (agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
         const auto &value = *model;
@@ -139,6 +140,11 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     if (agent != "shell" && agent != "codex" && agent != "claude" && agent != "opencode") return std::nullopt;
     auto run = store_.startRun(taskId, agent, model);
     std::clog << "aegis_daemon: starting agent " << agent << " run " << run.id << '\n';
+    if (continuationRequestId && !store_.linkContinuation(*continuationRequestId, run.id)) {
+        store_.updateRunStatus(run.id, "failed");
+        publish({newEventId(), taskId, run.id, "run.failed", agent, "continuation link failed", now()});
+        return std::nullopt;
+    }
     EventSink sink = [this](AgentEvent event) { publish(std::move(event)); };
     SessionSink sessionSink = [this](const std::string &runId, std::string sessionId) {
         store_.setExternalSessionId(runId, std::move(sessionId));
@@ -186,19 +192,35 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
         }
         store_.updateRunStatus(run.id, "failed");
         publish({newEventId(), taskId, run.id, "run.failed", agent, "agent adapter failed to start", now()});
+        if (continuationRequestId) failContinuation(*continuationRequestId);
         return std::nullopt;
     }
     if (initialPrompt) {
         if (agent == "codex") {
             if (send(run.id, *initialPrompt) != SendResult::accepted) {
                 terminate(run.id);
+                if (continuationRequestId) failContinuation(*continuationRequestId);
                 return std::nullopt;
             }
         } else {
             publish({newEventId(), taskId, run.id, "user.message", agent, *initialPrompt, now()});
         }
     }
+    if (continuationRequestId && !store_.completeContinuation(*continuationRequestId, run.id))
+        return std::nullopt;
     return store_.run(run.id);
+}
+
+bool Manager::linkContinuation(const std::string &requestId, const std::string &runId) {
+    return store_.linkContinuation(requestId, runId);
+}
+
+bool Manager::failContinuation(const std::string &requestId) {
+    return store_.failContinuation(requestId);
+}
+
+std::optional<std::string> Manager::continuationState(const std::string &requestId) const {
+    return store_.continuationState(requestId);
 }
 
 SendResult Manager::send(const std::string &runId, std::string_view message) {
