@@ -5,6 +5,8 @@ import type { PtyConnection } from "../../app/events";
 import type { ReactNode } from "react";
 import { AegisMark } from "../../components/AegisMark";
 import { ImportedFinding } from "../review/ImportedFinding";
+import { ToolActivity } from "./ToolActivity";
+import { PermissionRequests } from "./PermissionRequests";
 const AgentTerminal = lazy(() => import("./AgentTerminal"));
 
 function importSummary(content: string): string | null {
@@ -49,7 +51,9 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
       </div>
       {showEmpty && <div className="empty-output"><div className="empty-icon"><AegisMark /></div><h2>{run ? `${run.agent} is ready` : task ? "Ready for direction" : "Your workspace is ready"}</h2><p>{run ? interactive ? "The terminal is ready. Type directly into it to answer setup prompts or interact with the CLI." : "Send a prompt below to start the agent." : task ? "Launch an agent, then send a prompt from the dock below." : "Create a task on the left to start an agent run."}</p></div>}
       {cards.map((event) => <article className={`event-card ${event.type.includes("failed") ? "failed" : ""}`} key={event.id}><div className="event-meta"><span className={`event-dot ${event.type.includes("completed") || event.type.includes("finished") ? "done" : ""}`} /><span>{event.agent || "system"}</span><span>{event.type.replaceAll(".", " / ")}</span><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><pre>{cardText(event)}</pre>{event.type === "import.message" && task && <ImportedFinding taskId={task.id} event={event} />}</article>)}
+      {run && <ToolActivity events={events.filter((event) => event.runId === run.id)} runFinished={runFinished} />}
     </div>
+    {run && <PermissionRequests key={run.id} runId={run.id} runFinished={runFinished} events={events} />}
     <div className="composer">
       <div className="composer-tools">{children}</div>
       {interactive ? <div className="composer-hint pty-hint">{runFinished ? "Run ended · terminal is read-only" : ptyConnection === "connected" ? "Interactive CLI · click the terminal or start typing to answer prompts (e.g. project trust)" : ptyConnection === "connecting" ? "Connecting interactive terminal…" : `Terminal ${ptyConnection === "unavailable" ? "offline · retrying" : "reconnecting…"} · input paused`}<span className="composer-status"><i />{busy}</span></div> : <>

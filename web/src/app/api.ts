@@ -152,6 +152,8 @@ export const api = {
   tasks: async () => (await request<Record<string, unknown>[]>("/api/tasks")).map(task),
   agents: () => request<Agent[]>("/api/agents"),
   events: async (taskId: string) => (await request<Record<string, unknown>[]>(`/api/events?task_id=${encodeURIComponent(taskId)}`)).map(agentEvent),
+  pendingPermissions: async (runId: string) => (await request<Record<string, unknown>[]>(`/api/runs/${encodeURIComponent(runId)}/permissions`)).map(agentEvent),
+  respondPermission: (runId: string, requestId: string, allow: boolean) => request<void>(`/api/runs/${encodeURIComponent(runId)}/permissions`, { method: "POST", body: JSON.stringify({ request_id: requestId, allow }) }),
   eventsBefore: async (taskId: string, beforeSequence: number, limit = 100) => {
     const page = await request<{ events: Record<string, unknown>[]; next_cursor: number | null; has_more: boolean }>(`/api/events?task_id=${encodeURIComponent(taskId)}&before_sequence=${encodeURIComponent(String(beforeSequence))}&limit=${encodeURIComponent(String(limit))}`);
     return { events: page.events.map(agentEvent), next_cursor: typeof page.next_cursor === "number" && Number.isSafeInteger(page.next_cursor) ? page.next_cursor : null, has_more: page.has_more === true } as EventPage;

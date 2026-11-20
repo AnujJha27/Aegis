@@ -75,3 +75,15 @@ button, select, textarea, .task-item, .file-row, .review-side-section, .code-too
 .task-item.selected { border: 1px solid #36475a; background: #1c2733; }
 .new-task button { border-radius: 8px; }
 .new-task textarea { border-radius: 8px; }
+.tool-activity { max-width: 900px; margin: 14px auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.tool-activity summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; cursor: pointer; }
+.tool-activity summary code { color: var(--muted); font-size: 11px; }
+.tool-activity pre { max-height: 240px; overflow: auto; padding: 12px; font-family: var(--mono, monospace); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-activity .tool-status.failed { color: var(--danger); }
+.tool-activity .tool-status.done { color: var(--accent); }
+.permission-requests { flex: 0 1 auto; min-height: 0; max-height: 35vh; overflow: auto; width: min(960px, calc(100% - 40px)); align-self: center; margin: 0 20px 12px; padding: 14px; border: 1px solid #6b5a3e; border-radius: 10px; background: var(--panel); }
+.permission-requests h2 { font-size: 13px; }
+.permission-requests .permission-meta { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; }
+.permission-requests .permission-request pre { max-height: 200px; overflow: auto; font-family: var(--mono, monospace); font-size: 12px; }
+.permission-requests .permission-actions { display: flex; gap: 8px; }
+.permission-requests .permission-actions button:first-child { color: #dce7f5; background: #2a3c4c; border-color: #526e89; }
