@@ -56,6 +56,10 @@ button, select, textarea, .task-item, .file-row, .review-side-section, .code-too
 .session .event-card, .session .event-card pre { font-family: var(--mono, monospace); font-size: 12px; line-height: 1.75; color: #c9d1d9; }
 .session .event-meta { font-family: var(--mono, monospace); font-size: 10px; letter-spacing: .04em; color: var(--muted); }
 .session .event-meta time { color: var(--faint); }
+.session .transcript-sigil { width: 10px; flex: none; color: var(--accent); }
+.session .transcript-author { color: #c9d1d9; font-weight: 600; text-transform: none; }
+.session .user-message .transcript-sigil, .session .user-message .transcript-author { color: var(--blue); }
+.session .event-card.failed .transcript-sigil { color: var(--danger); }
 
 
 .topbar { flex-shrink: 0; }
