@@ -164,7 +164,59 @@ int main() {
                     "if [ -n \"$FAKE_CODEX_DELAY\" ]; then sleep \"$FAKE_CODEX_DELAY\"; fi\n"
                     "printf '%s\n' '{\"type\":\"thread.started\",\"thread_id\":\"fake-thread\"}'\n"
                     "printf '%s\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}'\n");
-    writeScript(fakeBin / "claude", "#!/bin/sh\n" + logArgs);
+    writeScript(fakeBin / "claude", R"PY(#!/usr/bin/env python3
+import json, os, sys
+counter = 0
+pending = None
+with open(os.environ["FAKE_LOG"], "ab") as log:
+    for a in sys.argv[1:]:
+        log.write(a.encode() + b"\0")
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        t = msg.get("type")
+        if t == "control_request":
+            req = msg.get("request", {})
+            sub = req.get("subtype")
+            if sub == "initialize":
+                print(json.dumps({"type":"control_response","response":{"subtype":"success","request_id":msg.get("request_id"),"response":{}}}), flush=True)
+            elif sub == "interrupt":
+                if pending is not None:
+                    print(json.dumps({"type":"control_cancel_request","request_id":pending}), flush=True)
+                    pending = None
+                print(json.dumps({"type":"result","subtype":"success","is_error":True,"result":"Interrupted","session_id":"fake-claude-session"}), flush=True)
+        elif t == "control_response":
+            resp = msg.get("response", {})
+            if resp.get("subtype") != "success" or resp.get("request_id") != pending:
+                continue
+            d = resp.get("response", {})
+            if d.get("behavior") == "allow":
+                if d.get("updatedInput") != {"command": "printf approved"} or "updatedPermissions" in d:
+                    continue
+                print(json.dumps({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-%d" % counter,"content":"approved"}]}}), flush=True)
+                print(json.dumps({"type":"result","subtype":"success","is_error":False,"session_id":"fake-claude-session"}), flush=True)
+            elif d.get("behavior") == "deny":
+                print(json.dumps({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-%d" % counter,"is_error":True,"content":"denied"}]}}), flush=True)
+                print(json.dumps({"type":"result","subtype":"success","is_error":False,"session_id":"fake-claude-session"}), flush=True)
+            pending = None
+        elif t == "user":
+            content = msg.get("message", {}).get("content")
+            if isinstance(content, list):
+                content = "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+            log.write(str(content).encode() + b"\0")
+            log.flush()
+            counter += 1
+            print(json.dumps({"type":"system","subtype":"init","session_id":"fake-claude-session"}), flush=True)
+            if content == "permission-check" or content == "wait-for-interrupt":
+                pending = "approval-%d" % counter
+                print(json.dumps({"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-%d" % counter,"name":"Bash","input":{"command":"printf approved"}}]}}), flush=True)
+                print(json.dumps({"type":"control_request","request_id":"approval-%d" % counter,"request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"printf approved"}}}), flush=True)
+            else:
+                print(json.dumps({"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}), flush=True)
+                print(json.dumps({"type":"result","subtype":"success","is_error":False,"session_id":"fake-claude-session"}), flush=True)
+)PY");
     writeScript(fakeBin / "opencode", "#!/bin/sh\n" + logArgs);
     setenv("PATH", (fakeBin.string() + ":" + pathGuard.old).c_str(), 1);
 
@@ -253,13 +305,42 @@ int main() {
             manager.terminate(runId);
             waitLogQuiet(logPath);
         } else if (agentName == "claude") {
-            const std::vector<std::string> expected{"--", payload};
-            assert(tokens == expected);
+            assert(waitEvent(store, task.id, runId, "turn.completed"));
+            assert(std::find(tokens.begin(), tokens.end(), "--input-format") != tokens.end());
+            assert(std::find(tokens.begin(), tokens.end(), "--output-format") != tokens.end());
+            assert(std::count(tokens.begin(), tokens.end(), "stream-json") == 2);
+            assert(waitLogPrompt(logPath, payload));
+            manager.terminate(runId);
+            waitLogQuiet(logPath);
+            const auto claudeRun = store.run(runId);
+            assert(claudeRun.has_value() && claudeRun->externalSessionId == "fake-claude-session");
         } else {
             const std::vector<std::string> expected{"--prompt", payload};
             assert(tokens == expected);
         }
         assert(!fs::exists(sentinel));
+    }
+
+    // Native roundtrip: Codex -> Claude -> Codex using the Claude run id as source.
+    {
+        const fs::path logPath = fakeBin / "roundtrip.log";
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const auto toClaude = deliver(task.id, Json{{"agent", "claude"}, {"prompt", payload}, {"source_run_id", sourceRun.id}});
+        assert(toClaude.result() == http::status::created);
+        const std::string claudeRunId = Json::parse(toClaude.body()).at("id").get<std::string>();
+        launched.push_back(claudeRunId);
+        assert(waitEvent(store, task.id, claudeRunId, "turn.completed"));
+        assertOneUserMessage(store, task.id, claudeRunId, payload);
+        const std::string backPayload = payload + " back to Codex";
+        const auto toCodex = deliver(task.id, Json{{"agent", "codex"}, {"prompt", backPayload}, {"source_run_id", claudeRunId}});
+        assert(toCodex.result() == http::status::created);
+        const std::string codexRunId = Json::parse(toCodex.body()).at("id").get<std::string>();
+        launched.push_back(codexRunId);
+        assert(waitEvent(store, task.id, codexRunId, "turn.completed"));
+        assertOneUserMessage(store, task.id, codexRunId, backPayload);
+        manager.terminate(claudeRunId);
+        manager.terminate(codexRunId);
+        waitLogQuiet(logPath);
     }
 
     for (const char *agent : {"codex", "claude", "opencode"}) {
@@ -278,7 +359,7 @@ int main() {
         const auto tokens = logTokens(logPath);
         const auto modelIt = std::find(tokens.begin(), tokens.end(), "--model");
         assert(modelIt != tokens.end() && std::next(modelIt) != tokens.end() && *std::next(modelIt) == model);
-        if (agentName == "codex") assert(waitEvent(store, task.id, runId, "turn.completed"));
+        if (agentName == "codex" || agentName == "claude") assert(waitEvent(store, task.id, runId, "turn.completed"));
         manager.terminate(runId);
         waitLogQuiet(logPath);
     }
@@ -436,6 +517,91 @@ int main() {
         launched.push_back(retryRunId);
         assert(waitEvent(store, task.id, retryRunId, "turn.completed"));
         manager.terminate(retryRunId);
+        waitLogQuiet(logPath);
+    }
+
+    {
+        const fs::path logPath = fakeBin / "approval.log";
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const auto approvalRun = manager.launch(task.id, "claude");
+        assert(approvalRun.has_value());
+        const std::string approvalRunId = approvalRun->id;
+        launched.push_back(approvalRunId);
+        assert(!manager.isTurnBusy(approvalRunId));
+        const auto sent = manager.send(approvalRunId, "permission-check");
+        assert(sent == agents::SendResult::accepted);
+        assert(waitUntil([&] { return manager.isTurnBusy(approvalRunId); }));
+        assert(manager.send(approvalRunId, "permission-check") == agents::SendResult::busy);
+        assert(waitUntil([&] { return manager.pendingPermissions(approvalRunId).size() == 1; }));
+        const auto listed = api::handle(
+            req(http::verb::get, "/api/runs/" + approvalRunId + "/permissions", Json::object()), context);
+        assert(listed.result() == http::status::ok);
+        const Json pendingList = Json::parse(listed.body());
+        assert(pendingList.is_array() && pendingList.size() == 1);
+        const Json pendingEvent = pendingList.at(0);
+        const Json pendingContent = Json::parse(pendingEvent.at("content").get<std::string>());
+        const std::string permissionId = pendingContent.at("request_id").get<std::string>();
+        assert(pendingContent.at("input").at("command") == "printf approved");
+        const auto malformed = api::handle(
+            req(http::verb::post, "/api/runs/" + approvalRunId + "/permissions",
+                Json{{"request_id", permissionId}, {"allow", "yes"}}), context);
+        assert(malformed.result() == http::status::bad_request);
+        const auto wrongRun = api::handle(
+            req(http::verb::post, "/api/runs/" + sourceRun.id + "/permissions",
+                Json{{"request_id", permissionId}, {"allow", true}}), context);
+        assert(wrongRun.result() == http::status::conflict);
+        const auto allow = api::handle(
+            req(http::verb::post, "/api/runs/" + approvalRunId + "/permissions",
+                Json{{"request_id", permissionId}, {"allow", true}}), context);
+        assert(allow.result() == http::status::no_content);
+        const auto repeat = api::handle(
+            req(http::verb::post, "/api/runs/" + approvalRunId + "/permissions",
+                Json{{"request_id", permissionId}, {"allow", true}}), context);
+        assert(repeat.result() == http::status::conflict);
+        assert(waitUntil([&] { return !manager.isTurnBusy(approvalRunId) && manager.pendingPermissions(approvalRunId).empty(); }));
+        assert(waitEvent(store, task.id, approvalRunId, "tool.completed"));
+        assert(manager.send(approvalRunId, "permission-check") == agents::SendResult::accepted);
+        assert(waitUntil([&] { return manager.pendingPermissions(approvalRunId).size() == 1; }));
+        const std::string deniedId = Json::parse(manager.pendingPermissions(approvalRunId).front().content).at("request_id").get<std::string>();
+        assert(deniedId != permissionId);
+        assert(api::handle(req(http::verb::post, "/api/runs/" + approvalRunId + "/permissions", Json{{"request_id", permissionId}, {"allow", true}}), context).result() == http::status::conflict);
+        assert(api::handle(req(http::verb::post, "/api/runs/" + approvalRunId + "/permissions", Json{{"request_id", deniedId}, {"allow", false}}), context).result() == http::status::no_content);
+        assert(waitUntil([&] { return !manager.isTurnBusy(approvalRunId) && manager.pendingPermissions(approvalRunId).empty(); }));
+        bool deniedSeen = false;
+        for (const auto &e : store.events(task.id))
+            if (e.runId == approvalRunId && e.type == "tool.completed" && e.content.find("denied") != std::string::npos) deniedSeen = true;
+        assert(deniedSeen);
+        manager.terminate(approvalRunId);
+        waitLogQuiet(logPath);
+    }
+
+    // Interruption regression: launch claude, request a permission, interrupt the
+    // turn, and verify the run stays usable for a follow-up prompt.
+    {
+        const fs::path logPath = fakeBin / "interrupt.log";
+        setenv("FAKE_LOG", logPath.string().c_str(), 1);
+        const auto interruptRun = manager.launch(task.id, "claude");
+        assert(interruptRun.has_value());
+        const std::string interruptRunId = interruptRun->id;
+        launched.push_back(interruptRunId);
+        const auto sent = manager.send(interruptRunId, "wait-for-interrupt");
+        assert(sent == agents::SendResult::accepted);
+        assert(waitUntil([&] { return manager.pendingPermissions(interruptRunId).size() == 1; }));
+        assert(manager.interrupt(interruptRunId));
+        assert(waitUntil([&] {
+            const auto latest = store.latestTurnEvent(interruptRunId);
+            return latest.has_value() && latest->type == "turn.interrupted" && !manager.isTurnBusy(interruptRunId);
+        }));
+        const auto interruptedRun = store.run(interruptRunId);
+        assert(interruptedRun.has_value() && interruptedRun->status == "running");
+        assert(manager.pendingPermissions(interruptRunId).empty());
+        const auto followUp = manager.send(interruptRunId, "after-interruption");
+        assert(followUp == agents::SendResult::accepted);
+        assert(waitUntil([&] {
+            const auto latest = store.latestTurnEvent(interruptRunId);
+            return latest.has_value() && latest->type == "turn.completed" && !manager.isTurnBusy(interruptRunId);
+        }));
+        manager.terminate(interruptRunId);
         waitLogQuiet(logPath);
     }
 

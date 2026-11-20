@@ -65,6 +65,8 @@ add_library(aegis_daemon_services
     daemon/verification/runner.cpp
     daemon/agents/pty_adapter.cpp
     daemon/agents/codex_adapter.cpp
+    daemon/agents/claude_protocol.cpp
+    daemon/agents/claude_adapter.cpp
     daemon/agents/manager.cpp)
 target_include_directories(aegis_daemon_services PUBLIC .)
 target_link_libraries(aegis_daemon_services PUBLIC aegis_daemon_session Threads::Threads util)
@@ -134,6 +136,11 @@ add_executable(daemon_index_test tests/daemon_index_test.cpp)
 target_link_libraries(daemon_index_test PRIVATE aegis_daemon_services)
 aegis_quality(daemon_index_test)
 add_test(NAME daemon_index_test COMMAND daemon_index_test)
+
+add_executable(agent_protocol_test tests/agent_protocol_test.cpp)
+target_link_libraries(agent_protocol_test PRIVATE aegis_daemon_services)
+aegis_quality(agent_protocol_test)
+add_test(NAME agent_protocol_test COMMAND agent_protocol_test)
 
 add_executable(aegis_perf_bench tests/daemon_perf_bench.cpp)
 target_link_libraries(aegis_perf_bench PRIVATE aegis_daemon_api)

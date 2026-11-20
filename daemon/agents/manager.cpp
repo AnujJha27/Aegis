@@ -1,5 +1,6 @@
 #include "daemon/agents/manager.h"
 
+#include "daemon/agents/claude_adapter.h"
 #include "daemon/agents/codex_adapter.h"
 #include "daemon/agents/event_id.h"
 #include "daemon/agents/pty_adapter.h"
@@ -63,7 +64,7 @@ std::vector<AgentInfo> Manager::available() const {
     };
     return {{"shell", true, {false, true, true, true}},
             {"codex", executable("codex"), {true, false, true, true}},
-            {"claude", executable("claude"), {false, true, true, true}},
+            {"claude", executable("claude"), {true, false, true, true}},
             {"opencode", executable("opencode"), {false, true, true, true}}};
 }
 
@@ -152,11 +153,7 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     std::shared_ptr<Adapter> adapter;
     if (agent == "codex") adapter = std::make_shared<CodexAdapter>(std::move(sink), std::move(sessionSink));
     else if (agent == "shell") adapter = std::make_shared<PtyAdapter>(agent, std::vector<std::string>{"/bin/sh"}, std::move(sink));
-    else if (agent == "claude")
-        adapter = std::make_shared<PtyAdapter>(agent,
-            initialPrompt ? (model ? std::vector<std::string>{agent, "--model", *model, "--", *initialPrompt}
-                                   : std::vector<std::string>{agent, "--", *initialPrompt})
-                          : (model ? std::vector<std::string>{agent, "--model", *model} : std::vector<std::string>{agent}), std::move(sink));
+    else if (agent == "claude") adapter = std::make_shared<ClaudeAdapter>(std::move(sink), std::move(sessionSink));
     else if (agent == "opencode")
         adapter = std::make_shared<PtyAdapter>(agent,
             initialPrompt ? (model ? std::vector<std::string>{agent, "--model", *model, "--prompt", *initialPrompt}
@@ -197,6 +194,12 @@ std::optional<AgentRun> Manager::launch(const std::string &taskId, const std::st
     }
     if (initialPrompt) {
         if (agent == "codex") {
+            if (send(run.id, *initialPrompt) != SendResult::accepted) {
+                terminate(run.id);
+                if (continuationRequestId) failContinuation(*continuationRequestId);
+                return std::nullopt;
+            }
+        } else if (agent == "claude") {
             if (send(run.id, *initialPrompt) != SendResult::accepted) {
                 terminate(run.id);
                 if (continuationRequestId) failContinuation(*continuationRequestId);
@@ -274,6 +277,28 @@ bool Manager::interrupt(const std::string &runId) {
     }
     adapter->interrupt();
     return true;
+}
+
+std::vector<AgentEvent> Manager::pendingPermissions(const std::string &runId) const {
+    std::shared_ptr<Adapter> adapter;
+    {
+        std::lock_guard lock(mutex_);
+        const auto found = active_.find(runId);
+        if (found == active_.end()) return {};
+        adapter = found->second;
+    }
+    return adapter->pendingPermissions();
+}
+
+bool Manager::respondPermission(const std::string &runId, const std::string &requestId, bool allow) {
+    std::shared_ptr<Adapter> adapter;
+    {
+        std::lock_guard lock(mutex_);
+        const auto found = active_.find(runId);
+        if (found == active_.end()) return false;
+        adapter = found->second;
+    }
+    return adapter->respondPermission(requestId, allow);
 }
 
 bool Manager::terminate(const std::string &runId) {

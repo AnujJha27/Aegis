@@ -47,6 +47,17 @@ int main() {
     child.interrupt();
     waiter.join();
     assert(interrupted.exitCode >= 128);
+
+    {
+        aegis::daemon::process::ChildProcess bridge;
+        assert(bridge.start({"/bin/sh", "-c", "read line; printf '%s\\n' \"$line\""}, repository, true));
+        assert(bridge.writeInput("bridge roundtrip\n"));
+        const auto bridgeResult = bridge.wait(std::chrono::seconds(5));
+        assert(bridgeResult.exitCode == 0);
+        assert(bridgeResult.output == "bridge roundtrip\n");
+        assert(!bridge.writeInput("after exit\n"));
+    }
+
     aegis::daemon::repository::GitRepository git(repository);
     assert(!git.state().path.empty());
     assert(!git.state().branch.empty());

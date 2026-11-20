@@ -33,15 +33,40 @@ std::optional<AgentEvent> parseCodexJsonLine(std::string_view line,
         }
         if (type == "error")
             return AgentEvent{newEventId(), taskId, runId, "run.failed", agent, object.value("message", std::string{"Codex error"}), now()};
-        if (type != "item.started" && type != "item.completed") return std::nullopt;
+        if (type == "turn.failed") {
+            const auto error = object.value("error", nlohmann::json::object());
+            const auto message = error.value("message", std::string{"Codex turn failed"});
+            return AgentEvent{newEventId(), taskId, runId, "run.failed", agent, message, now()};
+        }
+        if (type != "item.started" && type != "item.updated" && type != "item.completed") return std::nullopt;
         const auto item = object.value("item", nlohmann::json::object());
         const auto itemType = item.value("type", std::string{});
         if (type == "item.completed" && itemType == "agent_message")
             return AgentEvent{newEventId(), taskId, runId, "agent.message.completed", agent, item.value("text", std::string{}), now()};
-        if (itemType == "command_execution")
-            return AgentEvent{newEventId(), taskId, runId,
-                              type == "item.started" ? "command.started" : "command.completed",
-                              agent, item.value("command", std::string{}), now()};
+        if (itemType != "command_execution" && itemType != "file_change" && itemType != "mcp_tool_call" && itemType != "web_search")
+            return std::nullopt;
+
+        static constexpr std::size_t kMaxDetailsLength = 16000;
+        const char *kOmissionMarker = "\n... [truncated]";
+        std::string details = item.dump(-1, ' ', true);
+        if (details.size() > kMaxDetailsLength)
+            details = details.substr(0, kMaxDetailsLength) + kOmissionMarker;
+
+        std::string status;
+        if (item.contains("status") && item["status"].is_string())
+            status = item["status"].get<std::string>();
+        else
+            status = type == "item.completed" ? "completed" : "in_progress";
+
+        const nlohmann::json content = nlohmann::json::object({
+            {"id", item.contains("id") && item["id"].is_string() ? item["id"].get<std::string>() : std::string{}},
+            {"name", itemType},
+            {"status", status},
+            {"details", details},
+        });
+
+        const auto toolState = type == "item.started" ? "tool.started" : type == "item.updated" ? "tool.updated" : "tool.completed";
+        return AgentEvent{newEventId(), taskId, runId, toolState, agent, content.dump(-1, ' ', true), now()};
     } catch (const nlohmann::json::exception &) {
         return std::nullopt;
     }

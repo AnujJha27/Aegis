@@ -44,6 +44,8 @@ public:
     bool resizePty(const std::string &runId, unsigned short cols, unsigned short rows);
     bool interrupt(const std::string &runId);
     bool terminate(const std::string &runId);
+    std::vector<AgentEvent> pendingPermissions(const std::string &runId) const;
+    bool respondPermission(const std::string &runId, const std::string &requestId, bool allow);
     EventHub &terminalEvents() { return terminalEvents_; }
 
 private:

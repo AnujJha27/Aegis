@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -16,21 +17,36 @@ namespace aegis::daemon::process {
 ChildProcess::~ChildProcess() {
     terminate();
     if (pid_ > 0) (void)wait(std::chrono::seconds(2));
-    else if (output_ >= 0) close(output_);
+    else {
+        if (output_ >= 0) close(output_);
+        if (input_ >= 0) close(input_);
+    }
 }
 
-bool ChildProcess::start(const std::vector<std::string> &arguments, const std::filesystem::path &directory) {
+bool ChildProcess::start(const std::vector<std::string> &arguments, const std::filesystem::path &directory,
+                         bool writableInput) {
     if (arguments.empty()) return false;
     int outputPipe[2];
     if (pipe(outputPipe) != 0) return false;
+    int inputPipe[2] = {-1, -1};
+    if (writableInput &&
+        socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, inputPipe) != 0) {
+        close(outputPipe[0]); close(outputPipe[1]);
+        return false;
+    }
     const auto child = fork();
     if (child < 0) {
         close(outputPipe[0]); close(outputPipe[1]);
+        if (inputPipe[0] >= 0) { close(inputPipe[0]); close(inputPipe[1]); }
         return false;
     }
     if (child == 0) {
         setpgid(0, 0);
         if (chdir(directory.c_str()) != 0) _exit(126);
+        if (inputPipe[0] >= 0) {
+            dup2(inputPipe[0], STDIN_FILENO);
+            close(inputPipe[0]); close(inputPipe[1]);
+        }
         dup2(outputPipe[1], STDOUT_FILENO);
         dup2(outputPipe[1], STDERR_FILENO);
         close(outputPipe[0]); close(outputPipe[1]);
@@ -45,11 +61,44 @@ bool ChildProcess::start(const std::vector<std::string> &arguments, const std::f
     close(outputPipe[1]);
     const auto flags = fcntl(outputPipe[0], F_GETFL, 0);
     if (flags >= 0) fcntl(outputPipe[0], F_SETFL, flags | O_NONBLOCK);
+    if (inputPipe[1] >= 0) {
+        const auto inFlags = fcntl(inputPipe[1], F_GETFL, 0);
+        if (inFlags >= 0) fcntl(inputPipe[1], F_SETFL, inFlags | O_NONBLOCK);
+        close(inputPipe[0]);
+    }
     std::lock_guard lock(mutex_);
     pid_ = child;
     output_ = outputPipe[0];
+    input_ = inputPipe[1];
     interruptRequested_ = false;
     terminationRequested_ = false;
+    return true;
+}
+
+bool ChildProcess::writeInput(std::string_view data) {
+    if (data.size() > 1024 * 1024) return false;
+    std::lock_guard lock(mutex_);
+    if (input_ < 0) return false;
+    const int fd = input_;
+    std::size_t written = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (written < data.size()) {
+        const auto remaining = std::chrono::steady_clock::now() - deadline;
+        if (remaining >= std::chrono::seconds(0)) return false;
+        pollfd descriptor{fd, POLLOUT, 0};
+        const auto ready = poll(&descriptor, 1, 1000);
+        if (ready <= 0) {
+            if (ready < 0 && errno == EINTR) continue;
+            return false;
+        }
+        const auto count = send(fd, data.data() + written, data.size() - written, MSG_NOSIGNAL);
+        if (count < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            return false;
+        }
+        written += static_cast<std::size_t>(count);
+    }
     return true;
 }
 
@@ -138,6 +187,8 @@ Result ChildProcess::wait(std::chrono::seconds timeout,
         std::lock_guard lock(mutex_);
         if (output_ >= 0) close(output_);
         output_ = -1;
+        if (input_ >= 0) close(input_);
+        input_ = -1;
         interruptRequested_ = false;
         terminationRequested_ = false;
     }

@@ -6,6 +6,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <sys/types.h>
 
@@ -32,7 +33,9 @@ public:
     ChildProcess(const ChildProcess &) = delete;
     ChildProcess &operator=(const ChildProcess &) = delete;
 
-    bool start(const std::vector<std::string> &arguments, const std::filesystem::path &directory);
+    bool start(const std::vector<std::string> &arguments, const std::filesystem::path &directory,
+               bool writableInput = false);
+    bool writeInput(std::string_view data);
     Result wait(std::chrono::seconds timeout,
                 const std::function<void(std::string_view)> &onOutput = {},
                 bool captureOutput = true,
@@ -44,6 +47,7 @@ private:
     std::mutex mutex_;
     pid_t pid_ = -1;
     int output_ = -1;
+    int input_ = -1;
     bool interruptRequested_ = false;
     bool terminationRequested_ = false;
 };

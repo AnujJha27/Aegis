@@ -29,6 +29,19 @@ std::optional<Response> runs(const Request &request, const Context &context) {
     const auto target = std::string(request.target());
     const auto method = request.method();
     if (method == boost::beast::http::verb::get) {
+        if (const auto runId = runPathId(target, "/permissions")) {
+            const auto run = context.store->run(*runId);
+            if (!run) return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+            const auto task = context.store->task(run->taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(task->repository, context.repository))
+                return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+            nlohmann::json result = nlohmann::json::array();
+            if (context.agentManager)
+                for (const auto &event : context.agentManager->pendingPermissions(*runId))
+                    result.push_back(protocol::toJson(event));
+            return jsonResponse(boost::beast::http::status::ok, result);
+        }
         if (const auto taskId = pathId(target, "/runs")) {
             if (!context.store->task(*taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
             nlohmann::json result = nlohmann::json::array();
@@ -87,6 +100,32 @@ std::optional<Response> runs(const Request &request, const Context &context) {
         }
     }
     if (method == boost::beast::http::verb::post) {
+        if (const auto runId = runPathId(target, "/permissions")) {
+            const auto run = context.store->run(*runId);
+            if (!run) return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+            const auto task = context.store->task(run->taskId);
+            if (!task) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
+            if (!matchesRepository(task->repository, context.repository))
+                return error(boost::beast::http::status::not_found, "run_not_found", "agent run not found");
+            if (!context.agentManager) return error(boost::beast::http::status::service_unavailable, "agents_unavailable", "agent service is unavailable");
+            nlohmann::json body;
+            try {
+                body = nlohmann::json::parse(request.body());
+            } catch (const nlohmann::json::exception &) {
+                return error(boost::beast::http::status::bad_request, "invalid_json", "request body must be valid JSON");
+            }
+            if (!body.is_object() || body.size() != 2 || !body.contains("request_id") || !body.contains("allow") ||
+                !body["request_id"].is_string() || !body["allow"].is_boolean())
+                return error(boost::beast::http::status::bad_request, "malformed_body", "request_id (string) and allow (boolean) are required");
+            const auto requestId = body["request_id"].get<std::string>();
+            if (requestId.empty() || requestId.size() > 200 || requestId.find('\0') != std::string::npos)
+                return error(boost::beast::http::status::bad_request, "invalid_request_id", "request_id must be non-empty, at most 200 bytes and without NUL");
+            if (!context.agentManager->respondPermission(*runId, requestId, body["allow"].get<bool>()))
+                return error(boost::beast::http::status::conflict, "permission_expired", "permission request no longer exists");
+            Response response{boost::beast::http::status::no_content, 11};
+            response.prepare_payload();
+            return response;
+        }
         if (const auto continuationId = pathId(target, "/continue")) {
             const auto &taskId = *continuationId;
             if (!context.store->task(taskId)) return error(boost::beast::http::status::not_found, "task_not_found", "task not found");
@@ -176,7 +215,7 @@ std::optional<Response> runs(const Request &request, const Context &context) {
             if (source->status == "starting")
                 return error(boost::beast::http::status::conflict, "source_busy", "source run is starting");
             if (source->status == "running") {
-                if (source->agent == "codex") {
+                if (source->agent == "codex" || source->agent == "claude") {
                     bool busy = context.agentManager->isTurnBusy(sourceRunId);
                     if (!busy)
                         if (const auto turn = context.store->latestTurnEvent(sourceRunId); turn && turn->type == "turn.started") busy = true;

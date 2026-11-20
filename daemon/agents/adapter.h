@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <vector>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -67,6 +68,8 @@ public:
     virtual void interrupt() = 0;
     virtual void terminate() = 0;
     virtual bool hasActiveTurn() const { return capabilities().interactive; }
+    virtual std::vector<AgentEvent> pendingPermissions() const { return {}; }
+    virtual bool respondPermission(std::string_view, bool) { return false; }
 };
 
 }
