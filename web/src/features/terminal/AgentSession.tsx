@@ -50,7 +50,14 @@ export function AgentSession({ task, run, runFinished, turnBusy, turnCompleted, 
         {run && interactive && <Suspense fallback={<div className="code-state">Loading terminal…</div>}><AgentTerminal run={run} runFinished={runFinished} events={events} onPtyInput={onPtyInput} onPtyResize={onPtyResize} /></Suspense>}
       </div>
       {showEmpty && <div className="empty-output"><div className="empty-icon"><AegisMark /></div><h2>{run ? `${run.agent} is ready` : task ? "Ready for direction" : "Your workspace is ready"}</h2><p>{run ? interactive ? "The terminal is ready. Type directly into it to answer setup prompts or interact with the CLI." : "Send a prompt below to start the agent." : task ? "Launch an agent, then send a prompt from the dock below." : "Create a task on the left to start an agent run."}</p></div>}
-      {cards.map((event) => <article className={`event-card ${event.type.includes("failed") ? "failed" : ""}`} key={event.id}><div className="event-meta"><span className={`event-dot ${event.type.includes("completed") || event.type.includes("finished") ? "done" : ""}`} /><span>{event.agent || "system"}</span><span>{event.type.replaceAll(".", " / ")}</span><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><pre>{cardText(event)}</pre>{event.type === "import.message" && task && <ImportedFinding taskId={task.id} event={event} />}</article>)}
+      {cards.map((event) => {
+        const isUser = event.type === "user.message";
+        const isImport = event.type === "import.message";
+        const isFailure = event.type === "run.failed";
+        const sigil = isUser ? "›" : isImport ? "↳" : isFailure ? "!" : "●";
+        const author = isUser ? "you" : isImport ? "import" : isFailure ? event.agent || "system" : event.agent;
+        return <article className={`event-card ${isUser ? "user-message" : ""} ${isFailure ? "failed" : ""}`} key={event.id}><div className="event-meta"><span className="transcript-sigil" aria-hidden="true">{sigil}</span><span className="transcript-author">{author}</span>{isFailure && <span className="transcript-label">error</span>}{isImport && <span className="transcript-label">imported</span>}<time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><pre>{cardText(event)}</pre>{isImport && task && <ImportedFinding taskId={task.id} event={event} />}</article>;
+      })}
       {run && <ToolActivity events={events.filter((event) => event.runId === run.id)} runFinished={runFinished} />}
     </div>
     {run && <PermissionRequests key={run.id} runId={run.id} runFinished={runFinished} events={events} />}
